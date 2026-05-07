@@ -1,0 +1,32 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  route?: "chat" | "papers" | "viewer";
+}
+
+const { title, route } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const b = base.endsWith("/") ? base : base + "/";
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a href={b} class="brand">◆ Sepsis Atlas</a>
+      <nav>
+        <a href={b} class={route === "chat" ? "active" : ""}>Chat</a>
+        <a href={`${b}papers/`} class={route === "papers" ? "active" : ""}>Papers</a>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>

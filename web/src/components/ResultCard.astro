@@ -1,0 +1,52 @@
+---
+import type { Row } from "../lib/types";
+import { buildViewerUrl } from "../lib/viewerUrl";
+
+interface Props {
+  row: Row;
+}
+const { row } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const href = buildViewerUrl(
+  base,
+  row.file_name,
+  row.anchor_page ?? 1,
+  row.anchor_bbox,
+  "tl",
+);
+const study = row.cohort_label
+  ? `${row.paper_ref} — ${row.cohort_label}`
+  : row.paper_ref;
+const verdict = row.verifier_verdict ?? "unverified";
+const verdictCls =
+  verdict === "ok" ? "ok" : verdict === "weak" ? "warn" : verdict === "fail" ? "fail" : "unk";
+
+function fmt(v: number | null | undefined, d = 2): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "";
+  return Number.isInteger(v) ? String(v) : v.toFixed(d);
+}
+const ci =
+  row.ci_lo !== null && row.ci_hi !== null
+    ? ` (95% CI ${fmt(row.ci_lo)}–${fmt(row.ci_hi)})`
+    : "";
+const pVal =
+  row.p_value !== null && row.p_value !== undefined
+    ? `p = ${fmt(row.p_value, 3)}`
+    : "";
+---
+<article class="card" data-href={href} tabindex="0">
+  <header class="card-head">
+    <span class="card-study">{study}</span>
+    <span class="card-meta">
+      <span class={`badge ${verdictCls}`}>{verdict}</span>
+      {row.anchor_page && <span class="card-page">p. {row.anchor_page}</span>}
+    </span>
+  </header>
+  <div class="card-grid">
+    <div><span class="lbl">Predictor</span><span class="val">{row.predictor_canonical || row.predictors || "—"}</span></div>
+    <div><span class="lbl">Outcome</span><span class="val">{row.outcome || "—"}</span></div>
+    <div><span class="lbl">Effect</span><span class="val">{row.effect_size_str || ""}{ci}</span></div>
+    <div><span class="lbl">N</span><span class="val">{row.cohort_size_n ?? "—"} {pVal && <>· {pVal}</>}</span></div>
+  </div>
+  {row.anchor_text && <blockquote class="card-quote">{row.anchor_text}</blockquote>}
+</article>

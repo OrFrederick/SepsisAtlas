@@ -12,7 +12,6 @@ db.sqlite
 db.sqlite-journal
 logs/
 runs/
-data/papers/raw/
 data/papers/parsed/
 static/plots/
 .idea/

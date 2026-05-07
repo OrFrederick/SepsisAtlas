@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 const MODE_KEY = "sepsis_atlas.backend_mode.v1";
+const VIEW_KEY = "sepsis_atlas.row_view.v1";
 const HISTORY_MAX = 50;
 
 const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) || "").replace(
@@ -40,6 +41,7 @@ const SAMPLE_QUERIES = [
 ];
 
 type Mode = "sql" | "kg";
+type View = "cards" | "table";
 
 type EvidenceRow = {
   paper_ref?: string;
@@ -132,6 +134,25 @@ function saveMode(m: Mode): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(MODE_KEY, m);
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadView(): View {
+  if (typeof window === "undefined") return "cards";
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === "table" ? "table" : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+function saveView(v: View): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(VIEW_KEY, v);
   } catch {
     /* ignore */
   }
@@ -294,6 +315,7 @@ function Welcome({ onChip }: { onChip: (q: string) => void }) {
 export default function ChatShell() {
   const [history, setHistory] = useState<Turn[]>([]);
   const [mode, setMode] = useState<Mode>("sql");
+  const [view, setView] = useState<View>("cards");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
@@ -306,6 +328,7 @@ export default function ChatShell() {
   useEffect(() => {
     setHistory(loadHistory());
     setMode(loadMode());
+    setView(loadView());
     const last = loadViewerUrl();
     if (last) {
       try {
@@ -331,6 +354,11 @@ export default function ChatShell() {
   const setModeAndPersist = useCallback((m: Mode) => {
     setMode(m);
     saveMode(m);
+  }, []);
+
+  const setViewAndPersist = useCallback((v: View) => {
+    setView(v);
+    saveView(v);
   }, []);
 
   // ---- card click → update viewer ---------------------------------------

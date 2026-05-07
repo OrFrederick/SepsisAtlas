@@ -50,6 +50,7 @@ from sepsis_atlas.schemas import (
 from sqlalchemy.orm import sessionmaker
 
 from src.extract.parse_effect import parse_effect_size
+from src.extract.verify_nli import run_verifier as run_verifier_local
 
 # ---------------------------------------------------------------------------
 # Prompt loading + IDs
@@ -468,10 +469,10 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         summary["latency_ms_total"] += ce_meta["latency_ms"]
         summary["n_cohorts"] = len(cohorts)
 
-        # Verify each cohort
+        # Verify each cohort (local NLI+regex; no LLM call)
         for c in cohorts:
             try:
-                verdict, vmeta = run_verifier(
+                verdict, vmeta = run_verifier_local(
                     c.model_dump(mode="json"),
                     c.anchor.text or "",
                     paper_id=file_stem,
@@ -509,7 +510,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             summary["latency_ms_total"] += pm_meta["latency_ms"]
             for r in rows:
                 try:
-                    verdict, vmeta = run_verifier(
+                    verdict, vmeta = run_verifier_local(
                         r.model_dump(mode="json"),
                         r.anchor.text or "",
                         paper_id=file_stem,

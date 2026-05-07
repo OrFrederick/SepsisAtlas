@@ -16,6 +16,8 @@ _CONSTRAINTS = [
     # Lateral-promote node labels (deterministic projections; no LLM).
     "CREATE CONSTRAINT predictor_canonical IF NOT EXISTS FOR (p:Predictor) REQUIRE p.canonical IS UNIQUE",
     "CREATE CONSTRAINT outcome_id IF NOT EXISTS FOR (o:Outcome) REQUIRE o.outcome_id IS UNIQUE",
+    # Assumes vocab.parse_method() guarantees `name` is globally unique
+    # across families; if that ever stops holding, switch to NODE KEY (family, name).
     "CREATE CONSTRAINT statmethod_name IF NOT EXISTS FOR (m:StatMethod) REQUIRE m.name IS UNIQUE",
     "CREATE CONSTRAINT setting_type IF NOT EXISTS FOR (s:Setting) REQUIRE s.type IS UNIQUE",
     "CREATE CONSTRAINT phenotypecluster_id IF NOT EXISTS FOR (c:PhenotypeCluster) REQUIRE c.cluster_id IS UNIQUE",
@@ -32,7 +34,7 @@ _INDEXES = [
     "CREATE INDEX ref_paper IF NOT EXISTS FOR (r:Reference) ON (r.paper_file_name)",
     # Lateral-promote indexes.
     "CREATE INDEX outcome_canonical IF NOT EXISTS FOR (o:Outcome) ON (o.canonical)",
-    "CREATE INDEX outcome_type IF NOT EXISTS FOR (o:Outcome) ON (o.type)",
+    "CREATE INDEX outcome_node_type IF NOT EXISTS FOR (o:Outcome) ON (o.type)",
     "CREATE INDEX statmethod_family IF NOT EXISTS FOR (m:StatMethod) ON (m.family)",
     "CREATE INDEX phenotypecluster_paper IF NOT EXISTS FOR (c:PhenotypeCluster) ON (c.paper_file_name)",
 ]

@@ -263,57 +263,127 @@ Click random cell → drawer opens, PDF.js loads page, yellow rectangle on bbox,
 
 ## OpenWebUI integration (in scope, primary UI)
 
-OpenWebUI is the chat surface. No custom Next.js frontend. Saves time, looks production-ready, judges recognize it.
+OpenWebUI = chat surface + side-by-side PDF viewer via Artifacts pane. No custom Next.js frontend. Saves time, gets auth/history/multi-user free, judges recognize it.
+
+Confirmed viable as of OpenWebUI 0.3.32+ and 2026 updates:
+- Native Artifacts pane (right side) auto-renders HTML/SVG from LLM/tool output
+- Tools/Actions support `HTMLResponse` → renders inline as interactive iframe in chat or as artifact
+- Iframe ↔ parent communication via postMessage (height + custom events)
+- Multi-artifact rendering (2026): multiple HTML blocks → separate artifacts
+- Iframe sandbox: enable "Allow Iframe Sandbox Same-Origin Access" in settings
+
+Sources: docs.openwebui.com (Artifacts, Rich UI Embedding), GH discussions #3487, #6111, #15858, releases March 2026.
 
 ### Architecture
 
 ```
-┌───────────────┐    HTTP    ┌────────────────────────┐
-│  OpenWebUI    │ ──────────▶│  FastAPI backend       │
-│  (Pipelines + │            │  • /query              │
-│   Tools)      │            │  • /source/<row_id>    │
-│               │ ◀──────────│  • /forest_plot.png    │
-└───────┬───────┘            │  • /viewer/<doi>?p=&bbox=│
-        │ markdown +         │  • SQLite + figures dir│
-        │ inline images +    └────────────────────────┘
-        │ deep-links
-        ▼
-   user sees: table, forest plot inline,
-   "View source" links → open PDF viewer page
+┌───────────────────────────────┐    HTTP    ┌──────────────────────────┐
+│  OpenWebUI                    │ ──────────▶│  FastAPI backend         │
+│  ┌──────────────────────────┐ │            │  • POST /query           │
+│  │ Pipeline (sepsis_atlas)  │ │            │  • GET  /viewer/<doi>    │
+│  └──────────────────────────┘ │ ◀──────────│         ?page=&bbox=     │
+│  ┌──────────────────────────┐ │            │  • GET  /forest_plot.png │
+│  │ Tools (HTMLResponse)     │ │            │  • POST /ingest_pubmed   │
+│  │  open_source(row_id)     │ │            │  • SQLite + papers/      │
+│  │  meta_analyze(row_ids)   │ │            │  • static/plots/         │
+│  │  expand_pubmed(q,n)      │ │            └──────────────────────────┘
+│  └──────────────────────────┘ │
+│                               │
+│  ┌─────────────┬───────────┐  │
+│  │ CHAT (left) │ ARTIFACT  │  │  ← side-by-side
+│  │  table      │ (right)   │  │
+│  │  forest plot│ PDF.js +  │  │
+│  │  summary    │ bbox hi-  │  │
+│  │             │ light     │  │
+│  └─────────────┴───────────┘  │
+└───────────────────────────────┘
 ```
 
 ### Two integration points
 
-**1. Pipelines (primary)** — OpenWebUI middleware. Drop one Python file in `pipelines/sepsis_atlas.py`. Intercepts every user message:
+**1. Pipelines (orchestration)** — drop `pipelines/sepsis_atlas.py` in OpenWebUI Pipelines dir. Intercepts every user message:
 - Calls FastAPI `/query` w/ NL text
-- Receives JSON: `{table_md, forest_plot_url, summary, rows}`
-- Renders to chat as: narrative summary → markdown table w/ verified badges → forest plot image → per-row "View source [p.7]" markdown links
+- Returns JSON: `{summary, table_md, forest_plot_url, rows}`
+- Renders to chat: narrative → markdown table w/ ✓ badges → forest plot image inline → row buttons (each triggers `open_source` tool)
 
-**2. Tools (optional, agentic mode)** — Register OpenAI-style tools so LLM can chain calls:
-- `query_atlas(nl_query)` → rows JSON
-- `meta_analyze(row_ids)` → forest plot URL + pooled estimate
-- `expand_corpus_pubmed(query, n)` → triggers ingest of new papers
-- `get_source(row_id)` → viewer URL w/ bbox params
-- Useful for follow-up questions ("now filter to ICU only", "add IL-6 papers from PubMed")
+**2. Tools w/ HTMLResponse (the side-by-side mechanism)** — Register OpenAI-style tools that return `HTMLResponse`. OpenWebUI renders each as iframe in artifact pane:
 
-### Source-anchor click-through (the demo killer)
+```python
+# tools/sepsis_atlas/open_source.py
+from fastapi.responses import HTMLResponse
 
-OpenWebUI renders markdown but won't natively highlight bbox in PDFs. Workaround:
+def open_source(row_id: str) -> HTMLResponse:
+    """Open paper in viewer w/ bbox highlight."""
+    row = db.get_row(row_id)
+    iframe_html = f'''
+    <iframe src="http://backend:8000/viewer/{row.doi}?page={row.anchor_page}&bbox={row.bbox_csv}"
+            style="width:100%; height:100vh; border:0;"
+            sandbox="allow-scripts allow-same-origin"></iframe>
+    '''
+    return HTMLResponse(iframe_html, headers={"X-OpenWebUI-Artifact": "true"})
+```
 
-- FastAPI serves `/viewer/<doi>?page=<n>&bbox=<x0,y0,x1,y1>`
-- That endpoint returns single HTML page: PDF.js loads the PDF, scrolls to page, draws yellow rectangle overlay using bbox
-- In OpenWebUI chat, each row has a `[View source ↗](http://localhost:8000/viewer/leona2025?page=7&bbox=120,340,480,410)` link
-- Click → opens viewer in new tab → PDF + highlight rectangle
-- Demo: click in chat → tab pops with paper highlighted. Clean.
+Other tools:
+- `query_atlas(nl_query)` → rows JSON (data, not HTML)
+- `meta_analyze(row_ids)` → HTMLResponse w/ inline forest plot + pooled estimate panel
+- `expand_corpus_pubmed(query, n)` → triggers ingest, returns progress HTML
+- `get_cohort_match(row_id)` → HTML side panel showing population overlap vs registry
 
-Stretch: embed viewer as iframe inside OpenWebUI artifact pane if version supports it.
+### Side-by-side flow (the demo killer)
+
+1. User types: *"What predicts 28d mortality in septic shock?"*
+2. Pipeline → backend `/query` → returns table_md + summary + row list
+3. Chat (left) renders: summary → markdown table w/ ✓ badges → forest plot PNG inline → button per row "View paper [p.7]"
+4. User clicks button → OpenWebUI tool call: `open_source(row_id="r_8a3f")` → backend returns HTMLResponse w/ PDF.js iframe pointing to `/viewer/leona2025?page=7&bbox=120,340,480,410`
+5. **Artifact pane (right) renders PDF.js, jumps to page 7, draws yellow rectangle on bbox**
+6. Click another row → artifact updates → different paper, different bbox
+7. Chat + PDF visible simultaneously. Researcher reads source while reviewing extracted data.
+
+### FastAPI viewer endpoint (`/viewer/<doi>`)
+
+Single static HTML page, served same-origin as backend:
+
+```html
+<!DOCTYPE html>
+<html><head><script src="/static/pdfjs/pdf.min.js"></script></head>
+<body>
+  <canvas id="pdf-canvas"></canvas>
+  <div id="bbox-overlay" style="position:absolute;border:2px solid yellow;
+       background:rgba(255,255,0,0.25);"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const page = +params.get('page'), bbox = params.get('bbox').split(',').map(Number);
+    pdfjsLib.getDocument('/papers/{{doi}}/pdf/original.pdf').promise.then(doc =>
+      doc.getPage(page).then(p => {
+        const vp = p.getViewport({scale: 1.5});
+        const canvas = document.getElementById('pdf-canvas');
+        canvas.width = vp.width; canvas.height = vp.height;
+        p.render({canvasContext: canvas.getContext('2d'), viewport: vp});
+        // draw bbox overlay scaled to viewport
+        const [x0,y0,x1,y1] = bbox.map(v => v * vp.scale);
+        const ov = document.getElementById('bbox-overlay');
+        ov.style.left=`${x0}px`; ov.style.top=`${y0}px`;
+        ov.style.width=`${x1-x0}px`; ov.style.height=`${y1-y0}px`;
+      }));
+  </script>
+</body></html>
+```
+
+Same-origin = no iframe sandbox CORS issues. PDFs served from `/papers/<doi>/pdf/...` static mount.
+
+### Iframe security checklist
+
+- Backend + viewer + PDFs on same origin (one FastAPI host)
+- OpenWebUI setting: "Allow Iframe Sandbox Same-Origin Access" = ON
+- Tool returns `HTMLResponse` w/ `sandbox="allow-scripts allow-same-origin"` on iframe
+- If still blocked: configure OpenWebUI `WEBUI_AUTH_TRUSTED_IFRAME_ORIGINS` env var
 
 ### Forest plot rendering
 
 - FastAPI computes meta-analysis on filtered rows (statsmodels)
-- matplotlib → PNG → saves to `static/plots/<query_id>.png`
-- Pipeline returns `![Forest plot](http://localhost:8000/static/plots/<query_id>.png)` in markdown
-- OpenWebUI renders inline. Done.
+- matplotlib → PNG → `static/plots/<query_id>.png`
+- Pipeline returns `![Forest plot](http://backend:8000/static/plots/<query_id>.png)` in chat markdown
+- Renders inline left-side. PDF stays right-side in artifact.
 
 ### Verifier badges
 
@@ -359,8 +429,6 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 
 - Vector DB over chunks
 - Cross-paper knowledge graph
-- Chat history / multi-turn
-- User accounts / auth
 - Custom Next.js frontend (using OpenWebUI instead)
 - Full vision figure extraction during hackathon
 - Lazy-fill schema (pick wide schema upfront for v1)
@@ -372,8 +440,16 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 - **PM** — Extraction agent (Sonnet 4.6, structured JSON). Verifier pass (Haiku). Fill table for 10 papers. Sanity check on 3.
 
 ### Day 2
-- **AM** — FastAPI backend (`/query`, `/viewer`, `/forest_plot`). Standalone PDF.js viewer page w/ bbox highlight. OpenWebUI Pipeline file → markdown table + image rendering.
-- **PM** — Counterfactual meta-analysis (random-effects pooling, forest plot PNG). Population similarity scoring. PubMed live expansion as Tool. Slides + dry-run in OpenWebUI.
+- **AM** — FastAPI backend (`/query`, `/viewer/<doi>`, `/forest_plot`, static PDF mount). Standalone PDF.js viewer page w/ bbox highlight overlay. OpenWebUI deploy via Docker. Pipeline file → markdown table + forest plot inline.
+- **PM** — Tool: `open_source(row_id)` returns `HTMLResponse` w/ iframe → side-by-side artifact. Tool: `meta_analyze`, `expand_corpus_pubmed`. Spike iframe sandbox config early — if cross-origin blocks, fallback to Streamlit split-pane (4h escape hatch). Slides + dry-run.
+
+### Spike checklist (Day 2 AM, hour 1)
+Test iframe sandbox **before** building Tool surface:
+- Deploy minimal FastAPI w/ `/viewer/test` returning PDF.js page
+- OpenWebUI Tool returns HTMLResponse w/ iframe to that endpoint
+- Verify artifact pane renders + PDF.js loads + bbox overlay draws
+- If blocked: toggle "Allow Iframe Sandbox Same-Origin Access", set `WEBUI_AUTH_TRUSTED_IFRAME_ORIGINS`, retry
+- If still blocked after 1h: switch to Streamlit fallback. Same FastAPI backend reused.
 
 ## Pre-QA expert questions (priority order)
 

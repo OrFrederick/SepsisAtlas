@@ -58,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--paper", help="single file stem (e.g. Gai_2022)")
     g.add_argument("--gt-only", action="store_true",
                    help="run on the 4 ground-truth papers only")
+    g.add_argument("--no-gt", action="store_true",
+                   help="run on every parsed paper EXCEPT the ground-truth set")
     g.add_argument("--all", action="store_true",
                    help="run on every parsed paper in data/papers/parsed/")
     args = ap.parse_args(argv)
@@ -66,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
         targets = [args.paper]
     elif args.gt_only:
         targets = list(GT_PAPERS)
+    elif args.no_gt:
+        gt = set(GT_PAPERS)
+        targets = [p.stem for p in sorted(PAPERS_PARSED.glob("*.json")) if p.stem not in gt]
     else:
         targets = sorted(p.stem for p in PAPERS_PARSED.glob("*.json"))
 

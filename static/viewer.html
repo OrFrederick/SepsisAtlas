@@ -15,7 +15,6 @@
       --fg: #e7e9ee;
       --muted: #8c93a6;
       --accent: #ffd23f;
-      --accent-soft: rgba(255, 210, 63, 0.22);
     }
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
                  font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -76,17 +75,10 @@
     #bboxOverlay {
       position: absolute;
       pointer-events: none;
-      border: 2px solid var(--accent);
-      background: var(--accent-soft);
-      box-shadow: 0 0 0 9999px rgba(0,0,0,0.18);
+      background: rgba(255, 235, 59, 0.45);
+      mix-blend-mode: multiply;
       border-radius: 1px;
-      animation: bboxPulse 1.6s ease-out 1;
       display: none;
-    }
-    @keyframes bboxPulse {
-      0%   { transform: scale(1.08); box-shadow: 0 0 0 9999px rgba(0,0,0,0.0), 0 0 0 4px rgba(255,210,63,0.6); }
-      60%  { transform: scale(1.0);  box-shadow: 0 0 0 9999px rgba(0,0,0,0.18), 0 0 0 0 rgba(255,210,63,0.0); }
-      100% { transform: scale(1.0);  box-shadow: 0 0 0 9999px rgba(0,0,0,0.18); }
     }
   </style>
 </head>
@@ -222,10 +214,6 @@
       overlay.style.width = `${w}px`;
       overlay.style.height = `${h}px`;
       overlay.style.display = "block";
-      // Trigger pulse animation on each draw.
-      overlay.style.animation = "none";
-      overlay.offsetHeight;
-      overlay.style.animation = "";
     }
 
     function scrollToBbox() {

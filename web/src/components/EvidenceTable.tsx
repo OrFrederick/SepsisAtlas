@@ -89,6 +89,80 @@ function pageOf(row: EvidenceRow): string {
   return Number.isFinite(p) && p >= 1 ? String(p) : "—";
 }
 
+const VERDICT_ORDER: Record<VerdictKind, number> = {
+  ok: 0,
+  warn: 1,
+  fail: 2,
+  unk: 3,
+};
+
+function effectNumeric(row: EvidenceRow): number {
+  const s = effectOf(row);
+  if (!s || s === "—") return Number.POSITIVE_INFINITY;
+  const m = s.match(/-?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : Number.POSITIVE_INFINITY;
+}
+
+function nNumeric(row: EvidenceRow): number {
+  const s = nOf(row);
+  if (!s || s === "—") return Number.POSITIVE_INFINITY;
+  const v = parseFloat(s);
+  return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+}
+
+function pageNumeric(row: EvidenceRow): number {
+  const s = pageOf(row);
+  if (!s || s === "—") return Number.POSITIVE_INFINITY;
+  const v = parseFloat(s);
+  return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+}
+
+function compareRows(
+  a: EvidenceRow,
+  b: EvidenceRow,
+  key: SortKey,
+  dir: SortDir,
+): number {
+  let av: number | string;
+  let bv: number | string;
+  switch (key) {
+    case "paper":
+      av = paperCohort(a).toLowerCase();
+      bv = paperCohort(b).toLowerCase();
+      break;
+    case "predictor":
+      av = predictorOf(a).toLowerCase();
+      bv = predictorOf(b).toLowerCase();
+      break;
+    case "outcome":
+      av = outcomeOf(a).toLowerCase();
+      bv = outcomeOf(b).toLowerCase();
+      break;
+    case "effect":
+      av = effectNumeric(a);
+      bv = effectNumeric(b);
+      break;
+    case "n":
+      av = nNumeric(a);
+      bv = nNumeric(b);
+      break;
+    case "page":
+      av = pageNumeric(a);
+      bv = pageNumeric(b);
+      break;
+    case "verdict": {
+      const av_ = verdictKind(a.verifier_verdict ?? a.verifier).cls;
+      const bv_ = verdictKind(b.verifier_verdict ?? b.verifier).cls;
+      av = VERDICT_ORDER[av_];
+      bv = VERDICT_ORDER[bv_];
+      break;
+    }
+  }
+  if (av < bv) return -1 * dir;
+  if (av > bv) return 1 * dir;
+  return 0;
+}
+
 export default function EvidenceTable({
   rows,
   turnIdx,
@@ -100,12 +174,17 @@ export default function EvidenceTable({
   activeRowKey: string | null;
   onActivate: (rowIdx: number, row: EvidenceRow) => void;
 }) {
-  // sort state used in Task 4; declared here so the component shape is
-  // stable across that task (no prop changes needed).
-  const [sortKey] = useState<SortKey | null>(null);
-  const [sortDir] = useState<SortDir>(1);
-  void sortKey;
-  void sortDir;
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(1);
+
+  const onHeaderClick = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 1 ? -1 : 1));
+    } else {
+      setSortKey(key);
+      setSortDir(1);
+    }
+  };
 
   const handleKey = (e: React.KeyboardEvent, rowIdx: number, row: EvidenceRow) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -114,21 +193,46 @@ export default function EvidenceTable({
     }
   };
 
+  const indexedRows = rows.map((row, ri) => ({ row, ri }));
+  const displayRows = sortKey
+    ? [...indexedRows].sort((a, b) => compareRows(a.row, b.row, sortKey, sortDir))
+    : indexedRows;
+
   return (
     <table className="evidence-table">
       <thead>
         <tr>
-          <th>Paper · Cohort</th>
-          <th>Predictor</th>
-          <th>Outcome</th>
-          <th>Effect</th>
-          <th className="num">N</th>
-          <th className="num">Page</th>
-          <th className="verdict">✓</th>
+          {([
+            ["paper", "Paper · Cohort", ""],
+            ["predictor", "Predictor", ""],
+            ["outcome", "Outcome", ""],
+            ["effect", "Effect", "num"],
+            ["n", "N", "num"],
+            ["page", "Page", "num"],
+            ["verdict", "✓", "verdict"],
+          ] as const).map(([key, label, klass]) => {
+            const isActive = sortKey === key;
+            const dirCls = isActive ? (sortDir === 1 ? "sort-asc" : "sort-desc") : "";
+            const ariaSort = isActive
+              ? sortDir === 1
+                ? "ascending"
+                : "descending"
+              : "none";
+            return (
+              <th
+                key={key}
+                className={[klass, dirCls].filter(Boolean).join(" ")}
+                aria-sort={ariaSort}
+                onClick={() => onHeaderClick(key)}
+              >
+                {label}
+              </th>
+            );
+          })}
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, ri) => {
+        {displayRows.map(({ row, ri }) => {
           const k = `${turnIdx}:${ri}`;
           const active = activeRowKey === k;
           const verdict = verdictKind(row.verifier_verdict ?? row.verifier);

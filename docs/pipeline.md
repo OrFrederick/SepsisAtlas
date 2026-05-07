@@ -18,10 +18,11 @@ flowchart LR
     P --> J[Parsed JSON<br/>data/papers/parsed/]
     P --> D1[(papers row<br/>db.sqlite)]
     J --> E[Stage 2<br/>EXTRACT]
-    E --> V[Stage 3<br/>VERIFY]
+    E --> RES[Stage 2b<br/>RESOLVE ANCHOR<br/>deterministic]
+    RES --> V[Stage 3<br/>VERIFY<br/>local NLI+regex]
     V --> D2[(study_cohort +<br/>predictor_model<br/>db.sqlite)]
     V --> M[(llm_calls<br/>append-only)]
-    Q[NL query] --> I[Stage 4<br/>INTENT]
+    Q[NL query] --> I[Stage 4<br/>INTENT<br/>+ answerability gate]
     I --> S[Stage 5<br/>SQL FILTER + RANK]
     S --> D2
     S --> META[Stage 6<br/>META-ANALYSIS]
@@ -106,7 +107,9 @@ numbers. No silent fabrication.
 
 **Anchor contract** — every row carries `(anchor_page, anchor_bbox,
 anchor_text, anchor_section)`. anchor_text MUST be a verbatim substring
-of the parsed paper, or the row is rejected.
+of the parsed paper, or the row is rejected. Note that the LLM only
+emits `anchor_text` and `anchor_section` — the page and bbox are
+recovered deterministically in Stage 2b.
 
 **Run**: `make extract` (`--gt-only` flag limits to the 4 ground-truth
 papers).
@@ -115,26 +118,62 @@ papers).
 
 ---
 
-## Stage 3 — VERIFY (`src/extract/extractor.py::run_verifier`)
+## Stage 2b — RESOLVE ANCHOR (`src/extract/anchor_resolver.py`)
 
-Cheap-judge step. Haiku 4.5 reads (claim, source span) and emits
-`{verdict: ok | partial | reject, score: 0..1, rationale}`.
+The LLM input (`_slim_paper`) strips per-token offsets, so the model
+cannot see bboxes and is liable to fabricate them. Instead, the
+extractor stores only `anchor_text` + `anchor_section`, and a
+deterministic resolver runs against the parsed Docling JSON to recover
+`(anchor_page, anchor_bbox)`.
 
 ```mermaid
 flowchart LR
-    R[predictor_model row] --> V[verifier_v1.md<br/>Haiku 4.5]
-    A[anchor_text from row] --> V
-    V -->|ok ≥0.85| K[keep, badge ✓]
-    V -->|partial| K2[keep, badge ~]
-    V -->|reject| X[exclude from forest plot,<br/>still stored for audit]
+    LLM[extractor row<br/>anchor_text +<br/>anchor_section] --> IDX[build_index<br/>over parsed JSON<br/>body / heading /<br/>caption / table_cell]
+    IDX --> M[smallest verbatim<br/>match for anchor_text]
+    M --> OUT[anchor_page, anchor_bbox<br/>written to row]
+    M -->|no match| REJ[mark for verifier rejection]
 ```
 
-Verdict + score + rationale are stored on the row. UI badge in
-the markdown table comes from this column.
+**Why deterministic** — the parser already knows where every text span
+lives. Anchor recovery is a substring search, not a generation problem.
+Removing the LLM from this step eliminates a class of "wrong page" bugs
+and makes anchor accuracy a function of parser fidelity, not model
+behaviour. See `tests/test_anchor_resolver.py` for coverage.
 
-**Why a second model, not the same prompt** — extractor is incentivized
-to produce an answer; verifier is incentivized to skepticize. Cheaper
-model, narrower task, less coupling.
+---
+
+## Stage 3 — VERIFY (`src/extract/verify_nli.py`)
+
+Local hybrid verifier. **No LLM, no network calls.** Per-row, the
+verifier emits the same `{verdict: ok | partial | reject, score: 0..1,
+rationale}` shape the extractor used to consume from a Haiku judge.
+
+```mermaid
+flowchart LR
+    R[predictor_model row] --> SPLIT{atom kind?}
+    A[anchor_text<br/>from row] --> SPLIT
+    SPLIT -->|numeric atoms<br/>auc, ci_lo/hi, p, sens,<br/>spec, ppv, npv, c_index,<br/>cohort_size_n, mortality %| RX[regex match in span<br/>matched / contradicted /<br/>absent]
+    SPLIT -->|free-text atoms<br/>predictor, outcome| NLI[DeBERTa-MNLI<br/>premise=span<br/>hypothesis=claim]
+    RX --> AGG[score = weighted<br/>matched=1, absent=0.5,<br/>contradict=0]
+    NLI --> AGG
+    CC[cohort_context cross-check<br/>population, location,<br/>outcome window] --> NLI
+    AGG -->|reject if any contradiction| X[exclude from forest plot,<br/>still stored for audit]
+    AGG -->|score ≥ 0.7| K[keep, badge ✓]
+    AGG -->|otherwise| K2[keep, badge ~]
+```
+
+**Cohort cross-check** — for `predictor_model` rows the verifier joins
+back to `study_cohort` on `cohort_id` and adds NLI hypotheses about the
+cohort's population, location, and outcome window. This catches the
+failure mode where a row's numeric atoms match the span but the span
+actually describes a *different* sub-cohort. See
+`tests/test_verifier_cohort_check.py`.
+
+> NOTE (2026-05-07): The previous Haiku-based verifier
+> (`prompts/verifier_v1.md`) was replaced in commit d782db4. The local
+> hybrid runs ~30× faster, costs $0, and added the cohort cross-check
+> dimension. Existing rows were back-filled by `src/extract/reverify.py`
+> (commit c9d634f).
 
 🔗 **Excalidraw**: `docs/diagrams/verify.excalidraw`.
 
@@ -202,7 +241,9 @@ gold CSV format directly (trivial validation). Parsed numerics enable
 forest plots, ranking, neighbor queries.
 
 **llm_calls is append-only**. Every API hit logs cost, latency, model,
-prompt hash. Replay + diff_runs.py operates on this.
+prompt hash. Replay + diff_runs.py operates on this. Aggregates are
+exposed read-only via `GET /health/cost` (totals + by_stage + by_model
++ token counts; supports `?run_id=` and `?since=` filters).
 
 🔗 **Excalidraw**: `docs/diagrams/schema.excalidraw`.
 
@@ -213,14 +254,30 @@ prompt hash. Replay + diff_runs.py operates on this.
 ```mermaid
 flowchart TB
     NL["What predicts 28-day mortality<br/>in septic shock?"] --> H[Haiku intent parser<br/>→ JSON intent]
-    H --> J["{outcome_type: 'mortality',<br/>outcome_window_days: 28,<br/>population: {condition: 'septic shock'},<br/>predictor: null}"]
-    J --> CAN[predictor canonicalization<br/>lactate / SOFA / APACHE_II / qSOFA / ...]
-    CAN --> SQL[deterministic SQL builder]
+    H --> J["{outcome_type: 'mortality',<br/>outcome_window_days: 28,<br/>population: {condition: 'septic shock'},<br/>predictor: null,<br/>paper_ref: null}"]
+    J --> GATE{answerability gate<br/>predictor / outcome /<br/>paper_ref / non-trivial<br/>condition?}
+    GATE -->|no| REF[refused=true<br/>+ hint string]
+    GATE -->|yes| CAN[predictor canonicalization<br/>lactate / SOFA / APACHE_II / qSOFA / ...]
+    CAN --> SQL[deterministic SQL builder<br/>incl. paper_ref LIKE filter]
     SQL --> Q[(study_cohort ⋈<br/>predictor_model)]
     Q --> RR[rows]
     RR --> RANK[rerank<br/>sentence-transformers<br/>cosine vs query]
     RANK --> OUT[ranked rows]
 ```
+
+**Answerability gate** (`_assess_answerable` in `src/api/main.py`) —
+the structured DB only indexes predictor, outcome (type/window),
+`paper_ref`, and `population.condition`. A query that pins none of
+these (e.g. bare "summarise sepsis" — corpus is 100% sepsis) cannot
+narrow the result set, so the API refuses rather than returning an
+unfiltered dump. The response carries `refused=true` plus a hint
+suggesting a more specific phrasing.
+
+**`paper_ref` filter** — when the user names a study (e.g. *"show
+predictors from Zhang 2021"*), the heuristic intent parser pulls
+`Author YYYY` out of the prompt and the SQL builder LIKE-matches it
+against `study_cohort.paper_ref`. Lets the same endpoint serve both
+corpus-wide and single-study questions.
 
 **Tiered window relaxation** for "27-day mortality" type queries:
 

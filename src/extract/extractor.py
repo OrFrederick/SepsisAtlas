@@ -27,7 +27,6 @@ from sepsis_atlas.config import (
     GROUND_TRUTH,
     LOGS_DIR,
     MODEL_EXTRACT,
-    MODEL_VERIFY,
     PAPERS_PARSED,
     PIPELINE_VERSION,
     SCHEMA_VERSION,
@@ -49,8 +48,9 @@ from sepsis_atlas.schemas import (
 )
 from sqlalchemy.orm import sessionmaker
 
+from src.extract.anchor_resolver import build_index, resolve
 from src.extract.parse_effect import parse_effect_size
-from src.extract.verify_nli import run_verifier as run_verifier_local
+from src.extract.verify_nli import run_verifier
 
 # ---------------------------------------------------------------------------
 # Prompt loading + IDs
@@ -99,13 +99,6 @@ def _call_cohort_enum(messages, model, **kwargs):
 
 @logged_llm_call(stage="predictor_extract")
 def _call_predictor_extract(messages, model, **kwargs):
-    return get_client().chat.completions.create(
-        messages=messages, model=model, **kwargs
-    )
-
-
-@logged_llm_call(stage="verifier")
-def _call_verifier(messages, model, **kwargs):
     return get_client().chat.completions.create(
         messages=messages, model=model, **kwargs
     )
@@ -253,63 +246,6 @@ def run_predictor_extract(
     return parsed.rows, meta
 
 
-# ---------------------------------------------------------------------------
-# Verifier
-# ---------------------------------------------------------------------------
-
-
-def run_verifier(
-    claim: dict,
-    source_span: str,
-    *,
-    paper_id: str,
-    run_id: str,
-    row_id: str,
-    model: str = MODEL_VERIFY,
-) -> tuple[VerifierResponse, dict]:
-    sys_prompt, prompt_id = _load_prompt("verifier_v1.md")
-    sys_prompt_with_schema = (
-        sys_prompt
-        + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
-        + _schema_hint(VerifierResponse)
-    )
-    messages = [
-        {"role": "system", "content": sys_prompt_with_schema},
-        {
-            "role": "user",
-            "content": json.dumps(
-                {"claim": claim, "source_span": source_span}, ensure_ascii=False
-            ),
-        },
-    ]
-    rf = _json_object_format()
-    t0 = time.time()
-    resp = _call_verifier(
-        messages,
-        model,
-        response_format=rf,
-        temperature=0,
-        run_id=run_id,
-        paper_id=paper_id,
-        row_id=row_id,
-        prompt_id=prompt_id,
-    )
-    latency_ms = int((time.time() - t0) * 1000)
-    raw = _check_resp(resp, "verifier")
-    parsed = VerifierResponse.model_validate_json(_strip_fences(raw))
-    meta = {
-        "model": model,
-        "prompt_id": prompt_id,
-        "latency_ms": latency_ms,
-        "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
-        "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
-        "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-        ),
-    }
-    return parsed, meta
-
-
 def _strip_fences(s: str) -> str:
     """Strip ``` / ```json fences if a model wraps JSON in markdown."""
     s = s.strip()
@@ -440,6 +376,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
     """
     run_id = run_id or str(uuid.uuid4())
     paper_json = _load_paper(file_stem)
+    anchor_index = build_index(paper_json, file_stem=file_stem)
 
     if session_factory is None:
         engine = init_db()
@@ -451,10 +388,33 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         "n_cohorts": 0,
         "n_rows": 0,
         "verdict_counts": {"ok": 0, "partial": 0, "reject": 0},
+        "anchor_resolved": 0,
+        "anchor_missed": 0,
         "cost_usd_total": 0.0,
         "latency_ms_total": 0,
         "errors": [],
     }
+
+    def _bind_anchor(anchor) -> None:
+        """Replace LLM-emitted bbox+page+section with resolver lookup against
+        the parsed paper. Anchor.text is left as-is (already verifier-checked).
+        Misses leave the anchor untouched and bump the missed counter."""
+        hit = resolve(anchor.text or "", anchor.section, anchor_index)
+        if hit is None:
+            summary["anchor_missed"] += 1
+            return
+        bbox = hit.get("bbox")
+        if bbox is not None:
+            anchor.bbox = bbox
+        page = hit.get("page")
+        if isinstance(page, int):
+            anchor.page = page
+        elif isinstance(page, str) and page.isdigit():
+            anchor.page = int(page)
+        sec = hit.get("section")
+        if sec:
+            anchor.section = sec
+        summary["anchor_resolved"] += 1
 
     with session_factory() as session:
         # Stage 1
@@ -471,8 +431,9 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
 
         # Verify each cohort (local NLI+regex; no LLM call)
         for c in cohorts:
+            _bind_anchor(c.anchor)
             try:
-                verdict, vmeta = run_verifier_local(
+                verdict, vmeta = run_verifier(
                     c.model_dump(mode="json"),
                     c.anchor.text or "",
                     paper_id=file_stem,
@@ -509,8 +470,9 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             summary["cost_usd_total"] += pm_meta["cost_usd"]
             summary["latency_ms_total"] += pm_meta["latency_ms"]
             for r in rows:
+                _bind_anchor(r.anchor)
                 try:
-                    verdict, vmeta = run_verifier_local(
+                    verdict, vmeta = run_verifier(
                         r.model_dump(mode="json"),
                         r.anchor.text or "",
                         paper_id=file_stem,

@@ -72,32 +72,65 @@ def _ensure_nli_loaded() -> None:
         _nli_state["loaded"] = True
 
 
-def _nli(premise: str, hypothesis: str) -> str:
-    """Return one of {"entail","neutral","contradict"}."""
-    if not premise or not hypothesis:
-        return "neutral"
-    _ensure_nli_loaded()
-    tok = _nli_state["tok"]
-    model = _nli_state["model"]
-    torch = _nli_state["torch"]
-    device = _nli_state["device"]
-
-    enc = tok(
-        premise,
-        hypothesis,
-        return_tensors="pt",
-        truncation=True,
-        max_length=512,
-    ).to(device)
-    with torch.no_grad():
-        logits = model(**enc).logits[0]
-    label_id = int(logits.argmax().item())
+def _label_from_id(model, label_id: int) -> str:
     raw = model.config.id2label[label_id].lower()
     if "entail" in raw:
         return "entail"
     if "contrad" in raw:
         return "contradict"
     return "neutral"
+
+
+def _nli_batch(pairs: list[tuple[str, str]]) -> list[str]:
+    """Batched NLI inference. Returns one label per (premise, hypothesis) pair.
+
+    Empty premises or hypotheses fall back to "neutral" without tokenisation.
+    """
+    if not pairs:
+        return []
+    out: list[str | None] = [None] * len(pairs)
+    real_idx: list[int] = []
+    real_pairs: list[tuple[str, str]] = []
+    for i, (p, h) in enumerate(pairs):
+        if not p or not h:
+            out[i] = "neutral"
+        else:
+            real_idx.append(i)
+            real_pairs.append((p, h))
+
+    if real_pairs:
+        _ensure_nli_loaded()
+        tok = _nli_state["tok"]
+        model = _nli_state["model"]
+        torch = _nli_state["torch"]
+        device = _nli_state["device"]
+
+        premises = [p for p, _ in real_pairs]
+        hypotheses = [h for _, h in real_pairs]
+        enc = tok(
+            premises,
+            hypotheses,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+            padding=True,
+        ).to(device)
+        with torch.no_grad():
+            logits = model(**enc).logits
+        label_ids = logits.argmax(dim=-1).tolist()
+        for k, lid in enumerate(label_ids):
+            out[real_idx[k]] = _label_from_id(model, int(lid))
+
+    return [x or "neutral" for x in out]
+
+
+def _nli(premise: str, hypothesis: str) -> str:
+    """Return one of {"entail","neutral","contradict"}.
+
+    Single-pair convenience wrapper around `_nli_batch`. Kept for back-compat
+    with callers that were written before batching landed.
+    """
+    return _nli_batch([(premise, hypothesis)])[0]
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +274,19 @@ def _check_numeric_atoms(claim: dict, span: str) -> tuple[list[str], list[str], 
 # ---------------------------------------------------------------------------
 
 
-def _identifier_hypotheses(claim: dict) -> list[tuple[str, str]]:
-    """Build (label, hypothesis) pairs for free-text identifier fields."""
+def _identifier_hypotheses(
+    claim: dict, cohort_context: dict | None = None
+) -> list[tuple[str, str]]:
+    """Build (label, hypothesis) pairs for free-text identifier fields.
+
+    If ``cohort_context`` is provided (typically populated for predictor_model
+    rows by joining to ``study_cohort`` on ``cohort_id``), additional
+    hypotheses are added asserting that the anchor span is consistent with the
+    cohort's population, location, and outcome window. The numeric atoms in
+    the predictor row may match exactly while the surrounding sentence still
+    describes a *different* sub-cohort — that's the failure mode this guards
+    against.
+    """
     out: list[tuple[str, str]] = []
 
     pred = claim.get("predictors") or claim.get("predictor_canonical")
@@ -260,6 +304,44 @@ def _identifier_hypotheses(claim: dict) -> list[tuple[str, str]]:
     loc = claim.get("population_location")
     if loc:
         out.append(("location", f"The study setting was {loc}."))
+
+    if cohort_context:
+        c_pop = cohort_context.get("population_description")
+        # Only add cohort-population hypothesis if the row didn't already
+        # carry one (avoid double-counting the same atom).
+        if c_pop and not pop:
+            out.append(
+                ("cohort_population", f"The cohort consisted of {c_pop}.")
+            )
+        c_loc = cohort_context.get("population_location")
+        if c_loc and not loc:
+            out.append(
+                ("cohort_location", f"The study setting was {c_loc}.")
+            )
+        # Outcome window check: predictor rows can carry their own window,
+        # but the cohort-level value is the canonical one for the claim.
+        win = claim.get("outcome_window_days") or cohort_context.get(
+            "outcome_window_days"
+        )
+        if win:
+            try:
+                wd = int(win)
+                if wd <= 2:
+                    win_phrase = "in-hospital"
+                elif wd in (28, 30):
+                    win_phrase = f"{wd}-day"
+                elif wd in (60, 90, 180, 365):
+                    win_phrase = f"{wd}-day"
+                else:
+                    win_phrase = f"{wd}-day"
+                out.append(
+                    (
+                        "outcome_window",
+                        f"The outcome was measured at {win_phrase} follow-up.",
+                    )
+                )
+            except (TypeError, ValueError):
+                pass
     return out
 
 
@@ -321,6 +403,61 @@ def _aggregate(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_cohort_context(
+    claim: dict,
+    cohort_context: dict | None,
+    db_session: Any,
+) -> dict | None:
+    """Pull cohort fields for cross-checking a predictor row.
+
+    Resolution order:
+      1. Explicit ``cohort_context`` argument wins.
+      2. If ``db_session`` is provided and the claim has a ``cohort_id``,
+         look up ``study_cohort``.
+      3. Otherwise return None.
+    """
+    if cohort_context is not None:
+        return cohort_context
+    if db_session is None:
+        return None
+    cohort_id = claim.get("cohort_id")
+    if not cohort_id:
+        return None
+    try:
+        # SQLAlchemy session path
+        from sepsis_atlas.db import StudyCohort  # local import: optional dep
+
+        sc = db_session.get(StudyCohort, cohort_id)
+        if sc is None:
+            return None
+        return {
+            "population_description": sc.population_description,
+            "population_location": sc.population_location,
+            "study_design": sc.study_design,
+            "cohort_label": sc.cohort_label,
+        }
+    except Exception:
+        # Fall back to raw sqlite3 connection if caller passed one in.
+        try:
+            cur = db_session.execute(
+                "SELECT population_description, population_location, "
+                "study_design, cohort_label FROM study_cohort WHERE cohort_id=?",
+                (cohort_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            keys = (
+                "population_description",
+                "population_location",
+                "study_design",
+                "cohort_label",
+            )
+            return {k: row[i] for i, k in enumerate(keys)}
+        except Exception:
+            return None
+
+
 def run_verifier(
     claim: dict,
     source_span: str,
@@ -330,6 +467,8 @@ def run_verifier(
     row_id: str = "",
     extra_context: str = "",
     skip_nli: bool = False,
+    cohort_context: dict | None = None,
+    db_session: Any = None,
     **_kwargs: Any,
 ) -> tuple[VerifierResponse, dict]:
     """Hybrid verifier. Drop-in replacement for `extractor.run_verifier`.
@@ -344,6 +483,13 @@ def run_verifier(
                      to the NLI premise. Numeric check still uses only
                      `source_span` so number provenance stays honest.
     skip_nli       : regex-only mode (faster, used by tests).
+    cohort_context : dict of cohort-level fields (population_description,
+                     population_location, study_design, outcome_window_days)
+                     used to cross-check predictor_model rows against the
+                     anchor span. If None and ``db_session`` is given, the
+                     verifier looks up the cohort by ``claim['cohort_id']``.
+    db_session     : optional SQLAlchemy session OR sqlite3 connection used
+                     to resolve ``cohort_context`` when not passed directly.
     """
     import time
 
@@ -351,11 +497,25 @@ def run_verifier(
 
     matched, contradicted, absent = _check_numeric_atoms(claim, source_span)
 
+    resolved_cohort = _resolve_cohort_context(claim, cohort_context, db_session)
+
     nli_results: list[tuple[str, str]] = []
     if not skip_nli:
         premise = source_span if not extra_context else f"{source_span}\n\n{extra_context}"
-        for label, hyp in _identifier_hypotheses(claim):
-            nli_results.append((label, _nli(premise, hyp)))
+        # If the premise is essentially a numeric table fragment (no prose
+        # context), the cohort/window cross-checks are noisy: the NLI model
+        # tends to hallucinate "contradict" when it can't ground the claim
+        # in any sentence at all. Drop the cohort_context atoms in that case
+        # but still run the predictor/outcome checks — they default to
+        # neutral on bare fragments and were the original behaviour.
+        word_count = len(re.findall(r"[A-Za-z]{3,}", premise or ""))
+        ctx_for_hyp = resolved_cohort if word_count >= 6 else None
+        hypotheses = _identifier_hypotheses(claim, ctx_for_hyp)
+        if hypotheses:
+            labels = [lbl for lbl, _ in hypotheses]
+            pairs = [(premise, hyp) for _, hyp in hypotheses]
+            verdicts = _nli_batch(pairs)
+            nli_results = list(zip(labels, verdicts))
 
     resp = _aggregate(matched, contradicted, absent, nli_results)
     latency_ms = int((time.time() - t0) * 1000)

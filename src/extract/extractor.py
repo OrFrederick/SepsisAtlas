@@ -49,6 +49,7 @@ from sepsis_atlas.schemas import (
 )
 from sqlalchemy.orm import sessionmaker
 
+from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
 from src.extract.parse_effect import parse_effect_size
 from src.extract.verify_nli import run_verifier as run_verifier_local
 
@@ -440,6 +441,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
     """
     run_id = run_id or str(uuid.uuid4())
     paper_json = _load_paper(file_stem)
+    anchor_index = build_index(paper_json)
 
     if session_factory is None:
         engine = init_db()
@@ -451,10 +453,33 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         "n_cohorts": 0,
         "n_rows": 0,
         "verdict_counts": {"ok": 0, "partial": 0, "reject": 0},
+        "anchor_resolved": 0,
+        "anchor_missed": 0,
         "cost_usd_total": 0.0,
         "latency_ms_total": 0,
         "errors": [],
     }
+
+    def _bind_anchor(anchor) -> None:
+        """Replace LLM-emitted bbox+page+section with resolver lookup against
+        the parsed paper. Anchor.text is left as-is (already verifier-checked).
+        Misses leave the anchor untouched and bump the missed counter."""
+        hit = resolve(anchor.text or "", anchor.section, anchor_index)
+        if hit is None:
+            summary["anchor_missed"] += 1
+            return
+        bbox = to_flat_bbox(hit.get("bbox"))
+        if bbox is not None:
+            anchor.bbox = bbox
+        page = hit.get("page")
+        if isinstance(page, int):
+            anchor.page = page
+        elif isinstance(page, str) and page.isdigit():
+            anchor.page = int(page)
+        sec = hit.get("section")
+        if sec:
+            anchor.section = sec
+        summary["anchor_resolved"] += 1
 
     with session_factory() as session:
         # Stage 1
@@ -471,6 +496,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
 
         # Verify each cohort (local NLI+regex; no LLM call)
         for c in cohorts:
+            _bind_anchor(c.anchor)
             try:
                 verdict, vmeta = run_verifier_local(
                     c.model_dump(mode="json"),
@@ -509,6 +535,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             summary["cost_usd_total"] += pm_meta["cost_usd"]
             summary["latency_ms_total"] += pm_meta["latency_ms"]
             for r in rows:
+                _bind_anchor(r.anchor)
                 try:
                     verdict, vmeta = run_verifier_local(
                         r.model_dump(mode="json"),

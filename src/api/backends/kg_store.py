@@ -13,6 +13,12 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT table_id IF NOT EXISTS FOR (t:PaperTable) REQUIRE t.table_id IS UNIQUE",
     "CREATE CONSTRAINT figure_id IF NOT EXISTS FOR (f:Figure) REQUIRE f.figure_id IS UNIQUE",
     "CREATE CONSTRAINT ref_id IF NOT EXISTS FOR (r:Reference) REQUIRE r.ref_id IS UNIQUE",
+    # Lateral-promote node labels (deterministic projections; no LLM).
+    "CREATE CONSTRAINT predictor_canonical IF NOT EXISTS FOR (p:Predictor) REQUIRE p.canonical IS UNIQUE",
+    "CREATE CONSTRAINT outcome_id IF NOT EXISTS FOR (o:Outcome) REQUIRE o.outcome_id IS UNIQUE",
+    "CREATE CONSTRAINT statmethod_name IF NOT EXISTS FOR (m:StatMethod) REQUIRE m.name IS UNIQUE",
+    "CREATE CONSTRAINT setting_type IF NOT EXISTS FOR (s:Setting) REQUIRE s.type IS UNIQUE",
+    "CREATE CONSTRAINT phenotypecluster_id IF NOT EXISTS FOR (c:PhenotypeCluster) REQUIRE c.cluster_id IS UNIQUE",
 ]
 
 _INDEXES = [
@@ -24,6 +30,11 @@ _INDEXES = [
     "CREATE INDEX table_paper IF NOT EXISTS FOR (t:PaperTable) ON (t.paper_file_name)",
     "CREATE INDEX figure_paper IF NOT EXISTS FOR (f:Figure) ON (f.paper_file_name)",
     "CREATE INDEX ref_paper IF NOT EXISTS FOR (r:Reference) ON (r.paper_file_name)",
+    # Lateral-promote indexes.
+    "CREATE INDEX outcome_canonical IF NOT EXISTS FOR (o:Outcome) ON (o.canonical)",
+    "CREATE INDEX outcome_type IF NOT EXISTS FOR (o:Outcome) ON (o.type)",
+    "CREATE INDEX statmethod_family IF NOT EXISTS FOR (m:StatMethod) ON (m.family)",
+    "CREATE INDEX phenotypecluster_paper IF NOT EXISTS FOR (c:PhenotypeCluster) ON (c.paper_file_name)",
 ]
 
 

@@ -36,7 +36,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .topbar {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 18px;
-  padding: 10px 18px;
+  height: 40px;
+  padding: 0 18px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(8px);

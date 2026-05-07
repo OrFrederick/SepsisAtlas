@@ -65,7 +65,7 @@ export function renderCardHtml(row: Row, base: string): string {
       ? `p. ${row.anchor_page}`
       : "";
 
-  return `<article class="card" data-href="${esc(href)}" tabindex="0">
+  return `<article class="card" data-href="${esc(href)}" data-viewer-href="${esc(href)}" tabindex="0">
   <header class="card-head">
     <span class="card-study">${esc(study)}</span>
     <span class="card-meta">

@@ -1,12 +1,12 @@
 ---
 import type { Paper } from "../lib/types";
-import { buildViewerUrl } from "../lib/viewerUrl";
 
 interface Props {
   papers: Paper[];
 }
 const { papers } = Astro.props;
 const base = import.meta.env.BASE_URL;
+const b = base.endsWith("/") ? base : base + "/";
 ---
 <table class="papers" id="papers-table">
   <thead>
@@ -25,7 +25,7 @@ const base = import.meta.env.BASE_URL;
   </thead>
   <tbody>
     {papers.map((p) => {
-      const href = buildViewerUrl(base, p.file_name, 1);
+      const href = `${b}papers/${encodeURIComponent(p.file_name)}/`;
       return (
         <tr data-href={href}>
           <td>{p.file_name}</td>

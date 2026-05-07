@@ -2,20 +2,23 @@
 import Base from "../layouts/Base.astro";
 import SearchBox from "../components/SearchBox.astro";
 import SettingsDrawer from "../components/SettingsDrawer.astro";
+import SplitShell from "../components/SplitShell.astro";
 ---
 <Base title="Sepsis Atlas — Chat" route="chat">
-  <SearchBox />
-  <div id="results"></div>
-  <div id="welcome" class="welcome">
-    <h2>Search the corpus</h2>
-    <p>Ask anything about sepsis predictors, mortality outcomes, or specific cohorts. Click an example to try it:</p>
-    <div class="chips">
-      <span class="chip" data-q="lactate and 28-day mortality">lactate and 28-day mortality</span>
-      <span class="chip" data-q="qSOFA in septic shock">qSOFA in septic shock</span>
-      <span class="chip" data-q="predictors from Schlapbach 2018">predictors from Schlapbach 2018</span>
+  <SplitShell>
+    <SearchBox />
+    <div id="results"></div>
+    <div id="welcome" class="welcome">
+      <h2>Search the corpus</h2>
+      <p>Ask anything about sepsis predictors, mortality outcomes, or specific cohorts. Click an example to try it:</p>
+      <div class="chips">
+        <span class="chip" data-q="lactate and 28-day mortality">lactate and 28-day mortality</span>
+        <span class="chip" data-q="qSOFA in septic shock">qSOFA in septic shock</span>
+        <span class="chip" data-q="predictors from Schlapbach 2018">predictors from Schlapbach 2018</span>
+      </div>
     </div>
-  </div>
-  <SettingsDrawer />
+    <SettingsDrawer />
+  </SplitShell>
   <script>
     import { buildIndex, queryIndex } from "../lib/search";
     import { renderCardHtml } from "../lib/cardTemplate";
@@ -70,17 +73,13 @@ import SettingsDrawer from "../components/SettingsDrawer.astro";
       runQuery(ce.detail.query);
     });
 
-    // Card click delegation
-    resultsEl.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const card = target.closest(".card") as HTMLElement | null;
-      if (card?.dataset.href) location.href = card.dataset.href;
-    });
+    // Card clicks are handled globally by SplitShell via `data-viewer-href`
+    // — no per-page navigation. Keep keyboard Enter for accessibility.
     resultsEl.addEventListener("keydown", (e) => {
       const ke = e as KeyboardEvent;
       if (ke.key !== "Enter") return;
       const card = (ke.target as HTMLElement).closest(".card") as HTMLElement | null;
-      if (card?.dataset.href) location.href = card.dataset.href;
+      if (card?.getAttribute("data-viewer-href")) card.click();
     });
 
     // Welcome chips

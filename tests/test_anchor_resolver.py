@@ -89,7 +89,10 @@ def test_resolve_single_hit_returns_body_entry():
     assert hit is not None
     assert hit["page"] == 3
     assert hit["section"] == "Methods"
-    assert hit["bbox"]["page_no"] == 3
+    # bbox is now a flat [l, y0, r, y1] list with y0 < y1.
+    assert isinstance(hit["bbox"], list)
+    assert len(hit["bbox"]) == 4
+    assert hit["bbox"][1] < hit["bbox"][3]
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +213,8 @@ def test_resolve_table_cell_match():
     assert hit is not None
     assert hit["kind"] == "table_cell"
     assert hit["page"] == 5
-    assert hit["bbox"]["l"] == 80
+    # bbox is flat [l, y0, r, y1]; left edge came from the cell with l=80.
+    assert hit["bbox"][0] == 80
 
 
 # ---------------------------------------------------------------------------
@@ -317,9 +321,14 @@ def test_zhang_2021_regression():
     assert hit["section"] == "Model Performance", (
         f"Expected 'Model Performance', got {hit['section']!r}"
     )
-    flat = to_flat_bbox(hit["bbox"])
+    flat = hit["bbox"]
     bad = [305.1086, 109.32437763125006, 380.16209969502887, 98.20583043023225]
     assert flat != bad, "Resolver returned the buggy DISCUSSION-heading bbox"
+    # Post-fix invariant: every resolved bbox is in TOPLEFT screen coords
+    # with y0 < y1.
+    assert flat is not None and flat[1] < flat[3], (
+        f"Resolved bbox {flat!r} should have y0 < y1 (top-left screen coords)"
+    )
     # Sanity: the resolved bbox should sit on page 4 like the offending anchor.
     assert hit["page"] == 4
 
@@ -503,14 +512,72 @@ def test_resolve_jaccard_does_not_oversell_tiny_numeric_overlap():
 
 
 # ---------------------------------------------------------------------------
-# to_flat_bbox
+# to_flat_bbox — origin-aware top-left normalization
 # ---------------------------------------------------------------------------
 
 
-def test_to_flat_bbox_preserves_order():
-    assert to_flat_bbox(_bbox(l=1, t=2, r=3, b=4)) == [1.0, 2.0, 3.0, 4.0]
+def test_to_flat_bbox_topleft_returns_y0_lt_y1():
+    """Cell-style TOPLEFT input passes through with y0 < y1."""
+    bb = {"l": 50.0, "t": 100.0, "r": 200.0, "b": 120.0, "coord_origin": "TOPLEFT"}
+    assert to_flat_bbox(bb, page_height=792.0) == [50.0, 100.0, 200.0, 120.0]
+
+
+def test_to_flat_bbox_topleft_swaps_when_inverted():
+    """If a TOPLEFT bbox arrives with t > b (rare), we still emit y0 < y1."""
+    bb = {"l": 0.0, "t": 200.0, "r": 50.0, "b": 100.0, "coord_origin": "TOPLEFT"}
+    assert to_flat_bbox(bb, page_height=792.0) == [0.0, 100.0, 50.0, 200.0]
+
+
+def test_to_flat_bbox_bottomleft_converts():
+    """BOTTOMLEFT (t=500, b=480) on a 792pt page flips to TOPLEFT (292, 312)."""
+    bb = {"l": 10.0, "t": 500.0, "r": 60.0, "b": 480.0, "coord_origin": "BOTTOMLEFT"}
+    assert to_flat_bbox(bb, page_height=792.0) == [10.0, 292.0, 60.0, 312.0]
+
+
+def test_to_flat_bbox_bottomleft_uses_default_height_when_missing():
+    """Missing page_height for BOTTOMLEFT falls back to 792pt instead of crashing."""
+    bb = {"l": 0.0, "t": 700.0, "r": 100.0, "b": 600.0, "coord_origin": "BOTTOMLEFT"}
+    out = to_flat_bbox(bb, page_height=None)
+    # 792 - 700 = 92, 792 - 600 = 192
+    assert out == [0.0, 92.0, 100.0, 192.0]
+
+
+def test_to_flat_bbox_returns_y0_lt_y1_invariant():
+    """Mixed-orientation synthetic inputs all produce y0 < y1."""
+    cases = [
+        {"l": 0, "t": 50, "r": 10, "b": 60, "coord_origin": "TOPLEFT"},
+        {"l": 0, "t": 60, "r": 10, "b": 50, "coord_origin": "TOPLEFT"},   # inverted
+        {"l": 0, "t": 700, "r": 10, "b": 600, "coord_origin": "BOTTOMLEFT"},
+        {"l": 0, "t": 600, "r": 10, "b": 700, "coord_origin": "BOTTOMLEFT"},  # inverted
+    ]
+    for bb in cases:
+        out = to_flat_bbox(bb, page_height=792.0)
+        assert out is not None
+        assert out[1] < out[3], f"y0 < y1 failed for {bb!r} -> {out!r}"
 
 
 def test_to_flat_bbox_handles_none():
-    assert to_flat_bbox(None) is None
-    assert to_flat_bbox({}) is None
+    assert to_flat_bbox(None, page_height=792.0) is None
+    assert to_flat_bbox({}, page_height=792.0) is None
+    assert to_flat_bbox({"l": 1, "t": 2, "r": 3}, page_height=792.0) is None  # missing b
+
+
+# ---------------------------------------------------------------------------
+# Post-resolve bbox invariant
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not ZHANG.exists(), reason="Zhang_2021.json not available")
+def test_resolver_bbox_top_left_after_resolve():
+    """A resolved Zhang-2021 anchor should expose a TOPLEFT (y0 < y1) bbox."""
+    parsed = json.loads(ZHANG.read_text())
+    idx = build_index(parsed, file_stem="Zhang_2021")
+    needle = (
+        "In the validation set, we evaluated the discrimination and "
+        "calibration of SMRS"
+    )
+    hit = resolve(needle, None, idx)
+    assert hit is not None
+    bb = hit["bbox"]
+    assert bb is not None
+    assert bb[1] < bb[3], f"Expected top-left y0 < y1, got {bb!r}"

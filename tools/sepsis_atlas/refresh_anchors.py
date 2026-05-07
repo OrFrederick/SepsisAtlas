@@ -24,7 +24,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
+from src.extract.anchor_resolver import _page_heights_for, build_index, resolve
 
 
 def _load_parsed(parsed_dir: Path, file_name: str) -> dict | None:
@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 continue
-            index_cache[file_name] = build_index(parsed)
+            index_cache[file_name] = build_index(parsed, file_stem=file_name)
 
         idx = index_cache[file_name]
         hit = resolve(anchor_text, anchor_section, idx)
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             continue
 
-        new_bbox = to_flat_bbox(hit["bbox"])
+        new_bbox = hit.get("bbox")
         if new_bbox is None:
             missed[table] += 1
             by_paper_missed[paper_ref] += 1
@@ -220,6 +220,66 @@ def main(argv: list[str] | None = None) -> int:
             )
         con.commit()
 
+    # ------------------------------------------------------------------------
+    # Legacy BOTTOMLEFT cleanup pass.
+    #
+    # Rows the resolver couldn't match keep their original LLM-emitted bbox.
+    # Pre-fix, those bboxes were stored as Docling BOTTOMLEFT (y0 > y1). The
+    # consumer contract is now "every bbox is TOPLEFT screen coords with
+    # y0 < y1", so flip any leftover y0 > y1 bbox using the PDF's page
+    # height. Only touches rows whose stored bbox violates the invariant.
+    # ------------------------------------------------------------------------
+    flipped = {"study_cohort": 0, "predictor_model": 0}
+    if not args.dry_run:
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        for table, pk_col, join in (
+            ("study_cohort", "cohort_id",
+             "FROM study_cohort"),
+            ("predictor_model", "id",
+             "FROM predictor_model pm "
+             "JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id"),
+        ):
+            if table == "study_cohort":
+                rows = cur.execute(
+                    f"SELECT cohort_id AS id, file_name, anchor_page, anchor_bbox "
+                    f"{join} WHERE anchor_bbox IS NOT NULL"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"SELECT pm.id AS id, sc.file_name AS file_name, "
+                    f"pm.anchor_page AS anchor_page, pm.anchor_bbox AS anchor_bbox "
+                    f"{join} WHERE pm.anchor_bbox IS NOT NULL"
+                ).fetchall()
+            for r in rows:
+                try:
+                    v = json.loads(r["anchor_bbox"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if not (isinstance(v, list) and len(v) == 4):
+                    continue
+                if v[1] < v[3]:
+                    continue  # already TOPLEFT
+                # Look up page height; fall back to 792.
+                ph = 792.0
+                if r["file_name"]:
+                    heights = _page_heights_for(r["file_name"])
+                    if isinstance(r["anchor_page"], int):
+                        ph = heights.get(r["anchor_page"], 792.0)
+                l, y_top, rt, y_bot = v
+                # In stored (BOTTOMLEFT) coords y_top > y_bot; flip to TOPLEFT
+                # screen coords.
+                new_v = [l, ph - y_top, rt, ph - y_bot]
+                # Guarantee the invariant in case of weird inputs.
+                if new_v[1] > new_v[3]:
+                    new_v[1], new_v[3] = new_v[3], new_v[1]
+                cur.execute(
+                    f"UPDATE {table} SET anchor_bbox=? WHERE {pk_col}=?",
+                    (json.dumps(new_v), r["id"]),
+                )
+                flipped[table] += 1
+        con.commit()
+
     con.close()
 
     # ------------------------------------------------------------------ report
@@ -230,7 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     for table in ("study_cohort", "predictor_model"):
         print(
             f"  {table:<16} total={totals[table]:<5} "
-            f"resolved={resolved[table]:<5} missed={missed[table]:<5}"
+            f"resolved={resolved[table]:<5} missed={missed[table]:<5} "
+            f"legacy_flipped={flipped[table]:<5}"
         )
     print()
     print("  by paper:")

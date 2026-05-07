@@ -12,9 +12,19 @@ This module does no LLM calls and no network IO.
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
+from pathlib import Path
 from typing import Iterable
+
+from sepsis_atlas.config import PAPERS_RAW
+
+# US Letter portrait height in PDF points. Used as a last-resort fallback when
+# we can't open the source PDF. Most journal articles use Letter or A4 (842pt);
+# Letter is the safer default since it's slightly shorter and a wrong page
+# height only matters for BOTTOMLEFT->TOPLEFT flip math.
+_DEFAULT_PAGE_HEIGHT = 792.0
 
 
 _WS_RE = re.compile(r"\s+")
@@ -63,38 +73,100 @@ def _norm(s: str) -> str:
     return s
 
 
-def to_flat_bbox(bbox_dict: dict | None) -> list[float] | None:
-    """Return ``[l, t, r, b]`` from the Docling bbox dict.
+@functools.lru_cache(maxsize=128)
+def _page_heights_for(file_stem: str) -> dict[int, float]:
+    """Return {1-based page number: page height in PDF points} for a paper.
 
-    Coord origin is preserved by leaving the numeric order untouched. The
-    front-end auto-detects TOPLEFT vs BOTTOMLEFT from the y-ordering, so we
-    don't need to flip here.
+    Reads from ``data/papers/raw/<stem>.pdf`` using PyMuPDF (``fitz``), which
+    is already a project dependency. Returns ``{}`` if the PDF or the
+    library is unavailable; callers should then fall back to
+    :data:`_DEFAULT_PAGE_HEIGHT`.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return {}
+    pdf_path = Path(PAPERS_RAW) / f"{file_stem}.pdf"
+    if not pdf_path.exists():
+        return {}
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception:
+        return {}
+    try:
+        return {i + 1: float(doc[i].rect.height) for i in range(len(doc))}
+    finally:
+        doc.close()
+
+
+def to_flat_bbox(
+    bbox_dict: dict | None, page_height: float | None = None
+) -> list[float] | None:
+    """Return ``[l, y0, r, y1]`` in TOPLEFT screen coordinates.
+
+    Docling emits two coord origins:
+
+    * ``TOPLEFT`` for table cells — already screen-style, ``y_top < y_bottom``.
+    * ``BOTTOMLEFT`` for section/paragraph offsets and table envelopes — PDF
+      native, ``y_top > y_bottom``, measured up from the page bottom.
+
+    This function normalizes both into TOPLEFT screen coords with the
+    invariant ``y0 < y1`` (top edge first, bottom edge second), so consumers
+    can render ``[l, y0, r, y1]`` as a screen rectangle without inspecting
+    ``coord_origin`` themselves.
+
+    For a BOTTOMLEFT bbox we need the PDF page height to flip
+    ``y_screen = page_h - y_pdf``. Pass it via ``page_height`` (in PDF
+    points). If ``page_height`` is missing for a BOTTOMLEFT bbox we fall
+    back to :data:`_DEFAULT_PAGE_HEIGHT` (US Letter, 792pt) — wrong but
+    bounded; better than dropping the row.
+
+    Returns ``None`` when ``bbox_dict`` is missing required fields.
     """
     if not bbox_dict:
         return None
-    try:
-        return [
-            float(bbox_dict["l"]),
-            float(bbox_dict["t"]),
-            float(bbox_dict["r"]),
-            float(bbox_dict["b"]),
-        ]
-    except (KeyError, TypeError, ValueError):
+    l = bbox_dict.get("l")
+    t = bbox_dict.get("t")
+    r = bbox_dict.get("r")
+    b = bbox_dict.get("b")
+    if any(v is None for v in (l, t, r, b)):
         return None
+    try:
+        l_f = float(l)
+        t_f = float(t)
+        r_f = float(r)
+        b_f = float(b)
+    except (TypeError, ValueError):
+        return None
+    origin = (bbox_dict.get("coord_origin") or "").upper()
+    if origin == "BOTTOMLEFT":
+        ph = float(page_height) if page_height else _DEFAULT_PAGE_HEIGHT
+        # In PDF native: t and b are y-up coordinates. The numerically larger
+        # one is the top edge; flipping with `page_h - y_pdf` turns it into
+        # the smaller (top) y-down coordinate.
+        y_top = ph - max(t_f, b_f)
+        y_bot = ph - min(t_f, b_f)
+        return [l_f, y_top, r_f, y_bot]
+    # TOPLEFT (cells) — already screen-style; just guarantee y0 < y1.
+    y_top, y_bot = (t_f, b_f) if t_f <= b_f else (b_f, t_f)
+    return [l_f, y_top, r_f, y_bot]
 
 
-def build_index(parsed: dict) -> list[dict]:
+def build_index(parsed: dict, file_stem: str | None = None) -> list[dict]:
     """Flatten parsed paper into a list of locatable text spans.
 
     Each entry is::
 
         {
-            "text": str,           # the verbatim text of this element
-            "page": int,           # 1-based page number
-            "bbox": dict,          # Docling bbox dict (l,t,r,b,coord_origin,page_no)
-            "kind": str,           # body | heading | caption | list_item | table_cell ...
-            "section": str | None, # owning section heading text (if any)
+            "text": str,                # the verbatim text of this element
+            "page": int,                # 1-based page number
+            "bbox": [l, y0, r, y1],     # FLAT TOPLEFT screen coords (y0 < y1)
+            "kind": str,                # body | heading | caption | list_item | table_cell ...
+            "section": str | None,      # owning section heading text (if any)
         }
+
+    The ``bbox`` value is already normalized to top-left screen coordinates
+    via :func:`to_flat_bbox` — consumers never see the raw Docling dict.
 
     We pull from two sources:
 
@@ -103,7 +175,28 @@ def build_index(parsed: dict) -> list[dict]:
     * ``parsed["tables"][i]["cells"]`` — every table cell is its own anchor
       candidate, with the cell's own bbox. ``section`` falls back to the table
       caption.
+
+    ``file_stem`` is used to look up per-page heights (PyMuPDF) so we can
+    flip BOTTOMLEFT-origin bboxes into screen coords correctly. If
+    ``file_stem`` is omitted we fall back to ``page_size`` on each bbox dict
+    (some Docling versions emit it) and ultimately to US Letter (792pt).
     """
+    page_heights: dict[int, float] = (
+        _page_heights_for(file_stem) if file_stem else {}
+    )
+
+    def _ph_for(bbox: dict | None, page: int | None) -> float | None:
+        if isinstance(page, int) and page in page_heights:
+            return page_heights[page]
+        if isinstance(bbox, dict):
+            ps = bbox.get("page_size")
+            if isinstance(ps, dict) and ps.get("height"):
+                try:
+                    return float(ps["height"])
+                except (TypeError, ValueError):
+                    pass
+        return None
+
     index: list[dict] = []
 
     full_text: str = parsed.get("full_text", "") or ""
@@ -115,11 +208,14 @@ def build_index(parsed: dict) -> list[dict]:
         text = full_text[start:end]
         if not text:
             continue
+        page = o.get("page")
+        bbox_dict = o.get("bbox")
+        flat = to_flat_bbox(bbox_dict, _ph_for(bbox_dict, page))
         index.append(
             {
                 "text": text,
-                "page": o.get("page"),
-                "bbox": o.get("bbox"),
+                "page": page,
+                "bbox": flat,
                 "kind": o.get("kind") or o.get("label") or "body",
                 "section": o.get("section"),
             }
@@ -142,11 +238,12 @@ def build_index(parsed: dict) -> list[dict]:
             if isinstance(cell_bbox, dict):
                 cell_page = cell_bbox.get("page_no") or tpage
             cell_page = cell_page or tpage
+            flat = to_flat_bbox(cell_bbox, _ph_for(cell_bbox, cell_page))
             index.append(
                 {
                     "text": cell_text,
                     "page": cell_page,
-                    "bbox": cell_bbox,
+                    "bbox": flat,
                     "kind": "table_cell",
                     "section": caption,
                 }

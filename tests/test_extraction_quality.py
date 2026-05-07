@@ -35,7 +35,7 @@ from typing import Iterator
 
 import pytest
 
-from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
+from src.extract.anchor_resolver import build_index, resolve
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = REPO_ROOT / "db.sqlite"
@@ -88,7 +88,7 @@ def _get_index(
     except (OSError, json.JSONDecodeError):
         cache[file_name] = None
         return None
-    cache[file_name] = build_index(parsed)
+    cache[file_name] = build_index(parsed, file_stem=file_name)
     return cache[file_name]
 
 
@@ -172,7 +172,7 @@ def _measure_bbox_correctness() -> tuple[float, int, int]:
         total = 0
         match = 0
         for r, hit in _iter_resolvable_rows(con, cache):
-            target = to_flat_bbox(hit["bbox"])
+            target = hit["bbox"]
             if target is None:
                 continue
             stored_raw = r["anchor_bbox"]

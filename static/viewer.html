@@ -173,20 +173,16 @@
       const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
       await page.render({ canvasContext: ctx, viewport, transform }).promise;
 
-      // Text layer (selectable, copy/paste enabled).
+      // Text layer (selectable, copy/paste enabled) — pdfjs 4.x TextLayer API.
       textLayerDiv.replaceChildren();
       textLayerDiv.style.width = `${cssW}px`;
       textLayerDiv.style.height = `${cssH}px`;
-      // setProperty avoids a pdfjs warning about --scale-factor.
-      textLayerDiv.style.setProperty("--scale-factor", String(scale));
-      const textContent = await page.getTextContent();
-      const textTask = pdfjsLib.renderTextLayer({
-        textContentSource: textContent,
+      const textLayer = new pdfjsLib.TextLayer({
+        textContentSource: page.streamTextContent(),
         container: textLayerDiv,
         viewport,
-        textDivs: [],
       });
-      await textTask.promise;
+      await textLayer.render();
 
       pageInfoEl.textContent = `${num} / ${pdfDoc.numPages}`;
       zoomInfoEl.textContent = `${Math.round(scale / 1.5 * 100)}%`;

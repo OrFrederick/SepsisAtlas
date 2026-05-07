@@ -69,8 +69,8 @@ class Pipe:
 
     def __init__(self) -> None:
         self.valves = self.Valves()
-        self.id = "sepsis_atlas"
-        self.name = "Sepsis Atlas"
+        self.id = "sepsis_atlas_citations"
+        self.name = "Sepsis Atlas (citations)"
 
     # ------------------------------------------------------------------ entry
 

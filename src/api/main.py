@@ -285,6 +285,197 @@ def post_query_kg(req: QueryRequest) -> QueryResponse:
 
 
 # ---------------------------------------------------------------------------
+# /kg/graph — JSON dump of the Paper/Cohort/PredictorModel subgraph for the
+# Graph view. Skips Section/PaperTable/Figure/Reference to keep the payload
+# under ~50KB at the corpus size we have; the frontend force-graph layout
+# starts to choke past ~3000 nodes anyway.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/kg/graph")
+def get_kg_graph() -> dict:
+    """Return a frontend-friendly graph view of the KG.
+
+    Layered design — inspired by Connected Papers / Semantic Scholar but
+    adapted to our extracted-evidence corpus:
+
+      * Structural backbone: Paper -[HAS_COHORT]-> Cohort -[REPORTS]-> PM.
+      * Topical hubs: synthetic Predictor and OutcomeType nodes that every
+        PM connects into. Two papers testing "lactate" become 2 hops apart
+        via the lactate hub, so the force layout pulls them together.
+      * Paper-to-paper similarity: SIMILAR_TO edges weighted by Jaccard
+        over the predictor_canonical sets each paper covers. This is the
+        Connected-Papers analogue: papers that share methodology cluster
+        in space.
+    """
+    try:
+        store = _get_kg_backend()._store
+    except Exception as e:
+        # str(e) on neo4j.exceptions can echo the bolt URI including
+        # credentials; only the exception class name is safe to surface.
+        print(f"[kg/graph] backend failure: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"KG backend unavailable ({type(e).__name__})",
+        )
+
+    paper_rows = store.run(
+        "MATCH (p:Paper) RETURN p.file_name AS id, p.paper_ref AS label, "
+        "p.year AS year, p.n_cohorts AS n_cohorts, "
+        "p.n_predictor_models AS n_predictor_models"
+    )
+    cohort_rows = store.run(
+        "MATCH (c:Cohort) RETURN c.cohort_id AS id, c.cohort_label AS label, "
+        "c.paper_file_name AS paper, c.cohort_size_n AS n, "
+        "c.population_description AS population"
+    )
+    pm_rows = store.run(
+        "MATCH (pm:PredictorModel) RETURN pm.id AS id, "
+        "pm.predictor_canonical AS predictor, pm.outcome_type AS outcome_type, "
+        "pm.outcome AS outcome, pm.effect_size_str AS effect, "
+        "pm.cohort_id AS cohort, pm.paper_file_name AS paper, "
+        "pm.verifier_verdict AS verdict, pm.anchor_page AS page, "
+        "pm.anchor_bbox AS bbox"
+    )
+    # PredictorModel carries both `id` (PK) and `cohort_id` (denormalized
+    # FK); the coalesce has to favour `id` first or every REPORTS edge
+    # becomes a self-loop on the parent Cohort instead of pointing at the
+    # PM. Paper only has file_name, Cohort only has cohort_id, so this
+    # ordering yields each label's PK without ambiguity.
+    structural_edges = store.run(
+        "MATCH (a)-[r:HAS_COHORT|REPORTS]->(b) "
+        "RETURN type(r) AS kind, "
+        "coalesce(a.id, a.cohort_id, a.file_name) AS src, "
+        "coalesce(b.id, b.cohort_id, b.file_name) AS dst"
+    )
+
+    nodes: list[dict] = []
+    for r in paper_rows:
+        nodes.append({"id": r["id"], "type": "Paper", "label": r["label"] or r["id"],
+                      "year": r.get("year"), "n_cohorts": r.get("n_cohorts"),
+                      "n_predictor_models": r.get("n_predictor_models")})
+    for r in cohort_rows:
+        nodes.append({"id": r["id"], "type": "Cohort", "label": r["label"] or r["id"],
+                      "paper": r.get("paper"), "n": r.get("n"),
+                      "population": r.get("population")})
+    for r in pm_rows:
+        nodes.append({"id": r["id"], "type": "PredictorModel",
+                      "label": r.get("predictor") or r["id"],
+                      "predictor": r.get("predictor"),
+                      "outcome_type": r.get("outcome_type"),
+                      "outcome": r.get("outcome"), "effect": r.get("effect"),
+                      "cohort": r.get("cohort"), "paper": r.get("paper"),
+                      "verdict": r.get("verdict"), "page": r.get("page"),
+                      "bbox": r.get("bbox")})
+
+    edges: list[dict] = [
+        {"src": r["src"], "dst": r["dst"], "kind": r["kind"]} for r in structural_edges
+    ]
+
+    # ---- synthetic topical hubs ------------------------------------------
+    # One Predictor / OutcomeType hub per distinct value, but only if it
+    # has ≥2 PMs pointing in. Singletons would just clutter the canvas
+    # without adding cross-paper signal.
+    pred_pms: dict[str, list[dict]] = {}
+    outc_pms: dict[str, list[dict]] = {}
+    for r in pm_rows:
+        pred = (r.get("predictor") or "").strip()
+        outc = (r.get("outcome_type") or "").strip()
+        if pred:
+            pred_pms.setdefault(pred, []).append(r)
+        if outc:
+            outc_pms.setdefault(outc, []).append(r)
+
+    pred_hub_id = lambda name: f"pred::{name.lower()}"
+    outc_hub_id = lambda name: f"outc::{name.lower()}"
+
+    n_pred_hubs = 0
+    for pred, pms in pred_pms.items():
+        if len(pms) < 2:
+            continue
+        n_pred_hubs += 1
+        n_papers = len({pm.get("paper") for pm in pms if pm.get("paper")})
+        nodes.append({
+            "id": pred_hub_id(pred),
+            "type": "Predictor",
+            "label": pred,
+            "n_pms": len(pms),
+            "n_papers": n_papers,
+        })
+        for pm in pms:
+            edges.append({"src": pm["id"], "dst": pred_hub_id(pred), "kind": "TESTS"})
+
+    n_outc_hubs = 0
+    for outc, pms in outc_pms.items():
+        if len(pms) < 2:
+            continue
+        n_outc_hubs += 1
+        n_papers = len({pm.get("paper") for pm in pms if pm.get("paper")})
+        nodes.append({
+            "id": outc_hub_id(outc),
+            "type": "OutcomeType",
+            "label": outc,
+            "n_pms": len(pms),
+            "n_papers": n_papers,
+        })
+        for pm in pms:
+            edges.append({"src": pm["id"], "dst": outc_hub_id(outc), "kind": "TARGETS"})
+
+    # ---- direct paper-to-paper similarity --------------------------------
+    # Overlap coefficient (intersection / min(|A|,|B|)) over the
+    # predictor_canonical sets. Jaccard would punish papers with broad
+    # extraction footprints (e.g. 79-PM Besen) too hard; overlap-coef
+    # captures "does this paper cover most of what the other one does"
+    # which is a better proxy for "should they cluster on the canvas".
+    # Floor at MIN_SHARED so a single shared "age" doesn't link
+    # everything to everything.
+    paper_predictors: dict[str, set[str]] = {}
+    for pm in pm_rows:
+        pid = pm.get("paper")
+        pred = (pm.get("predictor") or "").strip()
+        if pid and pred:
+            paper_predictors.setdefault(pid, set()).add(pred)
+
+    MIN_SHARED = 2
+    OVERLAP_THRESHOLD = 0.20
+    paper_ids = list(paper_predictors.keys())
+    similar_edges = 0
+    for i in range(len(paper_ids)):
+        for j in range(i + 1, len(paper_ids)):
+            a, b = paper_ids[i], paper_ids[j]
+            sa, sb = paper_predictors[a], paper_predictors[b]
+            inter = sa & sb
+            if len(inter) < MIN_SHARED:
+                continue
+            denom = min(len(sa), len(sb))
+            score = len(inter) / denom if denom else 0.0
+            if score < OVERLAP_THRESHOLD:
+                continue
+            similar_edges += 1
+            edges.append({
+                "src": a, "dst": b, "kind": "SIMILAR_TO",
+                "score": round(score, 3),
+                "shared_predictors": sorted(inter),
+            })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "papers": len(paper_rows),
+            "cohorts": len(cohort_rows),
+            "predictor_models": len(pm_rows),
+            "predictor_hubs": n_pred_hubs,
+            "outcome_hubs": n_outc_hubs,
+            "structural_edges": len(structural_edges),
+            "topical_edges": (len(edges) - len(structural_edges) - similar_edges),
+            "similar_to_edges": similar_edges,
+            "edges": len(edges),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # /rank_predictors — UC3 ranked-predictors view
 # ---------------------------------------------------------------------------
 

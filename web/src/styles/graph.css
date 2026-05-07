@@ -1,0 +1,107 @@
+/* Graph view layout — split between force-graph canvas (left/main) and a
+   detail panel (right). Detail panel mirrors evidence-card visuals from
+   chat.css so the same data feels the same wherever it shows up. */
+
+body { overflow: hidden; }
+main { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+
+.graph-shell {
+  display: grid;
+  grid-template-rows: 36px 1fr;
+  height: calc(100vh - 49px);
+  width: 100vw;
+}
+
+.graph-controls {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.graph-stats { color: var(--fg-muted); font-size: 11.5px; flex: 1; }
+.graph-legend { display: flex; gap: 12px; font-size: 11px; color: var(--fg-muted); }
+.graph-legend .swatch {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.graph-split {
+  display: grid;
+  grid-template-columns: 1fr 1px 360px;
+  height: 100%;
+  overflow: hidden;
+}
+.graph-canvas {
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+}
+.graph-canvas .empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fg-muted); font-size: 12px;
+}
+.graph-canvas .error {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fail); font-size: 12px; padding: 40px; text-align: center;
+}
+.graph-divider { background: var(--border); width: 1px; height: 100%; }
+
+.graph-detail {
+  background: var(--panel-2);
+  overflow-y: auto;
+  padding: 16px;
+}
+.graph-detail .placeholder {
+  color: var(--fg-muted); font-size: 12px;
+}
+.graph-detail h3 {
+  margin: 0 0 6px;
+  color: var(--fg);
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+.graph-detail .type-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.graph-detail .type-pill.Paper          { background: rgba(255, 210, 63, 0.15); color: var(--accent); }
+.graph-detail .type-pill.Cohort         { background: rgba(124, 197, 255, 0.15); color: var(--link); }
+.graph-detail .type-pill.PredictorModel { background: rgba(140, 147, 166, 0.15); color: var(--fg-soft); }
+.graph-detail .type-pill.Predictor      { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
+.graph-detail .type-pill.OutcomeType    { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.graph-detail .kv-list {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+.graph-detail .kv-list .k {
+  color: var(--fg-muted); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.graph-detail .kv-list .v {
+  color: var(--fg-soft); font-size: 12px;
+  word-break: break-word;
+}
+.graph-detail .source-link {
+  display: inline-block;
+  padding: 6px 10px;
+  margin-top: 4px;
+  background: var(--accent);
+  color: #1a1a1a;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  text-decoration: none;
+}
+.graph-detail .source-link:hover { transform: translateY(-1px); }

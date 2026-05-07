@@ -17,6 +17,18 @@ DB_PATH = ROOT / "db.sqlite"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+# LLM provider switch. "openrouter" (default) hits api.openrouter.ai with the
+# OPENROUTER_API_KEY. "claude-cli" shells out to the local `claude` binary
+# (Claude Code) and uses your OAuth/subscription auth — no API key, but
+# requires `claude` to be on PATH and logged in. Useful when the
+# OpenRouter account is unreachable (auth, credits, outage).
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
+CLAUDE_CLI_BIN = os.getenv("CLAUDE_CLI_BIN", "claude")
+# 600s: predictor_extract on a long paper (~30k input tokens) takes 60-180s
+# under load; subprocess overhead + cold cache adds another 30s on the first
+# call. The default is generous so paper extraction doesn't fail on slow days.
+CLAUDE_CLI_TIMEOUT_S = int(os.getenv("CLAUDE_CLI_TIMEOUT_S", "600"))
+
 MODEL_EXTRACT = os.getenv("MODEL_EXTRACT", "anthropic/claude-opus-4.7")
 MODEL_VERIFY = os.getenv("MODEL_VERIFY", "anthropic/claude-sonnet-4.6")
 MODEL_VERIFY_LLM = os.getenv("MODEL_VERIFY_LLM", "anthropic/claude-haiku-4.5")

@@ -19,13 +19,13 @@ https://orfrederick.github.io/SepsisAtlas/
 The contents of `web/dist/` after running, in order:
 
 1. `python scripts/export_static.py --db db.sqlite --out-dir web/public` — dumps DB tables to JSON under `web/public/`.
-2. `cd web && npm ci && npm run build` — Astro builds the static site, picking up the JSON in `web/public/` as static assets.
+2. `cd web && bun install --frozen-lockfile && bun run build` — Astro builds the static site, picking up the JSON in `web/public/` as static assets.
 
 ## Local preview
 
 ```bash
 python scripts/export_static.py
-cd web && npm install && npm run build && npm run preview
+cd web && bun install && bun run build && bun run preview
 ```
 
 ## Limitations vs the FastAPI app
@@ -55,4 +55,4 @@ For the hackathon, commit a curated handful of PDFs (the ones referenced by the 
 
 ## Workflow file
 
-`.github/workflows/deploy-pages.yml`. Triggers on push to `main` and `workflow_dispatch`. The dispatch form has a `publish_data_only` toggle that skips `npm ci`/`npm run build` and instead overlays freshly exported JSON onto the previous `web/dist/` — useful when only the data changed and you want a fast republish. Note: this only works if a prior full build artifact still exists on the runner; in practice you'll usually want a full rebuild.
+`.github/workflows/deploy-pages.yml`. Triggers on push to `main` and `workflow_dispatch`. Uses bun (`oven-sh/setup-bun`) for the JS install + Astro build. The dispatch form has a `publish_data_only` toggle that skips `bun install`/`bun run build` and instead overlays freshly exported JSON onto the previous `web/dist/` — useful when only the data changed and you want a fast republish. Note: this only works if a prior full build artifact still exists on the runner; in practice you'll usually want a full rebuild.

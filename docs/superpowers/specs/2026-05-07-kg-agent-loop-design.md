@@ -1,4 +1,4 @@
-# KG Agent-Loop Backend with Persistent Storage Adapter
+# KG Agent-Loop Backend with Parallel Preprocessing
 
 **Date:** 2026-05-07
 **Status:** Draft, awaiting user review
@@ -6,185 +6,271 @@
 
 ## Goal
 
-Ship a second query backend (`kg`) alongside the existing `sql` backend. The KG backend reasons over a **persistent embedded graph** (Kuzu) and a **full-text embedding RAG layer** over the parsed papers. It runs an **agent loop** with six tools so it can plan retrieval, fetch anchors, pool effects, search paper text, and project richer tables than the SQL adapter renders. Switching between `sql` and `kg` happens at the OpenWebUI model picker — two virtual models in the same chat surface.
+Ship a second query backend (`kg`) alongside the existing `sql` backend, with its own end-to-end preprocessing pipeline that produces a **persistent, lossless, query-ergonomic graph** in Kuzu. The KG backend runs an **agent loop** over six uniform tools, with an **embedding RAG layer** over the parsed paper text, and renders a **richer evidence table** than the SQL adapter. Switching between backends happens at the OpenWebUI model picker.
 
-The design is constrained to **near-zero impact on teammate-active code paths.** Changes outside new files are limited to extraction (`src/extract/run_extract.py`, `src/extract/extractor.py`) via a small write-side adapter; `src/api/main.py`, `src/api/query.py`, `src/sepsis_atlas/db.py`, and the existing pipeline plugin stay untouched.
+**Top-level constraints:**
+
+1. **Query ergonomics is a first-class constraint.** The schema, tool surface, and indexes are all optimized so that any common question can be answered in 1–2 tool calls returning a uniform shape. The agent never writes Cypher.
+2. **Lossless w.r.t. parsed PDF content.** Every Docling-parsed section, table, figure, and reference has a node in the graph. The full parsed markdown is also stored verbatim per paper.
+3. **Zero impact on teammate-active code paths.** All changes live in new files. `src/api/main.py`, `src/api/query.py`, `src/sepsis_atlas/db.py`, `src/extract/run_extract.py`, `src/extract/extractor.py`, and `pipelines/sepsis_atlas.py` stay untouched.
 
 ## Architecture
 
-### Read side — already shipped
+### Read side — adapter pattern (already shipped)
 
-`QueryBackend` Protocol (`src/api/backends/base.py`) returns a uniform `QueryResult`. `SQLBackend` wraps the existing intent → SQL → rerank flow. `KGBackend` exists today as an in-memory dict graph + single-shot narrative; this design upgrades it to **Kuzu-backed + agent-orchestrated**.
+`QueryBackend` Protocol returns a uniform `QueryResult`. `SQLBackend` and `KGBackend` are independent implementations.
 
-### Write side — new
+### Two parallel preprocessing pipelines (no write-side adapter)
 
-The extraction pipeline currently hard-codes SQLAlchemy `s.add(...)` calls. To plug Kuzu in as a real peer source of truth without making it a derived view of SQL, we introduce a parallel adapter:
+The two stores are populated by **fully separate** extraction pipelines. No FanoutStorage, no shared writer.
 
-```python
-# src/extract/storage.py
-class StorageBackend(Protocol):
-    def write_paper(self, p: Paper) -> None: ...
-    def write_cohort(self, c: StudyCohort) -> None: ...
-    def write_predictor_model(self, pm: PredictorModel) -> None: ...
-
-class SQLStorage(StorageBackend):    # wraps current SQLAlchemy code
-class KuzuStorage(StorageBackend):   # writes to db.kuzu via Cypher
-class FanoutStorage(StorageBackend): # composite, writes to N peers
+```
+PDFs ── Docling ──► data/papers/parsed/*.md  (shared, deterministic)
+                          │
+                          ├──► run_extract.py        ──► db.sqlite   (existing)
+                          └──► run_kg_extract.py     ──► db.kuzu     (new)
 ```
 
-Default for extraction: `FanoutStorage(SQLStorage(...), KuzuStorage(...))`. Both stores receive every write; either is fully usable on its own.
+`run_kg_extract.py` is a brand-new entrypoint that lives next to `run_extract.py` but doesn't import or depend on it. The two pipelines can drift in shape — that's the point. Comparing them across the same papers is itself a useful eval signal.
 
-### KG persistence — Kuzu
+### KG persistence — Kuzu (embedded)
 
-Embedded single-file graph DB at `db.kuzu`. No service, `pip install kuzu`. Schema:
+Single-file embedded graph DB at `db.kuzu`. `pip install kuzu`, no service.
+
+## Schema
+
+### Node tables
 
 ```cypher
-CREATE NODE TABLE Paper(file_name STRING PRIMARY KEY, doi STRING, title STRING, year INT64, source STRING);
-CREATE NODE TABLE Cohort(cohort_id STRING PRIMARY KEY, cohort_label STRING, cohort_size_n STRING,
-                         population_description STRING, mortality_rate_pct DOUBLE, mortality_timepoint STRING);
-CREATE NODE TABLE PredictorModel(id STRING PRIMARY KEY, predictors STRING, predictor_canonical STRING,
-                                 timing STRING, outcome STRING, outcome_type STRING, outcome_window_days INT64,
-                                 model_specification STRING, effect_size_str STRING, effect_value DOUBLE,
-                                 ci_lo DOUBLE, ci_hi DOUBLE, p_value DOUBLE,
-                                 auc DOUBLE, auc_ci_lo DOUBLE, auc_ci_hi DOUBLE,
-                                 anchor_page INT64, anchor_bbox STRING, anchor_text STRING, anchor_section STRING,
-                                 verifier_verdict STRING, verifier_score DOUBLE);
-CREATE NODE TABLE Outcome(outcome_key STRING PRIMARY KEY, outcome_type STRING, outcome_window_days INT64);
+CREATE NODE TABLE Paper(
+    file_name STRING PRIMARY KEY,        -- e.g., "Cao_2021"
+    paper_ref STRING,                    -- "Cao 2021" formatted
+    doi STRING, title STRING, year INT64, source STRING,
+    full_md_path STRING,                 -- pointer to parsed markdown
+    full_md_text STRING,                 -- verbatim parsed text (lossless layer)
+    -- denormalized roll-ups for ergonomic queries:
+    n_cohorts INT64, n_predictor_models INT64,
+    predictors_canonical STRING[],       -- list of all canonical predictors in this paper
+    outcomes_covered STRING[]            -- list of distinct outcome_types in this paper
+);
 
-CREATE REL TABLE HAS(FROM Paper TO Cohort);
-CREATE REL TABLE REPORTS(FROM Cohort TO PredictorModel);
-CREATE REL TABLE PREDICTS(FROM PredictorModel TO Outcome);
+CREATE NODE TABLE Cohort(
+    cohort_id STRING PRIMARY KEY,
+    paper_file_name STRING,              -- denormalized FK
+    cohort_label STRING, cohort_size_n STRING,
+    population_description STRING,
+    mortality_rate_pct DOUBLE, mortality_timepoint STRING,
+    -- denormalized roll-ups:
+    n_predictor_models INT64,
+    predictors_canonical STRING[]
+);
+
+CREATE NODE TABLE PredictorModel(
+    id STRING PRIMARY KEY,
+    cohort_id STRING,                    -- denormalized FK
+    paper_file_name STRING,              -- denormalized FK
+    predictors STRING, predictor_canonical STRING,
+    timing STRING, outcome STRING,
+    outcome_type STRING, outcome_window_days INT64,   -- folded in: no separate Outcome node
+    model_specification STRING, adjustment_kind STRING, -- normalized: "univariate"|"multivariate"|"adjusted"
+    effect_size_str STRING, effect_type STRING,
+    effect_value DOUBLE, ci_lo DOUBLE, ci_hi DOUBLE, p_value DOUBLE,
+    auc DOUBLE, auc_ci_lo DOUBLE, auc_ci_hi DOUBLE,
+    is_significant BOOLEAN,              -- denormalized: p<0.05 OR CI excludes 1.0
+    anchor_page INT64, anchor_bbox STRING, anchor_text STRING, anchor_section STRING,
+    verifier_verdict STRING, verifier_score DOUBLE
+);
+
+CREATE NODE TABLE Section(
+    section_id STRING PRIMARY KEY,       -- {paper}__{slug}
+    paper_file_name STRING,
+    heading STRING, level INT64, page INT64, text STRING
+);
+
+CREATE NODE TABLE PaperTable(
+    table_id STRING PRIMARY KEY,
+    paper_file_name STRING,
+    page INT64, caption STRING, csv STRING
+);
+
+CREATE NODE TABLE Figure(
+    figure_id STRING PRIMARY KEY,
+    paper_file_name STRING,
+    page INT64, caption STRING
+);
+
+CREATE NODE TABLE Reference(
+    ref_id STRING PRIMARY KEY,
+    paper_file_name STRING,              -- the citing paper
+    citation_text STRING, doi STRING,
+    cited_paper_file_name STRING         -- non-null if matched to a corpus paper
+);
 ```
 
-Schema bootstrap lives in `src/api/backends/kg_store.py`. The first run creates `db.kuzu`; subsequent runs reuse it. Re-extraction repopulates both stores via `FanoutStorage`. A one-shot script `scripts/sync_sql_to_kuzu.py` is available to bootstrap `db.kuzu` from the committed `db.sqlite` snapshot without running full extraction.
+### Relationship tables
 
-### Embeddings RAG layer
+```cypher
+CREATE REL TABLE HAS_COHORT(FROM Paper TO Cohort);
+CREATE REL TABLE REPORTS(FROM Cohort TO PredictorModel);
+CREATE REL TABLE HAS_SECTION(FROM Paper TO Section);
+CREATE REL TABLE HAS_TABLE(FROM Paper TO PaperTable);
+CREATE REL TABLE HAS_FIGURE(FROM Paper TO Figure);
+CREATE REL TABLE HAS_REFERENCE(FROM Paper TO Reference);
+CREATE REL TABLE CITES(FROM Reference TO Paper);
+CREATE REL TABLE MENTIONS_PM(FROM Section TO PredictorModel);  -- cross-link unstructured ↔ structured
+CREATE REL TABLE MENTIONS_COHORT(FROM Section TO Cohort);
+```
+
+### Schema notes (ergonomics)
+
+- **No `Outcome` node.** `outcome_type` and `outcome_window_days` are denormalized onto `PredictorModel`. They were going to be separate nodes in the earlier draft — dropped because no query needs to traverse to Outcome.
+- **`paper_file_name` is the universal join key.** Used everywhere: `Paper.file_name`, `Cohort.paper_file_name`, `PredictorModel.paper_file_name`, `Section.paper_file_name`. Stable, filesystem-friendly. The display form `"Cao 2021"` lives only on `Paper.paper_ref`.
+- **Denormalized roll-ups on Paper and Cohort** so questions like *"papers that test SOFA"* are a single property filter (`WHERE 'SOFA' IN p.predictors_canonical`), not a traversal.
+- **`is_significant` and `adjustment_kind`** are precomputed at extract time so the agent doesn't re-derive them per query.
+- **Indexes:** Kuzu indexes primary keys automatically; we additionally explicitly index `predictor_canonical`, `outcome_type`, `paper_file_name` on `PredictorModel`, and `paper_file_name` on `Section` / `PaperTable` / `Figure` / `Reference`.
+
+## Tools (uniform, six total)
+
+`src/api/backends/kg_tools.py`. Every tool returns the same envelope:
+
+```python
+class ToolResult(TypedDict):
+    nodes: list[dict]      # rows of node attributes, never None
+    edges: list[dict]      # rows of (src_id, type, dst_id, attrs)
+    summary: str           # one-line description; agent often uses this verbatim
+```
+
+The six tools:
+
+| Tool | What it does |
+|---|---|
+| `find(node_type, **filters)` | Universal node finder. `find("PredictorModel", predictor_canonical="SOFA", outcome_type="mortality")`. Indexed lookups, hard-cap 100 results. |
+| `expand(node_id, hops=1, edge_kind=None)` | Universal traversal. From a node, walk `hops` and return everything reachable. `edge_kind=None` means all edges; e.g., `expand(cohort_id, edge_kind="REPORTS")` returns the cohort's predictor_models. |
+| `get(node_id)` | Fetch a single node + all its 1-hop neighbors as a small subgraph. Replaces specialized `get_anchor_text` / `get_paper` / `get_cohort` calls — one tool, one shape. |
+| `search_text(query, paper_file_name=None, k=5)` | Embedding RAG over parsed-text chunks. Returns top-k chunks with their `Section` and `Paper` nodes. Pinning to a paper turns it into in-paper grep. |
+| `pool_effects(predictor_model_ids, effect_type)` | DerSimonian–Laird meta-analysis from `src/stats/`. Returns a single synthetic node `{pooled, ci_lo, ci_hi, tau2, k, i2}`. |
+| `project_table(shape, predictor_model_ids=None)` | Renders a structured table. `shape ∈ {"evidence", "ranked_predictors", "study_summary"}`. The result's `nodes` list is the table rows; `summary` is the column spec. |
+
+**Why these six and not more.** Earlier drafts had specialized tools (`find_seeds`, `expand_neighbors`, `get_anchor_text`, `find_co_occurring_predictors`, `compare_predictors`). They collapse cleanly into `find` / `expand` / `get` plus the three projections. Six universal tools beat ten specialized ones for agent learnability — fewer choice points, fewer ways to misuse.
+
+**Dry-run mode.** Every tool accepts `dry_run=True` and returns the Cypher it would execute plus the expected node count. Used during eval and when debugging tool-call sequences.
+
+## Embedding RAG layer
 
 `src/api/backends/kg_text_index.py`:
 
-- **Source:** `data/papers/parsed/*.md` (Docling-parsed full text).
-- **Model:** `openai/text-embedding-3-large` via OpenRouter (3072 dims, top of MTEB English; works with the existing `OPENROUTER_API_KEY`).
-- **Chunking:** by markdown heading (Docling preserves section structure). Fallback: 512-token sliding window for headerless or over-long sections.
-- **Cache:** persist matrix + chunk metadata to `runs/embeddings.npz`, keyed by `sha256(parsed_md_content)` per paper. First boot embeds everything (~$0.02, ~30s). Subsequent boots load from disk in ms; only re-embeds papers whose hash changed.
-- **Search:** in-memory float32 numpy matrix `(n_chunks, 3072)`; cosine similarity via single `matmul`. ~30 chunks × 9 papers × 3072 × 4 bytes ≈ 3.3 MB.
+- **Source:** `Paper.full_md_text` (already in graph) chunked by markdown heading; fallback 512-token sliding window for headerless / over-long sections.
+- **Model:** `openai/text-embedding-3-large` via OpenRouter (3072 dims, top-of-MTEB).
+- **Cache:** `runs/embeddings.npz` keyed by `sha256(full_md_text)` per paper. Re-embed only on hash change.
+- **Index:** in-memory float32 matrix; cosine via single `matmul`. ~3.3 MB at 9 papers.
+- **Tool:** `search_text` (above).
 
-### Agent loop
+## Agent loop
 
 `src/api/backends/kg_agent.py`:
 
-- **Model:** `anthropic/claude-sonnet-4.6` (already in `MODEL_VERIFY`). Tool-use is reliable.
-- **Iterations cap:** 8 turns. Soft 8s / hard 30s per turn (per-call timeout).
-- **System prompt:** scope to evidence DB; never invent numbers; must call `project_table` before final message.
-- **Halt:** assistant message with no tool calls → that's the answer.
-- **Output:** `(narrative: str, table_spec: dict)` packaged into `QueryResult.summary` + `QueryResult.rows` + `QueryResult.meta.table_spec`.
+- **Model:** `anthropic/claude-sonnet-4.6` via OpenRouter.
+- **Iterations cap:** 8 turns. Soft 8s / hard 30s per turn.
+- **System prompt:** scope to evidence DB, never invent numbers, must call `project_table` before final.
+- **Halt:** assistant message with no tool calls.
+- **Output:** `QueryResult.summary` (narrative), `QueryResult.rows` (table rows from `project_table`), `QueryResult.meta.table_spec` (`{shape, columns, footer}`).
 
-### Tools
-
-`src/api/backends/kg_tools.py` — six tools, each a plain Python function the agent calls (exposed as OpenAI tool-use function specs):
-
-1. `find_seeds(predictor: str, outcome_type: str | None, window: int | None) -> list[row_id]`
-   Cypher: `MATCH (pm:PredictorModel) WHERE pm.predictor_canonical = $p AND pm.outcome_type = $o RETURN pm.id LIMIT 25`.
-2. `expand_neighbors(row_ids: list[str]) -> dict`
-   Returns sibling PMs on the same cohorts, plus the cohort and paper nodes those PMs belong to.
-3. `get_anchor_text(row_id: str) -> dict`
-   Returns `{paper_ref, page, section, text}` for a given PM. Verbatim quote for grounded citation.
-4. `pool_effects(row_ids: list[str], effect_type: str) -> dict`
-   Calls existing DerSimonian-Laird pooler in `src/stats/meta.py`. Returns `{pooled, ci_lo, ci_hi, tau2, k, i2}`.
-5. `project_table(shape: str, row_ids: list[str]) -> dict`
-   `shape ∈ {"evidence", "ranked_predictors", "study_summary"}`. Returns `{columns, rows, footer?}`. The agent picks the shape based on the question.
-6. `search_paper_text(query: str, paper_ref: str | None, k: int = 5) -> list[dict]`
-   Embeds the query (single OpenRouter call, ~50ms), runs cosine over the chunk index, returns top-k `{paper_ref, section, snippet, score}`. `paper_ref=None` searches across all papers.
-
-### Output table — evidence shape (richer than SQL adapter)
+## Output table — evidence shape (richer than SQL)
 
 ```
 # | Study | Population | N | Predictor | Outcome | Timing | Method | Adjustment |
 Effect Size | Performance | Co-tested | Pop. Relevance | ✓ | Source
 ```
 
-- **Adjustment** — univariate / multivariate / adjusted-for, parsed from `model_specification`.
+New columns:
+- **Adjustment** — from `PredictorModel.adjustment_kind` (precomputed).
 - **Performance** — `AUC (95% CI)` from `auc` + `auc_ci_lo/hi`.
 - **Co-tested** — sibling `predictor_canonical`s on the same cohort. KG-native.
-- **Pop. Relevance** — heuristic match between intent population and `population_description`, scored High/Medium/Low.
-- **Footer (when ≥3 rows of same `effect_type`):** `Pooled OR 1.84 (1.42–2.39), τ²=0.07, k=4 studies, I²=23%` from `pool_effects`.
+- **Pop. Relevance** — heuristic match between intent population and `Cohort.population_description`, scored High/Medium/Low.
 
-### OpenWebUI integration
+**Footer (when ≥3 rows of same `effect_type`):** `Pooled OR 1.84 (1.42–2.39), τ²=0.07, k=4 studies, I²=23%` from `pool_effects`.
 
-`pipelines/sepsis_atlas_kg.py` — a new pipeline plugin alongside the existing `sepsis_atlas.py`. Instantiates `KGBackend` directly (no FastAPI calls; the agent runs in-process). Renders the 14-column table + pooled footer.
+## Human query path
 
-The OpenWebUI model picker shows two virtual models:
+For ad-hoc human inspection (not just the agent):
 
-- `sepsis_atlas` — existing pipeline → SQL backend via `/query`.
-- `sepsis_atlas_kg` — new pipeline → KGBackend agent in-process.
-
-Switching between backends = switching the model in the picker. Zero changes to `pipelines/sepsis_atlas.py`, zero changes to FastAPI.
+- **`tools/sepsis_atlas/kg_query.py`** — thin Python helpers exposing the six tools as importable functions. Lets you fire up a `python -i` shell and ask `find("PredictorModel", predictor_canonical="SOFA")` directly.
+- **`make kg-shell`** — opens an interactive Kuzu CLI on `db.kuzu` for raw Cypher.
+- **`scripts/kg_inspect.py`** — pretty-prints summary stats: node counts per type, edge counts per relation, top predictors, papers with the most predictor_models, etc.
 
 ## Files
 
 ```
 NEW
-├── src/extract/storage.py                # StorageBackend, SQLStorage, KuzuStorage, FanoutStorage
-├── src/api/backends/kg_store.py          # Kuzu connection mgmt + schema bootstrap
-├── src/api/backends/kg_tools.py          # 6 agent tools (Cypher + RAG + pooling)
-├── src/api/backends/kg_agent.py          # ReAct loop with Sonnet
-├── src/api/backends/kg_text_index.py     # embeddings RAG layer
-├── pipelines/sepsis_atlas_kg.py          # new OpenWebUI model plugin
-├── scripts/sync_sql_to_kuzu.py           # one-shot bootstrap from db.sqlite
-├── tests/test_kg_storage.py              # write-side adapter tests
-├── tests/test_kg_tools.py                # tool unit tests
-└── tests/test_kg_agent.py                # agent loop e2e
+├── src/extract/kg_extractor.py             # transcribes Docling structure into graph fragments
+├── src/extract/run_kg_extract.py           # entrypoint, parallels run_extract.py
+├── src/extract/kg_verify.py                # graph-fragment grounding check
+├── src/api/backends/kg_store.py            # Kuzu connection + schema bootstrap + indexes
+├── src/api/backends/kg_tools.py            # 6 uniform tools
+├── src/api/backends/kg_agent.py            # ReAct loop
+├── src/api/backends/kg_text_index.py       # embeddings RAG
+├── pipelines/sepsis_atlas_kg.py            # OpenWebUI model plugin (second model)
+├── tools/sepsis_atlas/kg_query.py          # human-friendly query helpers
+├── scripts/kg_inspect.py                   # stats / sanity dump
+├── tests/test_kg_extractor.py
+├── tests/test_kg_tools.py
+└── tests/test_kg_agent.py
 
-CHANGED — surgical edits only
-├── src/api/backends/kg.py                # rewrite to use Kuzu + agent loop (file is mine, no teammate conflict)
-├── src/api/backends/__init__.py          # KGBackend takes Kuzu path/connection
-├── src/extract/run_extract.py            # accept StorageBackend param, default FanoutStorage
-├── src/extract/extractor.py              # replace inline SQLAlchemy with storage.write_*
-└── pyproject.toml                        # add `kuzu>=0.4.0`
+CHANGED — additive only
+├── src/api/backends/kg.py                  # rewrite to use Kuzu + agent (file is mine)
+├── src/api/backends/__init__.py            # KGBackend takes Kuzu path
+├── Makefile                                # add kg-extract, kg-shell targets (new lines only)
+└── pyproject.toml                          # add kuzu>=0.4.0
 
 UNCHANGED — teammate-active or unrelated
 ├── src/api/main.py
 ├── src/api/query.py
 ├── src/sepsis_atlas/db.py
+├── src/extract/run_extract.py
+├── src/extract/extractor.py
 ├── pipelines/sepsis_atlas.py
 └── existing tests (test_api.py, test_backends.py, test_demo_live.py)
 ```
 
 ## Rollout (incremental commits, each independently mergeable)
 
-1. **Storage adapter (no behavior change).** Land `StorageBackend` + `SQLStorage` in `src/extract/storage.py`. Refactor extraction to use it. SQLStorage produces byte-identical writes to today. Tests prove round-trip equivalence.
-2. **Kuzu peer.** Add `KuzuStorage` + `FanoutStorage`. Run `scripts/sync_sql_to_kuzu.py` to populate `db.kuzu` from the committed snapshot. Force-add `db.kuzu` like `db.sqlite` was, or generate at clone-time via the script.
-3. **KGBackend Kuzu rewrite.** Replace in-memory dict graph in `src/api/backends/kg.py` with Kuzu Cypher queries. Add tools in `kg_tools.py`. Existing single-shot narrate stays as the fallback for failures.
-4. **Embeddings RAG.** Build `kg_text_index.py`. Add `search_paper_text` to the tool set.
-5. **Agent loop.** Build `kg_agent.py`. Wire the agent into `KGBackend.query()`. Tests for budget caps, tool routing, output shape.
-6. **OpenWebUI plugin.** Add `pipelines/sepsis_atlas_kg.py`. Manually verify the model appears in the picker.
+1. **Schema bootstrap.** `kg_store.py` creates `db.kuzu` with the schema and indexes. No data yet.
+2. **Structure transcription.** `kg_extractor.py` populates `Paper`, `Section`, `PaperTable`, `Figure`, `Reference` from the Docling parsed markdown. Pure mechanical, no LLM calls.
+3. **Predictor extraction (LLM).** Same prompts as the SQL extractor (reusing `src/extract/extractor.py`'s prompt module without modifying the file) but writing to Kuzu via `kg_extractor.write_predictor_model`. Populates `Cohort`, `PredictorModel`, denormalized roll-ups.
+4. **Read-side tools.** `kg_tools.py`. Each tool is unit-tested against a seeded `db.kuzu`.
+5. **Embeddings RAG.** `kg_text_index.py`. `search_text` joins the tool surface.
+6. **Agent loop.** `kg_agent.py`. `KGBackend.query()` swaps from single-shot narrate to agent loop.
+7. **OpenWebUI plugin.** `pipelines/sepsis_atlas_kg.py`. Manually verify model appears in picker.
+8. **Human helpers.** `kg_query.py`, `kg_inspect.py`, Makefile targets.
 
-Each step ships on its own commit and on its own branch if needed. Steps 1–2 are the only ones that touch teammate-active files.
+Each step is one commit. Steps 1–3 are extraction; 4–6 are query side; 7–8 are integration.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Kuzu maturity (v0.x) — possible bugs | SQLStorage stays canonical; Kuzu is fully reproducible from SQL via the sync script. If Kuzu hits a wall, drop it and fall back to in-memory dict graph (revert `kg_store.py`). |
-| Agent runaway cost | 8-turn cap, 30s hard timeout per call, all calls go through `@logged_llm_call` so cost audits survive. |
-| Embedding cost | $0.02 per full corpus re-embed; content-hash cache means recurring cost ≈ $0. |
-| Teammate merge conflicts on extraction files | Limit step-1 PR to the storage adapter only; communicate. The change is a refactor (extract `s.add(...)` calls into the new storage methods), so it merges cleanly with content edits in the same files. |
-| `db.kuzu` size committed to repo | Probably <2 MB at this corpus size; same trade-off as the existing `db.sqlite` snapshot. Alternative: generate via sync script on first server boot. |
+| Kuzu maturity (v0.x) | Sqlite stays canonical for `SQLBackend`; Kuzu is fully reproducible from re-running `run_kg_extract.py`. Drop and revert to in-memory dicts if Kuzu hits a wall. |
+| Agent runaway cost | 8-turn cap, 30s hard timeout, `@logged_llm_call` for budget audit. |
+| Embedding cost | $0.02 per full corpus embed; content-hash cache. |
+| LLM cost for KG extraction | ~$1–2 per full corpus pass (one-time). Same order as the existing SQL extraction. |
+| `db.kuzu` size committed | <2 MB at this corpus size; same trade-off as the existing `db.sqlite` snapshot. Alternative: generate at boot via the script. |
+| Importing prompts from `src/extract/extractor.py` couples the new pipeline to its interface | If the teammate refactors that module, the import breaks. Rebasing is cheap; if churn becomes a problem, lift the prompts into a shared `src/extract/prompts.py` (additive, neutral). |
 
 ## Testing
 
-- `tests/test_kg_storage.py` — `SQLStorage` and `KuzuStorage` round-trip; `FanoutStorage` writes to both atomically.
-- `tests/test_kg_tools.py` — each tool against a seeded Kuzu DB. Cypher correctness, edge cases (empty seeds, unknown predictor).
-- `tests/test_kg_agent.py` — live e2e against OpenRouter. Smoke that agent terminates within budget, produces both narrative and table, never invents numbers (hash-check effect_size_str values appear verbatim in narrative).
+- `tests/test_kg_extractor.py` — Docling structure → Kuzu round-trip. Verify all sections / tables / refs land. Verify denormalized roll-ups are correct.
+- `tests/test_kg_tools.py` — Each tool against a seeded Kuzu DB. Cypher correctness, edge cases (empty filter, unknown id, hops out-of-range).
+- `tests/test_kg_agent.py` — Live e2e with OpenRouter. Smoke: agent terminates within budget, produces narrative + table, never invents numbers (hash-check that effect_size_str values appear verbatim in the narrative).
 - Existing tests stay untouched; `make test` keeps passing.
 
 ## Out of scope (deferred)
 
-- Open-corpus retrieval / `pubmed_search` tool — agent stays inside the 9-paper corpus.
-- Migrating `src/api/query.py` from SQL to Cypher — SQLBackend keeps querying the SQLite DB directly; only `KGBackend` uses Kuzu.
-- True graph DB schema migrations / versioning — for now, schema is recreated at startup if missing.
-- Concept hierarchy edges (severity scores, biomarkers as parent categories) — minimal schema only.
-- `compare_predictors` and `find_co_occurring_predictors` as standalone tools — both can be expressed via `expand_neighbors` in v1; promote later if the agent fumbles them.
+- Open-corpus retrieval / `pubmed_search` tool — closed-corpus only in v1.
+- Migrating `src/api/query.py` from SQL to Cypher — `SQLBackend` keeps querying SQLite directly; only `KGBackend` uses Kuzu.
+- LLM interpretation of methods / demographics / citation matching — structure transcription only in v1; LLM-interpreted layers ship as follow-ups when an actual query needs them.
+- Concept hierarchy edges (severity scores → biomarkers → ...) — minimal schema only.
+- `compare_predictors` / `find_co_occurring_predictors` as standalone tools — composable from `find` + `expand`.
 
 ## Open questions
 
-None. All architectural choices are pinned. Ready for implementation plan once user reviews.
+None. Ready for implementation plan once user reviews.

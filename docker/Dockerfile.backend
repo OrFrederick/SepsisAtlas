@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# OS deps for matplotlib + (optional) Docling/pdf rendering.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libgl1 \
+        libglib2.0-0 \
+        libfreetype6 \
+        libjpeg62-turbo \
+        libpng16-16 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project metadata first for better Docker layer caching.
+COPY pyproject.toml ./
+COPY src ./src
+
+# Install in editable mode so backend code mounted via volume is hot-reloadable.
+RUN pip install --upgrade pip && pip install -e .
+
+# Where the backend expects to find papers, db, static assets (mounted by compose).
+RUN mkdir -p /app/data /app/static /app/runs /app/logs
+
+EXPOSE 8000
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

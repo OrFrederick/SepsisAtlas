@@ -110,3 +110,44 @@ def test_build_backends_unknown_name_raises(seeded_engine):
 
     with pytest.raises(KeyError):
         build_backends(["nope"], seeded_engine)
+
+
+def test_kg_backend_query_returns_seed_rows(seeded_engine):
+    from api.backends import KGBackend
+
+    result = KGBackend(seeded_engine).query("lactate vs 28-day mortality", query_id="q_kg")
+    assert result.backend == "kg"
+    assert result.query_id == "q_kg"
+    assert result.canonical_predictor == "lactate"
+    assert result.n_rows == len(result.rows) >= 1
+    assert any((r.get("predictor_canonical") or "").lower() == "lactate" for r in result.rows)
+    assert isinstance(result.summary, str) and result.summary.strip()
+
+
+def test_kg_backend_unknown_predictor_returns_empty(seeded_engine):
+    from api.backends import KGBackend
+
+    result = KGBackend(seeded_engine).query("procalcitonin and mortality", query_id="q_kg2")
+    assert result.n_rows == 0
+    assert "no matching" in result.summary.lower()
+
+
+def test_kg_backend_builds_with_empty_db(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'kg-empty.sqlite'}"
+    os.environ["SEPSIS_DB_URL"] = db_url
+
+    from api.backends import KGBackend
+    from sepsis_atlas.db import init_db
+
+    engine = init_db(db_url)
+    kg = KGBackend(engine)
+    result = kg.query("anything", query_id="q_empty_kg")
+    assert result.n_rows == 0
+
+
+def test_build_backends_registers_kg(seeded_engine):
+    from api.backends import build_backends
+
+    backends = build_backends(["sql", "kg"], seeded_engine)
+    assert set(backends) == {"sql", "kg"}
+    assert backends["kg"].name == "kg"

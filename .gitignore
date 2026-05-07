@@ -17,5 +17,17 @@ static/plots/
 .idea/
 .vscode/
 .claude/settings.local.json
+.claude/
 *.egg-info/
 .pytest_cache/
+
+# Playwright debug artifacts
+.playwright-mcp/
+viewer-*.png
+
+# OpenWebUI Pipelines runtime state
+pipelines/*/valves.json
+
+# Local debug scratch
+scripts/render_bbox.py
+static/bbox_proof/

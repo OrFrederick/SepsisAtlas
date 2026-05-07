@@ -1,7 +1,8 @@
-"""FastAPI app: query API + same-origin PDF.js viewer.
+"""FastAPI app: query API, PDF.js viewer, and the research-shell SPA.
 
 Endpoints
 ---------
+GET  /                            static/app.html — the research-shell SPA
 POST /query                       NL question → ranked rows + markdown table + summary
 GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-side
 GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
@@ -10,8 +11,8 @@ POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-CORS + iframe headers are set globally so OpenWebUI's artifact pane can iframe
-`/viewer/<file_stem>` without the browser blocking the embed.
+The SPA at `/` iframes `/viewer/<stem>` for source previews, so we keep the
+permissive frame headers below.
 """
 
 from __future__ import annotations
@@ -57,10 +58,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def relax_iframe_headers(request: Request, call_next):
-    """Allow OpenWebUI to iframe /viewer/* same-origin.
+    """Permissive frame headers so the SPA's PDF iframe can embed /viewer/*.
 
-    We intentionally do NOT set X-Frame-Options (DENY would block embed)
-    and we set CSP frame-ancestors to '*' so the artifact pane can host us.
+    No X-Frame-Options; CSP frame-ancestors '*'.
     """
     response = await call_next(request)
     # Strip default deny if any upstream set it (Starlette MutableHeaders has no .pop).
@@ -421,3 +421,16 @@ def health_cost(run_id: str | None = None, since: str | None = None):
         return payload
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# /  — research-shell SPA
+# ---------------------------------------------------------------------------
+
+
+@app.get("/")
+def app_root():
+    p = STATIC_DIR / "app.html"
+    if not p.exists():
+        raise HTTPException(500, "app.html missing")
+    return Response(content=p.read_text(), media_type="text/html")

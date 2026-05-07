@@ -7,8 +7,14 @@ from pydantic import BaseModel, Field
 
 class Anchor(BaseModel):
     page: int
-    bbox: list[float] = Field(description="[x0, y0, x1, y1] in PDF points")
-    text: str = Field(description="Verbatim source span")
+    bbox: Optional[list[float]] = Field(
+        default=None,
+        description=(
+            "Optional [l,t,r,b] in PDF points. Resolver populates this from Docling "
+            "provenance after extraction; LLM should leave null."
+        ),
+    )
+    text: str = Field(description="Verbatim source span (full sentence or full table cell)")
     section: Optional[str] = None
 
 
@@ -88,4 +94,5 @@ class IntentParse(BaseModel):
     outcome_window_days: Optional[int] = None
     population: dict = Field(default_factory=dict)
     predictor: Optional[str] = None
+    paper_ref: Optional[str] = None
     intent: Literal["ranking", "lookup", "comparison", "summary"] = "lookup"

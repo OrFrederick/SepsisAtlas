@@ -21,6 +21,7 @@ MODEL_EXTRACT = os.getenv("MODEL_EXTRACT", "anthropic/claude-opus-4.7")
 MODEL_VERIFY = os.getenv("MODEL_VERIFY", "anthropic/claude-sonnet-4.6")
 MODEL_INTENT = os.getenv("MODEL_INTENT", "anthropic/claude-haiku-4.5")
 MODEL_NARRATIVE = os.getenv("MODEL_NARRATIVE", "anthropic/claude-haiku-4.5")
+MODEL_TRANSLATE = os.getenv("MODEL_TRANSLATE", "anthropic/claude-haiku-4.5")
 
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")

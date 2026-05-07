@@ -22,10 +22,6 @@ MODEL_VERIFY = os.getenv("MODEL_VERIFY", "anthropic/claude-haiku-4.5")
 MODEL_INTENT = os.getenv("MODEL_INTENT", "anthropic/claude-haiku-4.5")
 MODEL_NARRATIVE = os.getenv("MODEL_NARRATIVE", "anthropic/claude-haiku-4.5")
 
-LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
-LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-
 PIPELINE_VERSION = os.getenv("PIPELINE_VERSION", "0.1.0")
 SCHEMA_VERSION = os.getenv("SCHEMA_VERSION", "1")
 

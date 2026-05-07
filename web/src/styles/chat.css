@@ -264,3 +264,79 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   transition: border-color 120ms ease, color 120ms ease;
 }
 .chip:hover { border-color: var(--accent); color: var(--fg); }
+
+/* Evidence table view (Cards|Table toggle, Table branch).
+   Visual language matches .card: same panel/border tokens, same
+   active-row accent, same badge palette already defined above. */
+
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+.evidence-table thead th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--fg-muted);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.evidence-table thead th:hover { color: var(--fg); }
+.evidence-table thead th.sort-asc::after  { content: " ▲"; }
+.evidence-table thead th.sort-desc::after { content: " ▼"; }
+
+.evidence-table thead th.num     { text-align: right; }
+.evidence-table thead th.verdict { text-align: center; width: 36px; }
+
+.evidence-table tbody td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--fg);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-table tbody td.num {
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.evidence-table tbody td.verdict { text-align: center; }
+.evidence-table tbody td.paper   { font-weight: 500; }
+
+.evidence-table tbody tr {
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  outline: none;
+}
+.evidence-table tbody tr:hover  { background: #1c2029; }
+.evidence-table tbody tr:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.evidence-table tbody tr.active {
+  background: rgba(140, 147, 166, 0.08);
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+
+/* Column sizing — the long, prosey columns get most of the room. */
+.evidence-table th:nth-child(1), .evidence-table td:nth-child(1) { width: 26%; }
+.evidence-table th:nth-child(2), .evidence-table td:nth-child(2) { width: 22%; }
+.evidence-table th:nth-child(3), .evidence-table td:nth-child(3) { width: 22%; }
+.evidence-table th:nth-child(4), .evidence-table td:nth-child(4) { width: 14%; }
+.evidence-table th:nth-child(5), .evidence-table td:nth-child(5) { width: 6%; }
+.evidence-table th:nth-child(6), .evidence-table td:nth-child(6) { width: 6%; }
+.evidence-table th:nth-child(7), .evidence-table td:nth-child(7) { width: 4%; }

@@ -36,7 +36,9 @@ VERIFIER_BADGE = {
     "ok": "✓",
     "weak": "~",
     "warn": "~",
+    "partial": "~",
     "fail": "✗",
+    "reject": "✗",
     "unverified": "?",
 }
 
@@ -113,15 +115,12 @@ class Pipeline:
             yield narrative[i : i + chunk]
         yield "\n\n"
         yield self._render_table(payload)
-        yield "\n\n"
-        yield self._render_plot(payload)
 
     def _render(self, payload: dict) -> str:
         return "\n\n".join(
             [
                 payload.get("summary", "") or "_(no summary)_",
                 self._render_table(payload),
-                self._render_plot(payload),
             ]
         )
 
@@ -131,24 +130,34 @@ class Pipeline:
             return "_No matching evidence rows. Try `expand_pubmed` to broaden the corpus._"
 
         lines = [
-            "| # | Predictor | Cohort | Effect | Verifier | Source |",
-            "|---|-----------|--------|--------|----------|--------|",
+            "| # | Study | Population | N | Predictor | Outcome | Timing | Method | Effect Size | ✓ | Source |",
+            "|---|-------|------------|---|-----------|---------|--------|--------|-------------|---|--------|",
         ]
         for i, row in enumerate(rows, start=1):
             badge = VERIFIER_BADGE.get((row.get("verifier_verdict") or "").lower(), "?")
-            effect = row.get("effect_size_str") or "—"
-            cohort = row.get("cohort_id") or "—"
+            study = self._study_label(row)
+            population = _truncate(row.get("population_description"), 60)
+            n = row.get("cohort_size_n") or "—"
             predictor = row.get("predictor_canonical") or row.get("predictors") or "—"
+            outcome = _truncate(row.get("outcome"), 30)
+            timing = _truncate(row.get("timing"), 35)
+            method = _truncate(row.get("model_specification"), 40)
+            effect = _truncate(row.get("effect_size_str"), 60)
             src_md = self._source_link(row)
             lines.append(
-                f"| {i} | {predictor} | {cohort} | {effect} | {badge} | {src_md} |"
+                f"| {i} | {study} | {population} | {n} | {predictor} | {outcome} | "
+                f"{timing} | {method} | {effect} | {badge} | {src_md} |"
             )
 
-        legend = (
-            "\n_Verifier: ✓ pass · ~ weak · ✗ fail · ? unverified. "
-            "Click a Source link to open the highlighted PDF span in a new tab._"
-        )
-        return "\n".join(lines) + legend
+        return "\n".join(lines)
+
+    @staticmethod
+    def _study_label(row: dict) -> str:
+        ref = row.get("paper_ref") or "—"
+        cohort = row.get("cohort_label")
+        if cohort and cohort.lower() not in {"total cohort", "total"}:
+            return f"{ref} ({cohort})"
+        return ref
 
     def _source_link(self, row: dict) -> str:
         """Build a markdown link to /viewer/<file>?page=&bbox=&origin=tl.
@@ -174,23 +183,15 @@ class Pipeline:
         label = f"{file_stem} p.{page}"
         return f"[{label}]({url})"
 
-    def _render_plot(self, payload: dict) -> str:
-        qid = payload.get("query_id")
-        if not qid:
-            return ""
-        url = f"{self.valves.BACKEND_URL}/forest_plot/{qid}.png"
-        pooled = payload.get("pooled") or {}
-        pooled_md = ""
-        if pooled:
-            pooled_md = (
-                f"\n\n**Pooled estimate** "
-                f"({pooled.get('model','random-effects')}): "
-                f"{pooled.get('estimate','?')} "
-                f"(95% CI {pooled.get('ci_lo','?')}–{pooled.get('ci_hi','?')}); "
-                f"I²={pooled.get('i2','?')}, τ²={pooled.get('tau2','?')}, "
-                f"k={pooled.get('k','?')}"
-            )
-        return f"![forest plot]({url}){pooled_md}"
+def _truncate(value, limit: int) -> str:
+    if value is None:
+        return "—"
+    s = str(value).replace("|", "\\|").replace("\n", " ").strip()
+    if not s:
+        return "—"
+    if len(s) > limit:
+        return s[: limit - 1].rstrip() + "…"
+    return s
 
 
 # Convenience: allow `python sepsis_atlas.py "lactate vs 28d mortality"` for smoke tests.

@@ -2,36 +2,118 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sepsis Atlas — PDF viewer</title>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/web/pdf_viewer.css">
   <style>
-    html, body { margin: 0; padding: 0; background: #1e1e1e; color: #ddd; font: 13px/1.4 system-ui, sans-serif; }
-    #toolbar { position: sticky; top: 0; z-index: 10; padding: 6px 10px;
-               background: #2b2b2b; border-bottom: 1px solid #444;
-               display: flex; gap: 12px; align-items: center; }
-    #toolbar button { background: #444; color: #ddd; border: 1px solid #555;
-                      padding: 3px 10px; border-radius: 3px; cursor: pointer; }
-    #toolbar button:hover { background: #555; }
-    #stage { position: relative; padding: 12px; display: flex; justify-content: center; }
-    #pdf-canvas { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.6); background: #fff; }
-    #bbox-overlay { position: absolute; pointer-events: none;
-                    border: 2px solid #ffec3d;
-                    background: rgba(255, 236, 61, 0.22);
-                    box-shadow: 0 0 0 1px rgba(0,0,0,0.4) inset; display: none; }
-    #status { color: #aaa; }
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #181b22;
+      --panel-2: #232732;
+      --fg: #e7e9ee;
+      --muted: #8c93a6;
+      --accent: #ffd23f;
+      --accent-soft: rgba(255, 210, 63, 0.22);
+    }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+                 font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #toolbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; gap: 8px; align-items: center;
+      padding: 8px 14px;
+      background: var(--panel);
+      border-bottom: 1px solid #2a2f3a;
+      backdrop-filter: blur(8px);
+    }
+    #toolbar strong { color: var(--accent); letter-spacing: 0.4px; }
+    #toolbar .sep { width: 1px; height: 22px; background: #2a2f3a; margin: 0 6px; }
+    #toolbar button {
+      background: var(--panel-2); color: var(--fg);
+      border: 1px solid #2f3543;
+      padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      font: inherit;
+      transition: background 0.12s;
+    }
+    #toolbar button:hover:not(:disabled) { background: #2f3543; }
+    #toolbar button:disabled { opacity: 0.4; cursor: default; }
+    #pageinfo { color: var(--muted); min-width: 80px; text-align: center; }
+    #zoominfo { color: var(--muted); min-width: 50px; text-align: center; }
+    #filename { color: var(--muted); margin-left: auto; font-feature-settings: "tnum"; }
+    #status { color: var(--muted); }
+
+    #stage {
+      display: flex; justify-content: center;
+      padding: 24px 16px 60px;
+    }
+    #pageWrap {
+      position: relative;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.55);
+      background: #fff;
+      /* width/height set in JS to viewport CSS pixels */
+    }
+    #pdfCanvas {
+      position: absolute; left: 0; top: 0;
+      /* CSS dims set in JS so canvas fills wrapper but renders at devicePixelRatio */
+    }
+    .textLayer {
+      position: absolute; left: 0; top: 0;
+      overflow: hidden;
+      opacity: 1;
+      line-height: 1.0;
+      user-select: text;
+      forced-color-adjust: none;
+    }
+    .textLayer ::selection { background: rgba(0, 120, 255, 0.35); }
+    .textLayer span, .textLayer br {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+    }
+    #bboxOverlay {
+      position: absolute;
+      pointer-events: none;
+      border: 2px solid var(--accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.18);
+      border-radius: 1px;
+      animation: bboxPulse 1.6s ease-out 1;
+      display: none;
+    }
+    @keyframes bboxPulse {
+      0%   { transform: scale(1.08); box-shadow: 0 0 0 9999px rgba(0,0,0,0.0), 0 0 0 4px rgba(255,210,63,0.6); }
+      60%  { transform: scale(1.0);  box-shadow: 0 0 0 9999px rgba(0,0,0,0.18), 0 0 0 0 rgba(255,210,63,0.0); }
+      100% { transform: scale(1.0);  box-shadow: 0 0 0 9999px rgba(0,0,0,0.18); }
+    }
   </style>
 </head>
 <body>
   <div id="toolbar">
-    <span><strong>Sepsis Atlas</strong></span>
-    <span id="filename">__FILE_STEM__.pdf</span>
-    <button id="prev">Prev</button>
-    <span>Page <span id="pagenum">?</span> / <span id="pagecount">?</span></span>
-    <button id="next">Next</button>
+    <strong>Sepsis Atlas</strong>
+    <span class="sep"></span>
+    <button id="prev" title="Previous page (←)">‹</button>
+    <span id="pageinfo">— / —</span>
+    <button id="next" title="Next page (→)">›</button>
+    <span class="sep"></span>
+    <button id="zoomOut" title="Zoom out (-)">−</button>
+    <span id="zoominfo">100%</span>
+    <button id="zoomIn" title="Zoom in (+)">+</button>
+    <button id="fit" title="Fit width">Fit</button>
+    <span class="sep"></span>
+    <button id="jumpBbox" title="Jump back to highlight">↩ Highlight</button>
     <span id="status"></span>
+    <span id="filename">__FILE_STEM__.pdf</span>
   </div>
+
   <div id="stage">
-    <canvas id="pdf-canvas"></canvas>
-    <div id="bbox-overlay"></div>
+    <div id="pageWrap">
+      <canvas id="pdfCanvas"></canvas>
+      <div id="textLayer" class="textLayer"></div>
+      <div id="bboxOverlay"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -45,88 +127,174 @@
     const params = new URLSearchParams(location.search);
     let pageNum = Math.max(1, parseInt(params.get("page") || "1", 10));
     const bboxStr = params.get("bbox");
+    // origin: 'tl' (Docling tables, OCR-style top-left) or 'bl' (PDF-native bottom-left).
+    // Default 'tl' since most extracted cell bboxes are TOPLEFT in our parsed JSON.
+    const bboxOrigin = (params.get("origin") || "tl").toLowerCase();
     const bbox = bboxStr ? bboxStr.split(",").map(Number) : null;
 
-    const SCALE = 1.5;
-    const canvas = document.getElementById("pdf-canvas");
-    const ctx = canvas.getContext("2d");
-    const overlay = document.getElementById("bbox-overlay");
+    let scale = 1.5;
+    let pdfDoc = null;
+    let currentPage = null;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+
+    const canvas = document.getElementById("pdfCanvas");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const textLayerDiv = document.getElementById("textLayer");
+    const overlay = document.getElementById("bboxOverlay");
+    const wrap = document.getElementById("pageWrap");
     const stage = document.getElementById("stage");
     const statusEl = document.getElementById("status");
-    const pageNumEl = document.getElementById("pagenum");
-    const pageCountEl = document.getElementById("pagecount");
+    const pageInfoEl = document.getElementById("pageinfo");
+    const zoomInfoEl = document.getElementById("zoominfo");
+    const prevBtn = document.getElementById("prev");
+    const nextBtn = document.getElementById("next");
+    const fitBtn = document.getElementById("fit");
+    const jumpBtn = document.getElementById("jumpBbox");
 
-    let pdfDoc = null;
+    function setStatus(msg) { statusEl.textContent = msg; }
 
     async function renderPage(num) {
       if (!pdfDoc) return;
       const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: SCALE });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      pageNumEl.textContent = num;
+      currentPage = page;
 
-      // Draw bbox overlay only on the requested page.
-      if (bbox && bbox.length === 4 && num === pageNum) {
-        // Input bbox is in PDF user units (points). PDF.js viewport.scale is points->CSS px.
-        // PDF y origin is bottom-left; canvas y origin is top-left. Flip if needed.
-        // We accept either top-left coords (Docling/OCR style: y grows downward, page units)
-        // or PDF-native coords. Detect by checking if y0 > y1 → already top-left.
-        let [x0, y0, x1, y1] = bbox;
-        if (y0 > y1) {
-          // already top-left style; just scale
-        } else {
-          // PDF native bottom-left: flip via page height in points
-          const pageHeightPts = viewport.height / SCALE;
-          const ny0 = pageHeightPts - y1;
-          const ny1 = pageHeightPts - y0;
-          y0 = ny0; y1 = ny1;
-        }
-        const left = x0 * SCALE;
-        const top = y0 * SCALE;
-        const w = (x1 - x0) * SCALE;
-        const h = (y1 - y0) * SCALE;
-        // Position overlay relative to stage padding + canvas position.
-        const canvasRect = canvas.getBoundingClientRect();
-        const stageRect = stage.getBoundingClientRect();
-        const offsetLeft = canvas.offsetLeft;
-        const offsetTop = canvas.offsetTop;
-        overlay.style.display = "block";
-        overlay.style.left = `${offsetLeft + left}px`;
-        overlay.style.top = `${offsetTop + top}px`;
-        overlay.style.width = `${w}px`;
-        overlay.style.height = `${h}px`;
-      } else {
-        overlay.style.display = "none";
+      const viewport = page.getViewport({ scale });
+      const cssW = Math.floor(viewport.width);
+      const cssH = Math.floor(viewport.height);
+
+      // Crisp canvas: backing store at dpr, CSS box at viewport size.
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      wrap.style.width = `${cssW}px`;
+      wrap.style.height = `${cssH}px`;
+
+      const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
+      await page.render({ canvasContext: ctx, viewport, transform }).promise;
+
+      // Text layer (selectable, copy/paste enabled).
+      textLayerDiv.replaceChildren();
+      textLayerDiv.style.width = `${cssW}px`;
+      textLayerDiv.style.height = `${cssH}px`;
+      // setProperty avoids a pdfjs warning about --scale-factor.
+      textLayerDiv.style.setProperty("--scale-factor", String(scale));
+      const textContent = await page.getTextContent();
+      const textTask = pdfjsLib.renderTextLayer({
+        textContentSource: textContent,
+        container: textLayerDiv,
+        viewport,
+        textDivs: [],
+      });
+      await textTask.promise;
+
+      pageInfoEl.textContent = `${num} / ${pdfDoc.numPages}`;
+      zoomInfoEl.textContent = `${Math.round(scale / 1.5 * 100)}%`;
+      prevBtn.disabled = num <= 1;
+      nextBtn.disabled = num >= pdfDoc.numPages;
+
+      drawBbox(viewport, num);
+    }
+
+    function drawBbox(viewport, num) {
+      overlay.style.display = "none";
+      jumpBtn.style.display = bbox ? "" : "none";
+      if (!bbox || bbox.length !== 4 || num !== pageNum) return;
+
+      // Input bbox: PDF user-space points (1pt = 1/72 inch), independent of zoom.
+      let [x0, y0, x1, y1] = bbox;
+      // Normalize to top-left origin in points.
+      if (bboxOrigin === "bl") {
+        const pageHeightPts = viewport.height / scale;
+        const ny0 = pageHeightPts - y1;
+        const ny1 = pageHeightPts - y0;
+        y0 = ny0; y1 = ny1;
+      } else if (y0 > y1) {
+        // defensive: if caller swapped y values, normalize
+        [y0, y1] = [y1, y0];
       }
+      // Scale to CSS pixels.
+      const left = x0 * scale;
+      const top = y0 * scale;
+      const w = Math.max(2, (x1 - x0) * scale);
+      const h = Math.max(2, (y1 - y0) * scale);
+      overlay.style.left = `${left}px`;
+      overlay.style.top = `${top}px`;
+      overlay.style.width = `${w}px`;
+      overlay.style.height = `${h}px`;
+      overlay.style.display = "block";
+      // Trigger pulse animation on each draw.
+      overlay.style.animation = "none";
+      overlay.offsetHeight;
+      overlay.style.animation = "";
+    }
+
+    function scrollToBbox() {
+      if (overlay.style.display === "none") return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const overlayTop = parseFloat(overlay.style.top);
+      const overlayHeight = parseFloat(overlay.style.height);
+      const targetY = window.scrollY + wrapRect.top + overlayTop
+                      - window.innerHeight / 2 + overlayHeight / 2;
+      window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+    }
+
+    function fitWidth() {
+      if (!currentPage) return;
+      const baseViewport = currentPage.getViewport({ scale: 1 });
+      const available = stage.clientWidth - 32;
+      scale = Math.max(0.5, Math.min(4, available / baseViewport.width));
+      renderPage(pageNum).then(() => { if (bbox) scrollToBbox(); });
     }
 
     async function init() {
       try {
-        statusEl.textContent = "loading...";
-        pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
-        pageCountEl.textContent = pdfDoc.numPages;
+        setStatus("loading…");
+        pdfDoc = await pdfjsLib.getDocument({
+          url: PDF_URL,
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/cmaps/",
+          cMapPacked: true,
+        }).promise;
         pageNum = Math.min(pageNum, pdfDoc.numPages);
         await renderPage(pageNum);
-        statusEl.textContent = "";
-        // Notify parent (OpenWebUI artifact pane) for height adjustment.
+        setStatus("");
+        if (bbox) {
+          requestAnimationFrame(() => scrollToBbox());
+        }
         try {
           window.parent.postMessage(
             { type: "sepsis-atlas:viewer-ready", file: FILE_STEM, page: pageNum },
             "*"
           );
-        } catch (e) {}
+        } catch (_) {}
       } catch (err) {
-        statusEl.textContent = "Error: " + err.message;
+        setStatus("Error: " + err.message);
+        console.error(err);
       }
     }
 
-    document.getElementById("prev").addEventListener("click", () => {
+    prevBtn.addEventListener("click", () => {
       if (pageNum > 1) { pageNum--; renderPage(pageNum); }
     });
-    document.getElementById("next").addEventListener("click", () => {
+    nextBtn.addEventListener("click", () => {
       if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum++; renderPage(pageNum); }
+    });
+    document.getElementById("zoomIn").addEventListener("click", () => {
+      scale = Math.min(4, scale * 1.2); renderPage(pageNum);
+    });
+    document.getElementById("zoomOut").addEventListener("click", () => {
+      scale = Math.max(0.5, scale / 1.2); renderPage(pageNum);
+    });
+    fitBtn.addEventListener("click", fitWidth);
+    jumpBtn.addEventListener("click", scrollToBbox);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (e.key === "ArrowLeft" && pageNum > 1) { pageNum--; renderPage(pageNum); }
+      else if (e.key === "ArrowRight" && pdfDoc && pageNum < pdfDoc.numPages) { pageNum++; renderPage(pageNum); }
+      else if (e.key === "+" || e.key === "=") { scale = Math.min(4, scale * 1.2); renderPage(pageNum); }
+      else if (e.key === "-") { scale = Math.max(0.5, scale / 1.2); renderPage(pageNum); }
+      else if (e.key === "0") { scale = 1.5; renderPage(pageNum); }
     });
 
     init();

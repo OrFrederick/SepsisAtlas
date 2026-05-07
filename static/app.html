@@ -271,6 +271,14 @@
       if (nl) search(nl);
     });
 
+    // Auto-fire search when the page is opened with ?q=<NL> (used by the
+    // OpenWebUI pipeline link so chat queries deep-link straight into the UI).
+    const initialQ = new URLSearchParams(location.search).get('q');
+    if (initialQ) {
+      document.getElementById('nl').value = initialQ;
+      search(initialQ);
+    }
+
     (() => {
       const main = document.querySelector('main');
       const gutter = document.getElementById('gutter');

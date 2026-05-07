@@ -16,6 +16,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GT_PAPERS = ["Gai 2022", "Seymour 2016", "Wang 2023", "Zhang 2021"]
+PARSED_DIR = ROOT / "data" / "papers" / "parsed"
+
+# Lazy import — we only need the resolver if we're computing bbox accuracy,
+# and we don't want to break the existing CLI when src/ isn't on the path.
+sys.path.insert(0, str(ROOT))
+try:
+    from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
+except ImportError:  # pragma: no cover
+    build_index = resolve = to_flat_bbox = None  # type: ignore[assignment]
 
 # ---- normalization -----------------------------------------------------
 
@@ -182,13 +191,91 @@ def load_gold():
 def load_extracted():
     con = sqlite3.connect(ROOT / "db.sqlite")
     con.row_factory = sqlite3.Row
-    rows = [dict(r) for r in con.execute("SELECT * FROM predictor_model")]
+    # Join in file_name so the bbox-accuracy axis can locate the parsed JSON
+    # without a second lookup. Existing fields are unchanged.
+    rows = [
+        dict(r)
+        for r in con.execute(
+            "SELECT pm.*, sc.file_name AS file_name, sc.paper_ref AS paper_ref "
+            "FROM predictor_model pm "
+            "LEFT JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id"
+        )
+    ]
     con.close()
     rows = [
         r for r in rows
         if any(p.lower() in (r.get("cohort_id") or "").lower() for p in GT_PAPERS)
     ]
     return rows
+
+
+# ---- bbox accuracy -----------------------------------------------------
+
+
+_PARSED_INDEX_CACHE: dict[str, list[dict] | None] = {}
+
+
+def _get_parsed_index(file_name):
+    """Return the resolver index for a parsed paper, or None if missing."""
+    if not file_name or build_index is None:
+        return None
+    if file_name in _PARSED_INDEX_CACHE:
+        return _PARSED_INDEX_CACHE[file_name]
+    path = PARSED_DIR / f"{file_name}.json"
+    if not path.exists():
+        _PARSED_INDEX_CACHE[file_name] = None
+        return None
+    try:
+        parsed = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        _PARSED_INDEX_CACHE[file_name] = None
+        return None
+    _PARSED_INDEX_CACHE[file_name] = build_index(parsed)
+    return _PARSED_INDEX_CACHE[file_name]
+
+
+def _bbox_accuracy(returned_rows):
+    """Fraction of rows whose stored anchor_bbox matches the resolver's lookup
+    for the smallest containing element of the row's anchor_text.
+
+    Rows without parsed JSON, without anchor_text, without a stored bbox, or
+    where the resolver can't find a match are excluded from the denominator.
+    """
+    if build_index is None or resolve is None or to_flat_bbox is None:
+        return None, 0, 0
+
+    total = 0
+    match = 0
+    for r in returned_rows:
+        anchor_text = (r.get("anchor_text") or "").strip()
+        if not anchor_text:
+            continue
+        idx = _get_parsed_index(r.get("file_name"))
+        if idx is None:
+            continue
+        hit = resolve(anchor_text, r.get("anchor_section"), idx)
+        if hit is None:
+            continue
+        target = to_flat_bbox(hit.get("bbox"))
+        if target is None:
+            continue
+        stored_raw = r.get("anchor_bbox")
+        if not stored_raw:
+            continue
+        try:
+            stored = json.loads(stored_raw) if isinstance(stored_raw, str) else stored_raw
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(stored, list) or len(stored) != len(target):
+            continue
+        total += 1
+        try:
+            if all(abs(float(a) - float(b)) <= 0.01 for a, b in zip(stored, target)):
+                match += 1
+        except (TypeError, ValueError):
+            continue
+    rate = (match / total) if total else None
+    return rate, match, total
 
 
 # ---- score -------------------------------------------------------------
@@ -217,6 +304,7 @@ def score():
     anchor_present = 0
     cohort_match = 0
     failures = []
+    matched_rows = []  # rows we surfaced as best matches; used for bbox axis
 
     for g in gold:
         cands = by_strict.get(_cid_strict(g["cohort_id"]), [])
@@ -264,9 +352,12 @@ def score():
 
         if (best.get("anchor_text") or "").strip():
             anchor_present += 1
+        matched_rows.append(best)
 
     def _rate(num, den):
         return num / den if den else None
+
+    bbox_rate, bbox_match, bbox_total = _bbox_accuracy(matched_rows)
 
     return {
         "n_gold": n,
@@ -281,6 +372,8 @@ def score():
         "effect_full_rate": _rate(effect_full, effect_eval_n),
         "effect_partial_rate": _rate(effect_full + effect_partial, effect_eval_n),
         "anchor_rate": _rate(anchor_present, pred_match),
+        "bbox_accuracy": bbox_rate,
+        "bbox_accuracy_n": f"{bbox_match}/{bbox_total}" if bbox_total else "0/0",
         "failures_top": failures[:30],
     }
 

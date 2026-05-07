@@ -102,6 +102,9 @@ class QueryResponse(BaseModel):
     n_rows: int
     refused: bool = False
     refused_reason: str | None = None
+    # KG path piggybacks here for table_spec ({shape, columns, footer}) and
+    # n_turns; SQL path leaves it null.
+    meta: dict | None = None
 
 
 def _assess_answerable(intent) -> tuple[bool, str | None]:
@@ -208,6 +211,67 @@ def post_query(req: QueryRequest) -> QueryResponse:
         canonical_predictor=fr.canonical_predictor,
         fallback_note=fr.fallback_note,
         n_rows=len(ranked),
+    )
+
+
+# ---------------------------------------------------------------------------
+# /query_kg — Neo4j-backed KG agent loop (sibling endpoint to /query)
+# ---------------------------------------------------------------------------
+
+
+# Lazily-initialized singleton so importing this module never fails when
+# Neo4j is offline; the first /query_kg request pays the connection cost.
+# The lock matters because FastAPI runs sync endpoints in a threadpool;
+# without it two concurrent first-requests would each instantiate KGBackend
+# and leak the loser's Neo4j driver socket pool.
+import threading as _threading  # noqa: E402
+
+_kg_backend = None
+_kg_backend_lock = _threading.Lock()
+
+
+def _get_kg_backend():
+    global _kg_backend
+    if _kg_backend is None:
+        with _kg_backend_lock:
+            if _kg_backend is None:
+                from api.backends.kg import KGBackend
+
+                _kg_backend = KGBackend()
+    return _kg_backend
+
+
+@app.post("/query_kg", response_model=QueryResponse)
+def post_query_kg(req: QueryRequest) -> QueryResponse:
+    if not req.nl_text or not req.nl_text.strip():
+        raise HTTPException(400, "nl_text is required")
+
+    query_id = f"q_{uuid.uuid4().hex[:10]}"
+
+    try:
+        backend = _get_kg_backend()
+        result = backend.query(req.nl_text, query_id=query_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # str(e) on neo4j.exceptions can echo the bolt URI including
+        # credentials; only the exception class name is safe to surface.
+        print(f"[query_kg] backend failure: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"KG backend unavailable ({type(e).__name__})",
+        )
+
+    return QueryResponse(
+        query_id=query_id,
+        rows=result.rows,
+        table_md=to_markdown_table(result.rows),
+        summary=result.summary,
+        intent=result.intent,
+        canonical_predictor=result.canonical_predictor,
+        fallback_note=result.fallback_note,
+        n_rows=result.n_rows,
+        meta=result.meta,
     )
 
 

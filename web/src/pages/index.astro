@@ -1,93 +1,706 @@
 ---
 import Base from "../layouts/Base.astro";
-import SearchBox from "../components/SearchBox.astro";
-import SettingsDrawer from "../components/SettingsDrawer.astro";
-import SplitShell from "../components/SplitShell.astro";
 ---
 <Base title="Sepsis Atlas — Chat" route="chat">
-  <SplitShell>
-    <SearchBox />
-    <div id="results"></div>
-    <div id="welcome" class="welcome">
-      <h2>Search the corpus</h2>
-      <p>Ask anything about sepsis predictors, mortality outcomes, or specific cohorts. Click an example to try it:</p>
-      <div class="chips">
-        <span class="chip" data-q="lactate and 28-day mortality">lactate and 28-day mortality</span>
-        <span class="chip" data-q="qSOFA in septic shock">qSOFA in septic shock</span>
-        <span class="chip" data-q="predictors from Schlapbach 2018">predictors from Schlapbach 2018</span>
+  <div id="app" class="chat-shell">
+    <div class="controls">
+      <div class="backend-toggle" role="tablist" aria-label="Query backend">
+        <button id="modeSql" class="mode-btn active" type="button" data-mode="sql">SQL</button>
+        <button id="modeKg" class="mode-btn" type="button" data-mode="kg">KG (agent)</button>
       </div>
+      <span id="modeHint" class="mode-hint">Structured DB · single-shot ranked rows</span>
+      <button id="clearBtn" class="clear-btn" type="button" title="Clear chat history">Clear chat</button>
     </div>
-    <SettingsDrawer />
-  </SplitShell>
+    <main class="split">
+      <section class="chat">
+        <div id="scrollback" class="scrollback"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <textarea id="input" rows="1" placeholder="Ask about sepsis predictors, biomarkers, or outcomes..."></textarea>
+          <button id="send" class="send-btn" type="submit">Send</button>
+        </form>
+      </section>
+      <div class="divider"></div>
+      <section class="viewer" id="viewer">
+        <div class="viewer-empty" id="viewerEmpty">Click an evidence row to view the source PDF.</div>
+        <iframe id="viewerFrame" style="display:none" title="PDF viewer"></iframe>
+      </section>
+    </main>
+  </div>
+
+  <style is:global>
+    /* Chat shell takes over the viewport below Base.astro's topbar. */
+    body { overflow: hidden; }
+    main { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+    .chat-shell {
+      display: grid;
+      grid-template-rows: 36px 1fr;
+      height: calc(100vh - 49px); /* Base topbar = 10px + 13px line + 10px + 1px border ≈ 49px */
+      width: 100vw;
+    }
+    .controls {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-2);
+    }
+    .backend-toggle {
+      display: inline-flex; gap: 0;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .mode-btn {
+      background: transparent;
+      color: var(--fg-muted);
+      padding: 4px 12px;
+      font-size: 11.5px;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      border: none;
+      transition: color 120ms ease, background 120ms ease;
+    }
+    .mode-btn + .mode-btn { border-left: 1px solid var(--border); }
+    .mode-btn:hover { color: var(--fg); }
+    .mode-btn.active {
+      color: #1a1a1a;
+      background: var(--accent);
+      font-weight: 600;
+    }
+    .mode-hint {
+      color: var(--fg-muted);
+      font-size: 11.5px;
+      flex: 1;
+    }
+    .clear-btn {
+      color: var(--fg-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      background: transparent;
+      cursor: pointer;
+      transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+    .clear-btn:hover {
+      color: var(--fg);
+      border-color: var(--fg-muted);
+      background: var(--panel);
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 480px 1px 1fr;
+      height: 100%;
+      overflow: hidden;
+    }
+    .divider { background: var(--border); width: 1px; height: 100%; }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      background: var(--panel-2);
+      overflow: hidden;
+    }
+    .scrollback {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .scrollback::-webkit-scrollbar { width: 8px; }
+    .scrollback::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .turn { display: flex; flex-direction: column; gap: 10px; }
+    .bubble-user {
+      align-self: flex-end;
+      max-width: 85%;
+      padding: 8px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-right: 2px solid var(--accent);
+      border-radius: 8px;
+      color: var(--fg);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .assistant {
+      align-self: flex-start;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: fadeIn 120ms ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .summary {
+      color: var(--fg-soft);
+      padding: 4px 2px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .refused, .thinking {
+      color: var(--fg-muted);
+      font-style: italic;
+      padding: 4px 2px;
+    }
+    .rows { display: flex; flex-direction: column; gap: 8px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: border-color 120ms ease, transform 100ms ease, background 120ms ease;
+      outline: none;
+    }
+    .card:hover { background: #1c2029; }
+    .card:focus-visible { border-color: var(--accent); }
+    .card.active { border-color: var(--border-strong); }
+    .card.tap { transform: scale(0.985); }
+    .card-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-bottom: 6px;
+    }
+    .card-title {
+      color: var(--fg); font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1; min-width: 0;
+    }
+    .card-meta-right {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .page {
+      color: var(--fg-muted); font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px;
+      border-radius: 4px;
+      font-size: 11px; font-weight: 700; line-height: 1;
+      padding: 0; text-transform: none; letter-spacing: 0;
+    }
+    .badge.ok   { background: rgba(74, 222, 128, 0.15); color: var(--ok); border: none; }
+    .badge.warn { background: rgba(251, 191, 36, 0.15); color: var(--warn); border: none; }
+    .badge.fail { background: rgba(248, 113, 113, 0.15); color: var(--fail); border: none; }
+    .badge.unk  { background: rgba(140, 147, 166, 0.15); color: var(--fg-muted); border: none; }
+    .kv {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 12px;
+      margin-top: 4px;
+    }
+    .kv .k {
+      color: var(--fg-muted); font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .kv .v {
+      color: var(--fg-soft); font-size: 12px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .kv .row { min-width: 0; }
+    .quote {
+      margin-top: 8px;
+      color: var(--fg-muted);
+      font-style: italic;
+      font-size: 12px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      border-left: 2px solid var(--border);
+      padding-left: 8px;
+    }
+    .composer {
+      border-top: 1px solid var(--border);
+      background: var(--panel-2);
+      padding: 10px 12px;
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    .composer textarea {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      resize: none;
+      min-height: 36px; max-height: 132px;
+      overflow-y: auto;
+      line-height: 1.4;
+      outline: none;
+    }
+    .composer textarea:focus { border-color: var(--accent); }
+    .send-btn {
+      background: var(--accent);
+      color: #1a1a1a;
+      border-radius: 8px;
+      padding: 8px 14px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 120ms ease, transform 100ms ease;
+    }
+    .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .send-btn:not(:disabled):hover { transform: translateY(-1px); }
+    .viewer {
+      height: 100%;
+      background: var(--bg);
+      position: relative;
+    }
+    .viewer iframe {
+      width: 100%; height: 100%;
+      border: 0; background: var(--bg);
+    }
+    .viewer-empty {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--fg-muted);
+      padding: 40px; text-align: center;
+    }
+    .welcome {
+      margin: auto;
+      max-width: 380px;
+      padding: 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-align: center;
+    }
+    .welcome h2 { margin: 0 0 8px; color: var(--accent); font-size: 16px; letter-spacing: 0.3px; }
+    .welcome p  { margin: 0 0 14px; color: var(--fg-soft); font-size: 12.5px; line-height: 1.5; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .chip {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--fg-soft);
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      cursor: pointer;
+      transition: border-color 120ms ease, color 120ms ease;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--fg); }
+  </style>
+
   <script>
-    import { buildIndex, queryIndex } from "../lib/search";
-    import { renderCardHtml } from "../lib/cardTemplate";
-    import type { Row } from "../lib/types";
+    /*
+      Chat shell ported from `static/app.html`. Two changes from the original:
 
-    const base = import.meta.env.BASE_URL;
-    const b = base.endsWith("/") ? base : base + "/";
+        1. Backend toggle (SQL ↔ KG agent loop) — picks `/query` or `/query_kg`
+           per submit. Selection persists in localStorage so the user lands in
+           the same mode after reload.
+        2. Backend URL is configurable via PUBLIC_BACKEND_URL env so the static
+           site can hit a remote backend; defaults to "" (relative URL) so the
+           SPA still works when served at the same origin as FastAPI.
+    */
+    (function () {
+      "use strict";
 
-    const resultsEl = document.getElementById("results")!;
-    const welcomeEl = document.getElementById("welcome")!;
-    let fuse: ReturnType<typeof buildIndex> | null = null;
-    let rows: Row[] | null = null;
+      const HISTORY_KEY = "sepsis_atlas.history.v1";
+      const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
+      const MODE_KEY = "sepsis_atlas.backend_mode.v1";
+      const HISTORY_MAX = 50;
 
-    async function loadRows(): Promise<Row[]> {
-      if (rows) return rows;
-      try {
-        const res = await fetch(`${b}data/rows.json`);
-        rows = (await res.json()) as Row[];
-      } catch {
-        rows = [];
+      const BACKEND_URL = (import.meta.env.PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
+
+      const MODE_HINT = {
+        sql: "Structured DB · single-shot ranked rows",
+        kg:  "Neo4j + ReAct agent · multi-step retrieval",
+      };
+
+      const scrollback = document.getElementById("scrollback") as HTMLDivElement;
+      const input = document.getElementById("input") as HTMLTextAreaElement;
+      const sendBtn = document.getElementById("send") as HTMLButtonElement;
+      const form = document.getElementById("composer") as HTMLFormElement;
+      const viewerFrame = document.getElementById("viewerFrame") as HTMLIFrameElement;
+      const viewerEmpty = document.getElementById("viewerEmpty") as HTMLDivElement;
+      const modeSqlBtn = document.getElementById("modeSql") as HTMLButtonElement;
+      const modeKgBtn = document.getElementById("modeKg") as HTMLButtonElement;
+      const modeHint = document.getElementById("modeHint") as HTMLSpanElement;
+      const clearBtn = document.getElementById("clearBtn") as HTMLButtonElement;
+      let activeCard: HTMLElement | null = null;
+      let currentMode: "sql" | "kg" = "sql";
+
+      function el(tag: string, cls?: string | null, txt?: unknown): HTMLElement {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (txt !== undefined && txt !== null) n.textContent = String(txt);
+        return n;
       }
-      return rows;
-    }
 
-    function escText(s: string): string {
-      return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
-
-    async function runQuery(q: string) {
-      const data = await loadRows();
-      if (!fuse) fuse = buildIndex(data);
-      const matches = queryIndex(fuse, q, 50);
-      if (matches.length === 0) {
-        // q is escaped; renderCardHtml escapes Row fields. Both safe.
-        resultsEl.innerHTML =
-          `<div class="welcome"><p>No matches for <strong>${escText(q)}</strong>.</p></div>`;
-        welcomeEl.style.display = "none";
-        return;
+      function loadHistory(): any[] {
+        try {
+          const raw = localStorage.getItem(HISTORY_KEY);
+          if (!raw) return [];
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr : [];
+        } catch (e) { return []; }
       }
-      welcomeEl.style.display = "none";
-      // renderCardHtml escapes every row field via esc() — XSS safe.
-      resultsEl.innerHTML = matches.map((r) => renderCardHtml(r, b)).join("");
-    }
+      function saveHistory(h: any[]): void {
+        try {
+          const trimmed = h.slice(-HISTORY_MAX);
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+        } catch (e) {}
+      }
+      function loadViewerUrl(): string {
+        try { return localStorage.getItem(VIEWER_KEY) || ""; } catch (e) { return ""; }
+      }
+      function saveViewerUrl(u: string): void {
+        try { localStorage.setItem(VIEWER_KEY, u); } catch (e) {}
+      }
+      function loadMode(): string {
+        try { return localStorage.getItem(MODE_KEY) || "sql"; } catch (e) { return "sql"; }
+      }
+      function saveMode(m: string): void {
+        try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+      }
 
-    document.addEventListener("atlas:search", (e: Event) => {
-      const ce = e as CustomEvent<{ query: string }>;
-      runQuery(ce.detail.query);
-    });
+      function setMode(m: string): void {
+        currentMode = (m === "kg") ? "kg" : "sql";
+        modeSqlBtn.classList.toggle("active", currentMode === "sql");
+        modeKgBtn.classList.toggle("active", currentMode === "kg");
+        modeHint.textContent = MODE_HINT[currentMode];
+        saveMode(currentMode);
+      }
 
-    // Card clicks are handled globally by SplitShell via `data-viewer-href`
-    // — no per-page navigation. Keep keyboard Enter for accessibility.
-    resultsEl.addEventListener("keydown", (e) => {
-      const ke = e as KeyboardEvent;
-      if (ke.key !== "Enter") return;
-      const card = (ke.target as HTMLElement).closest(".card") as HTMLElement | null;
-      if (card?.getAttribute("data-viewer-href")) card.click();
-    });
+      function isGenericCohort(label: unknown): boolean {
+        if (!label) return true;
+        const s = String(label).trim().toLowerCase();
+        return s === "" || s === "total cohort" || s === "total";
+      }
 
-    // Welcome chips
-    document.querySelectorAll<HTMLElement>(".chip").forEach((el) => {
-      el.addEventListener("click", () => {
-        const q = el.dataset.q || "";
-        document.dispatchEvent(new CustomEvent("atlas:fill-query", { detail: { query: q } }));
+      function verdictBadge(verdict: unknown): HTMLElement {
+        const v = String(verdict || "").toLowerCase();
+        let cls: string, glyph: string;
+        if (v === "pass" || v === "ok")             { cls = "ok";   glyph = "✓"; }
+        else if (v === "weak" || v === "warn" || v === "partial") { cls = "warn"; glyph = "~"; }
+        else if (v === "fail" || v === "reject")    { cls = "fail"; glyph = "✗"; }
+        else                                         { cls = "unk";  glyph = "?"; }
+        const b = el("span", "badge " + cls, glyph);
+        b.title = "verdict: " + (verdict || "unverified");
+        b.setAttribute("aria-label", "verdict " + (verdict || "unverified"));
+        return b;
+      }
+
+      function parseBbox(bbox: unknown): number[] | null {
+        if (bbox == null) return null;
+        let arr: any = bbox;
+        if (typeof arr === "string") {
+          try { arr = JSON.parse(arr); } catch (e) { return null; }
+        }
+        if (!Array.isArray(arr) || arr.length !== 4) return null;
+        const nums = arr.map((x: unknown) => Number(x));
+        for (let i = 0; i < 4; i++) {
+          if (!isFinite(nums[i])) return null;
+        }
+        return nums;
+      }
+
+      function buildViewerUrl(row: any): string {
+        // Prefer absolute backend URL when configured (cross-origin static
+        // deploy); fall back to same-origin so the local FastAPI demo just
+        // works.
+        const origin = BACKEND_URL || window.location.origin;
+        const stem = row.file_name || row.paper_ref || "";
+        let page = parseInt(row.anchor_page, 10);
+        if (!isFinite(page) || page < 1) page = 1;
+        let url = origin + "/viewer/" + encodeURIComponent(stem) + "?page=" + page;
+        const bbox = parseBbox(row.anchor_bbox);
+        if (bbox) {
+          url += "&bbox=" + bbox.map((v) => (+v).toFixed(2)).join(",") + "&origin=tl";
+        }
+        return url;
+      }
+
+      function setViewer(url: string): void {
+        if (!url) return;
+        viewerEmpty.style.display = "none";
+        viewerFrame.style.display = "block";
+        if (viewerFrame.src !== url) viewerFrame.src = url;
+        saveViewerUrl(url);
+      }
+
+      function activateCard(card: HTMLElement, row: any): void {
+        if (activeCard && activeCard !== card) activeCard.classList.remove("active");
+        card.classList.add("active");
+        activeCard = card;
+        card.classList.add("tap");
+        setTimeout(() => card.classList.remove("tap"), 110);
+        setViewer(buildViewerUrl(row));
+      }
+
+      function makeCard(row: any): HTMLElement {
+        const card = el("div", "card");
+        card.setAttribute("role", "button");
+        card.setAttribute("tabindex", "0");
+
+        const head = el("div", "card-head");
+        const title = el("div", "card-title");
+        const paperRef = row.paper_ref || row.file_name || row.study || "(unknown paper)";
+        let titleText = paperRef;
+        if (!isGenericCohort(row.cohort_label)) {
+          titleText = paperRef + " · " + row.cohort_label;
+        }
+        title.textContent = titleText;
+
+        const right = el("div", "card-meta-right");
+        const pageNum = parseInt(row.anchor_page, 10);
+        if (isFinite(pageNum) && pageNum >= 1) {
+          right.appendChild(el("span", "page", "p." + pageNum));
+        }
+        right.appendChild(verdictBadge(row.verifier_verdict || row.verifier));
+
+        head.appendChild(title);
+        head.appendChild(right);
+        card.appendChild(head);
+
+        const kv = el("div", "kv");
+        const predictor = row.predictor_canonical || row.predictors || row.predictor || "—";
+        const outcome = row.outcome || "—";
+        const effect = row.effect_size_str || row.effect_size || "—";
+        const nVal = (row.cohort_size_n == null || row.cohort_size_n === "")
+          ? (row.n == null ? "—" : String(row.n))
+          : String(row.cohort_size_n);
+
+        const pairs = [
+          ["Predictor", predictor],
+          ["Outcome", outcome],
+          ["Effect", effect],
+          ["N", nVal]
+        ];
+        pairs.forEach((p) => {
+          const rowEl = el("div", "row");
+          rowEl.appendChild(el("div", "k", p[0]));
+          const v = el("div", "v", p[1]);
+          v.title = p[1];
+          rowEl.appendChild(v);
+          kv.appendChild(rowEl);
+        });
+        card.appendChild(kv);
+
+        if (row.anchor_text && String(row.anchor_text).trim().length > 0) {
+          card.appendChild(el("div", "quote", String(row.anchor_text)));
+        }
+
+        const activate = () => activateCard(card, row);
+        card.addEventListener("click", activate);
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            activate();
+          }
+        });
+        return card;
+      }
+
+      function renderAssistant(turnEl: HTMLElement, payload: any): void {
+        const holder = el("div", "assistant");
+        if (payload && payload.refused) {
+          holder.appendChild(el("div", "refused", payload.refused_reason || "Request refused."));
+          turnEl.appendChild(holder);
+          return;
+        }
+        if (payload && payload.summary) {
+          holder.appendChild(el("div", "summary", payload.summary));
+        }
+        const rows = (payload && Array.isArray(payload.rows)) ? payload.rows : [];
+        if (rows.length > 0) {
+          const rowsEl = el("div", "rows");
+          rows.forEach((r: any) => rowsEl.appendChild(makeCard(r)));
+          holder.appendChild(rowsEl);
+        }
+        turnEl.appendChild(holder);
+      }
+
+      function renderUserBubble(turnEl: HTMLElement, text: string): void {
+        turnEl.appendChild(el("div", "bubble-user", text));
+      }
+
+      function renderTurn(turn: any): HTMLElement {
+        const t = el("div", "turn");
+        renderUserBubble(t, turn.user_text || "");
+        renderAssistant(t, turn.assistant || {});
+        scrollback.appendChild(t);
+        return t;
+      }
+
+      function makeWelcome() {
+        const wrap = el("div", "welcome");
+        wrap.appendChild(el("h2", null, "Sepsis Atlas"));
+        wrap.appendChild(el("p", null,
+          "Ask about sepsis predictors, biomarkers, or outcomes. Answers are pinned to verbatim quotes from peer-reviewed papers; click any evidence row to inspect the cited PDF passage. Toggle KG mode for cross-paper, agent-driven retrieval."));
+        const chips = el("div", "chips");
+        const samples = [
+          "lactate and 28-day mortality",
+          "qSOFA in septic shock",
+          "predictors from Schlapbach 2018"
+        ];
+        samples.forEach((s) => {
+          const c = el("button", "chip", s) as HTMLButtonElement;
+          c.type = "button";
+          c.addEventListener("click", () => {
+            input.value = s;
+            autoGrow();
+            submitQuery();
+          });
+          chips.appendChild(c);
+        });
+        wrap.appendChild(chips);
+        return wrap;
+      }
+
+      function ensureWelcomeOrClear() {
+        if (scrollback.children.length === 0) {
+          scrollback.appendChild(makeWelcome());
+        }
+      }
+
+      function clearWelcome() {
+        const w = scrollback.querySelector(".welcome");
+        if (w) w.remove();
+      }
+
+      function scrollToBottom() {
+        scrollback.scrollTop = scrollback.scrollHeight;
+      }
+
+      function autoGrow() {
+        input.style.height = "auto";
+        const max = 132;
+        const h = Math.min(input.scrollHeight, max);
+        input.style.height = h + "px";
+      }
+
+      function endpointPath() {
+        return currentMode === "kg" ? "/query_kg" : "/query";
+      }
+
+      async function submitQuery() {
+        const text = input.value.trim();
+        if (!text) return;
+        if (sendBtn.disabled) return;
+
+        clearWelcome();
+
+        const turnEl = el("div", "turn");
+        renderUserBubble(turnEl, text);
+        const thinking = el("div", "assistant");
+        thinking.appendChild(el("div", "thinking", currentMode === "kg" ? "thinking (agent loop)..." : "thinking..."));
+        turnEl.appendChild(thinking);
+        scrollback.appendChild(turnEl);
+        scrollToBottom();
+
+        input.value = "";
+        autoGrow();
+        sendBtn.disabled = true;
+
+        let payload;
+        try {
+          const url = (BACKEND_URL || "") + endpointPath();
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nl_text: text })
+          });
+          if (!resp.ok) {
+            let msg = "Request failed: " + resp.status;
+            try {
+              const errBody = await resp.json();
+              if (errBody && errBody.detail) msg = String(errBody.detail);
+            } catch (e) {}
+            payload = { refused: true, refused_reason: msg, rows: [], summary: "" };
+          } else {
+            payload = await resp.json();
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "unknown";
+          payload = {
+            refused: true,
+            refused_reason: "Network error: " + msg,
+            rows: [], summary: "",
+          };
+        }
+
+        thinking.remove();
+        renderAssistant(turnEl, payload);
+        scrollToBottom();
+
+        const hist = loadHistory();
+        hist.push({
+          user_text: text,
+          mode: currentMode,
+          assistant: {
+            summary: payload.summary || "",
+            rows: Array.isArray(payload.rows) ? payload.rows : [],
+            refused: !!payload.refused,
+            refused_reason: payload.refused_reason || null,
+            meta: payload.meta || null,
+          },
+          ts: Date.now(),
+        });
+        saveHistory(hist);
+
+        sendBtn.disabled = false;
+        input.focus();
+      }
+
+      form.addEventListener("submit", (e) => { e.preventDefault(); submitQuery(); });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          submitQuery();
+        }
       });
-    });
+      input.addEventListener("input", autoGrow);
+
+      modeSqlBtn.addEventListener("click", () => setMode("sql"));
+      modeKgBtn.addEventListener("click", () => setMode("kg"));
+
+      clearBtn.addEventListener("click", () => {
+        try {
+          localStorage.removeItem(HISTORY_KEY);
+          localStorage.removeItem(VIEWER_KEY);
+        } catch (e) {}
+        while (scrollback.firstChild) scrollback.removeChild(scrollback.firstChild);
+        viewerFrame.removeAttribute("src");
+        viewerFrame.style.display = "none";
+        viewerEmpty.style.display = "";
+        ensureWelcomeOrClear();
+        input.value = "";
+        autoGrow();
+        input.focus();
+      });
+
+      // Init: rehydrate mode + history + viewer.
+      (function init() {
+        setMode(loadMode());
+        const hist = loadHistory();
+        if (hist.length === 0) {
+          ensureWelcomeOrClear();
+        } else {
+          hist.forEach(renderTurn);
+          scrollToBottom();
+        }
+        const lastUrl = loadViewerUrl();
+        if (lastUrl) {
+          try {
+            const u = new URL(lastUrl);
+            const okOrigin = BACKEND_URL
+              ? u.origin === new URL(BACKEND_URL).origin
+              : u.origin === window.location.origin;
+            if (okOrigin) {
+              viewerEmpty.style.display = "none";
+              viewerFrame.style.display = "block";
+              viewerFrame.src = lastUrl;
+            }
+          } catch (e) {}
+        }
+        autoGrow();
+        input.focus();
+      })();
+    })();
   </script>
 </Base>

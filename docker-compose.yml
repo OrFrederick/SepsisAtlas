@@ -23,6 +23,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/db.sqlite
       - PYTHONPATH=/app/src
+      - DISABLE_SEMANTIC_RERANK=1   # keyword fallback; flip off when HF model is pre-warmed
     volumes:
       - ./data:/app/data
       - ./db.sqlite:/app/db.sqlite

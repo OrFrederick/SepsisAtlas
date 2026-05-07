@@ -48,7 +48,7 @@ from sepsis_atlas.schemas import (
 )
 from sqlalchemy.orm import sessionmaker
 
-from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
+from src.extract.anchor_resolver import build_index, resolve
 from src.extract.parse_effect import parse_effect_size
 from src.extract.verify_nli import run_verifier
 
@@ -376,7 +376,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
     """
     run_id = run_id or str(uuid.uuid4())
     paper_json = _load_paper(file_stem)
-    anchor_index = build_index(paper_json)
+    anchor_index = build_index(paper_json, file_stem=file_stem)
 
     if session_factory is None:
         engine = init_db()
@@ -403,7 +403,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         if hit is None:
             summary["anchor_missed"] += 1
             return
-        bbox = to_flat_bbox(hit.get("bbox"))
+        bbox = hit.get("bbox")
         if bbox is not None:
             anchor.bbox = bbox
         page = hit.get("page")

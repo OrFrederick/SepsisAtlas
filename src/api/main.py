@@ -392,3 +392,17 @@ def ingest_pubmed(req: IngestPubMedRequest):
 @app.get("/health")
 def health():
     return {"ok": True, "static": str(STATIC_DIR), "papers": str(PAPERS_RAW)}
+
+
+# ---------------------------------------------------------------------------
+# /app — split-view single-page UI (search + table + PDF viewer)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/")
+@app.get("/app")
+def app_page():
+    p = STATIC_DIR / "app.html"
+    if not p.exists():
+        raise HTTPException(500, "app.html missing")
+    return Response(content=p.read_text(), media_type="text/html")

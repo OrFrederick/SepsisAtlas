@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sepsis Atlas</title>
+  <link rel="stylesheet" href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #181b22;
+      --panel-2: #232732;
+      --fg: #e7e9ee;
+      --muted: #8c93a6;
+      --accent: #ffd23f;
+      --border: #2a2f3a;
+      --ok: #4ade80;
+      --weak: #fbbf24;
+      --fail: #f87171;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+                 font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { display: flex; flex-direction: column; }
+
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 18px; background: var(--panel);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    header strong { color: var(--accent); letter-spacing: 0.4px; }
+    header form { flex: 1; display: flex; gap: 8px; }
+    header input[type=text] {
+      flex: 1; background: var(--panel-2); border: 1px solid var(--border);
+      color: var(--fg); padding: 8px 12px; border-radius: 6px; font: inherit;
+    }
+    header input[type=text]:focus { outline: none; border-color: var(--accent); }
+    header button {
+      background: var(--accent); color: #1a1a1a; border: 0;
+      padding: 8px 16px; border-radius: 6px; font: inherit; font-weight: 600;
+      cursor: pointer;
+    }
+    header button:disabled { opacity: 0.5; cursor: default; }
+    header .meta { color: var(--muted); white-space: nowrap; }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) 6px minmax(0, 1fr);
+      flex: 1; min-height: 0; overflow: hidden;
+    }
+    .pane { overflow: auto; min-height: 0; min-width: 0; }
+    .pane.left { padding: 14px 18px 60px; }
+    .pane.right { background: var(--panel); border-left: 1px solid var(--border); }
+    .pane.right iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+    .pane.right .placeholder {
+      height: 100%; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); padding: 32px; text-align: center;
+    }
+    .gutter {
+      cursor: col-resize; background: var(--border);
+      transition: background 0.12s;
+    }
+    .gutter:hover { background: var(--accent); }
+
+    #status { color: var(--muted); padding: 12px 0; }
+    #summary {
+      color: var(--muted); font-size: 12px; margin-bottom: 12px;
+      padding: 8px 12px; background: var(--panel); border-radius: 6px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .gridjs-container { color: var(--fg); }
+    .gridjs-table, .gridjs-th, .gridjs-td { background: var(--panel) !important; color: var(--fg) !important;
+                                            border-color: var(--border) !important; }
+    .gridjs-th-content { color: var(--accent); }
+    .gridjs-th-sort:hover { background: var(--panel-2) !important; }
+    .gridjs-tr:hover .gridjs-td { background: var(--panel-2) !important; cursor: pointer; }
+    .gridjs-tr.row-active .gridjs-td { background: rgba(255, 210, 63, 0.08) !important; }
+    .gridjs-search input {
+      background: var(--panel) !important; color: var(--fg) !important;
+      border: 1px solid var(--border) !important; padding: 6px 10px;
+      border-radius: 6px; min-width: 240px;
+    }
+    .gridjs-pagination, .gridjs-pages { color: var(--muted); }
+    .gridjs-pages button {
+      background: var(--panel-2) !important; color: var(--fg) !important;
+      border: 1px solid var(--border) !important;
+    }
+    .gridjs-pages button.gridjs-currentPage {
+      background: var(--accent) !important; color: #1a1a1a !important;
+    }
+    .gridjs-summary { color: var(--muted); }
+    .verdict-ok { color: var(--ok); font-weight: 700; }
+    .verdict-weak { color: var(--weak); font-weight: 700; }
+    .verdict-fail { color: var(--fail); font-weight: 700; }
+    .verdict-unverified { color: var(--muted); }
+    .source-link { color: var(--accent); text-decoration: none; }
+    .source-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Sepsis Atlas</strong>
+    <form id="q">
+      <input id="nl" type="text" placeholder="e.g. qSOFA accuracy for in-hospital mortality" autofocus>
+      <button id="go" type="submit">Search</button>
+    </form>
+    <span class="meta" id="meta"></span>
+  </header>
+  <main>
+    <div class="pane left">
+      <div id="summary" hidden></div>
+      <div id="status">Type a question to search the evidence corpus.</div>
+      <div id="grid"></div>
+    </div>
+    <div class="gutter" id="gutter"></div>
+    <div class="pane right" id="right"></div>
+  </main>
+  <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
+  <script>
+    const VERDICT = { ok: '✓', pass: '✓', weak: '~', warn: '~', fail: '✗', unverified: '?' };
+    const VERDICT_CLS = { ok: 'verdict-ok', pass: 'verdict-ok', weak: 'verdict-weak',
+                          warn: 'verdict-weak', fail: 'verdict-fail', unverified: 'verdict-unverified' };
+
+    function studyLabel(r) {
+      const ref = r.paper_ref || '—';
+      const c = r.cohort_label;
+      return c && !['total cohort','total'].includes(String(c).toLowerCase()) ? `${ref} (${c})` : ref;
+    }
+    function bboxQs(r) {
+      try {
+        const v = typeof r.anchor_bbox === 'string' ? JSON.parse(r.anchor_bbox) : r.anchor_bbox;
+        if (Array.isArray(v) && v.length === 4)
+          return `&bbox=${v.map(x => Number(x).toFixed(2)).join(',')}&origin=tl`;
+      } catch (_) {}
+      return '';
+    }
+    function viewerUrl(r) {
+      const stem = r.file_name || r.paper_ref;
+      if (!stem) return null;
+      const page = r.anchor_page || 1;
+      // Defensive: stems are A-Za-z0-9_- per our naming convention; encode anyway.
+      const safeStem = encodeURIComponent(stem);
+      return `/viewer/${safeStem}?page=${encodeURIComponent(page)}${bboxQs(r)}`;
+    }
+    function verdict(r) {
+      const v = String(r.verifier_verdict || 'unverified').toLowerCase();
+      const span = document.createElement('span');
+      span.className = VERDICT_CLS[v] || '';
+      span.textContent = VERDICT[v] || '?';
+      return gridjs.h('span', { className: span.className }, span.textContent);
+    }
+    function sourceLink(r) {
+      const url = viewerUrl(r);
+      if (!url) return '';
+      const stem = r.file_name || r.paper_ref;
+      const page = r.anchor_page || 1;
+      return gridjs.h('a', {
+        className: 'source-link',
+        target: '_blank',
+        rel: 'noreferrer',
+        href: url,
+      }, `${stem} p.${page} ↗`);
+    }
+
+    let currentRows = [];
+
+    function renderTable(rows) {
+      currentRows = rows;
+      const container = document.getElementById('grid');
+      container.replaceChildren();
+      const grid = new gridjs.Grid({
+        columns: [
+          { name: 'Study' },
+          { name: 'Population', width: '220px' },
+          { name: 'N' },
+          { name: 'Predictor' },
+          { name: 'Outcome' },
+          { name: 'Timing', width: '180px' },
+          { name: 'Method', width: '220px' },
+          { name: 'Effect', width: '220px' },
+          { name: 'p', formatter: c => c == null ? '—' : Number(c).toExponential(1) },
+          { name: 'AUC' },
+          { name: '✓', width: '36px' },
+          { name: 'Source' },
+        ],
+        data: rows.map((r, idx) => [
+          studyLabel(r),
+          r.population_description || '—',
+          r.cohort_size_n || '—',
+          r.predictor_canonical || r.predictors || '—',
+          r.outcome || '—',
+          r.timing || '—',
+          r.model_specification || '—',
+          r.effect_size_str || '—',
+          r.p_value,
+          r.auc != null ? r.auc : '—',
+          verdict(r),
+          sourceLink(r),
+        ]),
+        sort: true,
+        search: true,
+        pagination: { limit: 25 },
+        resizable: true,
+        style: { table: { 'white-space': 'normal' } },
+      });
+      grid.render(container);
+
+      grid.on('rowClick', (_, row) => {
+        const label = row.cells[0].data;
+        const match = currentRows.find(r => studyLabel(r) === label);
+        if (match) loadPdf(match);
+      });
+    }
+
+    function loadPdf(row) {
+      const url = viewerUrl(row);
+      if (!url) return;
+      const right = document.getElementById('right');
+      right.replaceChildren();
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('src', url);
+      iframe.setAttribute('referrerpolicy', 'no-referrer');
+      right.appendChild(iframe);
+    }
+
+    function showPlaceholder(text) {
+      const right = document.getElementById('right');
+      right.replaceChildren();
+      const div = document.createElement('div');
+      div.className = 'placeholder';
+      div.textContent = text;
+      right.appendChild(div);
+    }
+    showPlaceholder('Click a row to open its source PDF here.');
+
+    async function search(nl) {
+      const status = document.getElementById('status');
+      const meta = document.getElementById('meta');
+      const summary = document.getElementById('summary');
+      const go = document.getElementById('go');
+      go.disabled = true;
+      status.textContent = 'Searching…';
+      summary.hidden = true;
+      try {
+        const r = await fetch('/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nl_text: nl }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        meta.textContent = `${data.n_rows} rows · ${data.query_id}`;
+        if (data.summary) {
+          summary.textContent = data.summary;
+          summary.hidden = false;
+        }
+        status.textContent = '';
+        renderTable(data.rows || []);
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    document.getElementById('q').addEventListener('submit', e => {
+      e.preventDefault();
+      const nl = document.getElementById('nl').value.trim();
+      if (nl) search(nl);
+    });
+
+    (() => {
+      const main = document.querySelector('main');
+      const gutter = document.getElementById('gutter');
+      let dragging = false;
+      gutter.addEventListener('mousedown', () => { dragging = true; document.body.style.cursor = 'col-resize'; });
+      window.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const w = main.clientWidth;
+        const left = Math.max(280, Math.min(w - 320, e.clientX));
+        main.style.gridTemplateColumns = `${left}px 6px 1fr`;
+      });
+      window.addEventListener('mouseup', () => { dragging = false; document.body.style.cursor = ''; });
+    })();
+  </script>
+</body>
+</html>

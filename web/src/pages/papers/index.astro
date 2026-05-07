@@ -1,0 +1,17 @@
+---
+import Base from "../../layouts/Base.astro";
+import PapersTable from "../../components/PapersTable.astro";
+import type { Paper } from "../../lib/types";
+import papersJson from "../../../public/data/papers.json";
+
+const papers = (papersJson as Paper[]).slice();
+papers.sort((a, b) => (b.last_update || "").localeCompare(a.last_update || ""));
+---
+<Base title="Sepsis Atlas — Papers" route="papers">
+  <h1 style="margin: 0 0 12px; font-size: 18px;">Corpus ({papers.length} papers)</h1>
+  {papers.length === 0 ? (
+    <p style="color: var(--fg-muted);">No papers exported yet. Run <code>scripts/export_static.py</code> to populate <code>public/data/papers.json</code>.</p>
+  ) : (
+    <PapersTable papers={papers} />
+  )}
+</Base>

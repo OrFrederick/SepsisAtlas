@@ -115,14 +115,26 @@ class Pipeline:
             yield narrative[i : i + chunk]
         yield "\n\n"
         yield self._render_table(payload)
+        link = self._sortable_link(payload)
+        if link:
+            yield "\n\n" + link
 
     def _render(self, payload: dict) -> str:
-        return "\n\n".join(
-            [
-                payload.get("summary", "") or "_(no summary)_",
-                self._render_table(payload),
-            ]
-        )
+        parts = [
+            payload.get("summary", "") or "_(no summary)_",
+            self._render_table(payload),
+        ]
+        link = self._sortable_link(payload)
+        if link:
+            parts.append(link)
+        return "\n\n".join(parts)
+
+    def _sortable_link(self, payload: dict) -> str:
+        qid = payload.get("query_id")
+        if not qid or not (payload.get("rows") or []):
+            return ""
+        url = f"{self.valves.PUBLIC_BACKEND_URL}/table/{qid}"
+        return f"[Open sortable / filterable table]({url})"
 
     def _render_table(self, payload: dict) -> str:
         rows = payload.get("rows", []) or []

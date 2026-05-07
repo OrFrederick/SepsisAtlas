@@ -26,10 +26,13 @@ from sepsis_atlas.config import (
     RUNS_DIR,
     SCHEMA_VERSION,
 )
+from sepsis_atlas.checkpoint import load_done, mark_done, reset as reset_checkpoint
 from sepsis_atlas.db import init_db
 from sqlalchemy.orm import sessionmaker
 
 from src.extract.extractor import extract_paper
+
+CHECKPOINT_STAGE = "extract"
 
 GT_PAPERS = ["Gai_2022", "Seymour_2016", "Wang_2023", "Zhang_2021"]
 
@@ -62,7 +65,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="run on every parsed paper EXCEPT the ground-truth set")
     g.add_argument("--all", action="store_true",
                    help="run on every parsed paper in data/papers/parsed/")
+    ap.add_argument("--force", action="store_true",
+                    help="ignore the resume checkpoint and re-run every target")
+    ap.add_argument("--reset-checkpoint", action="store_true",
+                    help="clear the extract checkpoint file before running")
     args = ap.parse_args(argv)
+
+    if args.reset_checkpoint:
+        reset_checkpoint(CHECKPOINT_STAGE)
 
     if args.paper:
         targets = [args.paper]
@@ -77,6 +87,20 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("No targets resolved.", file=sys.stderr)
         return 2
+
+    if not args.force:
+        done = load_done(CHECKPOINT_STAGE)
+        already = [t for t in targets if t in done]
+        targets = [t for t in targets if t not in done]
+        if already:
+            print(
+                f"[resume] skipping {len(already)} previously-completed paper(s); "
+                f"use --force to redo all",
+                file=sys.stderr,
+            )
+        if not targets:
+            print("[resume] nothing to do — all targets already completed.", file=sys.stderr)
+            return 0
 
     run_id = str(uuid.uuid4())
     run_dir = RUNS_DIR / run_id
@@ -105,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:
             print(f"[error] {stem}: {e!r}")
             summary = {"file_stem": stem, "error": repr(e)}
+        else:
+            mark_done(CHECKPOINT_STAGE, stem)
         results.append(summary)
         print(json.dumps(summary, indent=2, default=str))
 

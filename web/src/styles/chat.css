@@ -36,6 +36,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   transition: color 120ms ease, background 120ms ease;
 }
 .mode-btn + .mode-btn { border-left: 1px solid var(--border); }
+.view-toggle { margin-top: 8px; align-self: flex-start; }
 .mode-btn:hover { color: var(--fg); }
 .mode-btn.active {
   color: #1a1a1a;

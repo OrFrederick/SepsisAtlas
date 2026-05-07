@@ -1,0 +1,112 @@
+{
+  "run_id": "a6935cce-c385-44e5-a9ba-d1d9fc94241e",
+  "started_ts": "2026-05-07T11:57:32.820374Z",
+  "ended_ts": "2026-05-07T12:10:23.300106Z",
+  "git_sha": "63b2f089d09fdf411856b9b58825b651907a3814",
+  "pipeline_version": "0.1.0",
+  "schema_version": "1",
+  "model_extract": "anthropic/claude-sonnet-4.5",
+  "model_verify": "anthropic/claude-haiku-4.5",
+  "prompt_hashes": {
+    "cohort_enum_v1.md": "f920aeb65b12",
+    "predictor_extract_v1.md": "df627d8c166a",
+    "verifier_v1.md": "b2b6b7c3ba22"
+  },
+  "targets": [
+    "Gai_2022",
+    "Seymour_2016",
+    "Wang_2023",
+    "Zhang_2021"
+  ],
+  "results": [
+    {
+      "file_stem": "Gai_2022",
+      "run_id": "a6935cce-c385-44e5-a9ba-d1d9fc94241e",
+      "n_cohorts": 3,
+      "n_rows": 39,
+      "verdict_counts": {
+        "ok": 8,
+        "partial": 34,
+        "reject": 0
+      },
+      "cost_usd_total": 0.0,
+      "latency_ms_total": 226610,
+      "errors": []
+    },
+    {
+      "file_stem": "Seymour_2016",
+      "run_id": "a6935cce-c385-44e5-a9ba-d1d9fc94241e",
+      "n_cohorts": 8,
+      "n_rows": 37,
+      "verdict_counts": {
+        "ok": 7,
+        "partial": 36,
+        "reject": 2
+      },
+      "cost_usd_total": 0.0,
+      "latency_ms_total": 340231,
+      "errors": []
+    },
+    {
+      "file_stem": "Wang_2023",
+      "run_id": "a6935cce-c385-44e5-a9ba-d1d9fc94241e",
+      "n_cohorts": 5,
+      "n_rows": 31,
+      "verdict_counts": {
+        "ok": 6,
+        "partial": 30,
+        "reject": 0
+      },
+      "cost_usd_total": 0.0,
+      "latency_ms_total": 200868,
+      "errors": [
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "verify_row Wang 2023 MIMIC-III Training set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "predictor_extract Wang 2023 MIMIC-III Training set, Survival group: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "predictor_extract Wang 2023 MIMIC-III Training set, Death group: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")",
+        "predictor_extract Wang 2023 MIMIC-III Testing set: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")"
+      ]
+    },
+    {
+      "file_stem": "Zhang_2021",
+      "run_id": "a6935cce-c385-44e5-a9ba-d1d9fc94241e",
+      "n_cohorts": 0,
+      "n_rows": 0,
+      "verdict_counts": {
+        "ok": 0,
+        "partial": 0,
+        "reject": 0
+      },
+      "cost_usd_total": 0.0,
+      "latency_ms_total": 0,
+      "errors": [
+        "cohort_enum: AuthenticationError(\"Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\")"
+      ]
+    }
+  ],
+  "totals": {
+    "n_cohorts": 16,
+    "n_rows": 107,
+    "cost_usd": 0.0,
+    "latency_ms": 767709,
+    "verdict_counts": {
+      "ok": 21,
+      "partial": 100,
+      "reject": 2
+    }
+  }
+}

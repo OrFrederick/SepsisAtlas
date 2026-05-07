@@ -1,0 +1,47 @@
+{
+  "run_id": "9445d5ad-1aba-4e07-a3e6-b4858cc3cba3",
+  "started_ts": "2026-05-07T11:31:58.247365Z",
+  "ended_ts": "2026-05-07T11:35:18.925250Z",
+  "git_sha": "21efe00d90e18e9914e7150c3d94dc2748c9420b",
+  "pipeline_version": "0.1.0",
+  "schema_version": "1",
+  "model_extract": "anthropic/claude-sonnet-4.5",
+  "model_verify": "anthropic/claude-haiku-4.5",
+  "prompt_hashes": {
+    "cohort_enum_v1.md": "f920aeb65b12",
+    "predictor_extract_v1.md": "df627d8c166a",
+    "verifier_v1.md": "b2b6b7c3ba22"
+  },
+  "targets": [
+    "Gai_2022"
+  ],
+  "results": [
+    {
+      "file_stem": "Gai_2022",
+      "run_id": "9445d5ad-1aba-4e07-a3e6-b4858cc3cba3",
+      "n_cohorts": 0,
+      "n_rows": 0,
+      "verdict_counts": {
+        "ok": 0,
+        "partial": 0,
+        "reject": 0
+      },
+      "cost_usd_total": 0.0,
+      "latency_ms_total": 0,
+      "errors": [
+        "cohort_enum: RuntimeError(\"cohort_enum: provider returned no choices ({'message': 'Provider returned error', 'code': 524})\")"
+      ]
+    }
+  ],
+  "totals": {
+    "n_cohorts": 0,
+    "n_rows": 0,
+    "cost_usd": 0.0,
+    "latency_ms": 0,
+    "verdict_counts": {
+      "ok": 0,
+      "partial": 0,
+      "reject": 0
+    }
+  }
+}

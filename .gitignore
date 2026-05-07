@@ -16,3 +16,6 @@ data/papers/parsed/
 static/plots/
 .idea/
 .vscode/
+.claude/settings.local.json
+*.egg-info/
+.pytest_cache/

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sepsis Atlas — PDF viewer</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #1e1e1e; color: #ddd; font: 13px/1.4 system-ui, sans-serif; }
+    #toolbar { position: sticky; top: 0; z-index: 10; padding: 6px 10px;
+               background: #2b2b2b; border-bottom: 1px solid #444;
+               display: flex; gap: 12px; align-items: center; }
+    #toolbar button { background: #444; color: #ddd; border: 1px solid #555;
+                      padding: 3px 10px; border-radius: 3px; cursor: pointer; }
+    #toolbar button:hover { background: #555; }
+    #stage { position: relative; padding: 12px; display: flex; justify-content: center; }
+    #pdf-canvas { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.6); background: #fff; }
+    #bbox-overlay { position: absolute; pointer-events: none;
+                    border: 2px solid #ffec3d;
+                    background: rgba(255, 236, 61, 0.22);
+                    box-shadow: 0 0 0 1px rgba(0,0,0,0.4) inset; display: none; }
+    #status { color: #aaa; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <span><strong>Sepsis Atlas</strong></span>
+    <span id="filename">__FILE_STEM__.pdf</span>
+    <button id="prev">Prev</button>
+    <span>Page <span id="pagenum">?</span> / <span id="pagecount">?</span></span>
+    <button id="next">Next</button>
+    <span id="status"></span>
+  </div>
+  <div id="stage">
+    <canvas id="pdf-canvas"></canvas>
+    <div id="bbox-overlay"></div>
+  </div>
+
+  <script type="module">
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+
+    const FILE_STEM = "__FILE_STEM__";
+    const PDF_URL = `/papers/${FILE_STEM}/pdf`;
+
+    const params = new URLSearchParams(location.search);
+    let pageNum = Math.max(1, parseInt(params.get("page") || "1", 10));
+    const bboxStr = params.get("bbox");
+    const bbox = bboxStr ? bboxStr.split(",").map(Number) : null;
+
+    const SCALE = 1.5;
+    const canvas = document.getElementById("pdf-canvas");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("bbox-overlay");
+    const stage = document.getElementById("stage");
+    const statusEl = document.getElementById("status");
+    const pageNumEl = document.getElementById("pagenum");
+    const pageCountEl = document.getElementById("pagecount");
+
+    let pdfDoc = null;
+
+    async function renderPage(num) {
+      if (!pdfDoc) return;
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: SCALE });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      pageNumEl.textContent = num;
+
+      // Draw bbox overlay only on the requested page.
+      if (bbox && bbox.length === 4 && num === pageNum) {
+        // Input bbox is in PDF user units (points). PDF.js viewport.scale is points->CSS px.
+        // PDF y origin is bottom-left; canvas y origin is top-left. Flip if needed.
+        // We accept either top-left coords (Docling/OCR style: y grows downward, page units)
+        // or PDF-native coords. Detect by checking if y0 > y1 → already top-left.
+        let [x0, y0, x1, y1] = bbox;
+        if (y0 > y1) {
+          // already top-left style; just scale
+        } else {
+          // PDF native bottom-left: flip via page height in points
+          const pageHeightPts = viewport.height / SCALE;
+          const ny0 = pageHeightPts - y1;
+          const ny1 = pageHeightPts - y0;
+          y0 = ny0; y1 = ny1;
+        }
+        const left = x0 * SCALE;
+        const top = y0 * SCALE;
+        const w = (x1 - x0) * SCALE;
+        const h = (y1 - y0) * SCALE;
+        // Position overlay relative to stage padding + canvas position.
+        const canvasRect = canvas.getBoundingClientRect();
+        const stageRect = stage.getBoundingClientRect();
+        const offsetLeft = canvas.offsetLeft;
+        const offsetTop = canvas.offsetTop;
+        overlay.style.display = "block";
+        overlay.style.left = `${offsetLeft + left}px`;
+        overlay.style.top = `${offsetTop + top}px`;
+        overlay.style.width = `${w}px`;
+        overlay.style.height = `${h}px`;
+      } else {
+        overlay.style.display = "none";
+      }
+    }
+
+    async function init() {
+      try {
+        statusEl.textContent = "loading...";
+        pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
+        pageCountEl.textContent = pdfDoc.numPages;
+        pageNum = Math.min(pageNum, pdfDoc.numPages);
+        await renderPage(pageNum);
+        statusEl.textContent = "";
+        // Notify parent (OpenWebUI artifact pane) for height adjustment.
+        try {
+          window.parent.postMessage(
+            { type: "sepsis-atlas:viewer-ready", file: FILE_STEM, page: pageNum },
+            "*"
+          );
+        } catch (e) {}
+      } catch (err) {
+        statusEl.textContent = "Error: " + err.message;
+      }
+    }
+
+    document.getElementById("prev").addEventListener("click", () => {
+      if (pageNum > 1) { pageNum--; renderPage(pageNum); }
+    });
+    document.getElementById("next").addEventListener("click", () => {
+      if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum++; renderPage(pageNum); }
+    });
+
+    init();
+  </script>
+</body>
+</html>

@@ -504,6 +504,8 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 - Custom Next.js frontend (using OpenWebUI instead)
 - Figure / vision extraction (KM curves, ROC plots, forest plots) — production roadmap only
 - Lazy-fill schema (pick wide schema upfront for v1)
+- **UC2 (sepsis phenotype extraction)** — extra-points use case, schema-additive (2 new tables: `study_phenotype_summary`, `phenotype_cluster`). Reuses Docling parse, extractor harness, verifier, evidence-row + PDF-anchor UI 1:1. Defer to post-hackathon (~4–6h). UC1 + counterfactual is brief-aligned; UC2 splits attention without scoring lift.
+- **UC3 (biomarker selection ranking)** — extra-points use case. Largely subsumed by UC1 predictor_model schema + a ranking view; defer dedicated tooling to post-hackathon.
 
 ## Two-day plan
 

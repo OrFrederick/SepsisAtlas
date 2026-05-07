@@ -17,7 +17,7 @@ const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) 
   "",
 );
 
-type NodeType = "Paper" | "Cohort" | "PredictorModel";
+type NodeType = "Paper" | "Cohort" | "PredictorModel" | "Predictor" | "OutcomeType";
 
 type RawNode = {
   id: string;
@@ -40,33 +40,68 @@ type RawNode = {
   verdict?: string | null;
   page?: number | string | null;
   bbox?: number[] | string | null;
+  // Predictor / OutcomeType hub
+  n_pms?: number | null;
+  n_papers?: number | null;
 };
+
+type EdgeKind = "HAS_COHORT" | "REPORTS" | "TESTS" | "TARGETS" | "SIMILAR_TO";
 
 type RawEdge = {
   src: string;
   dst: string;
-  kind: "HAS_COHORT" | "REPORTS";
+  kind: EdgeKind;
+  score?: number;
+  shared_predictors?: string[];
 };
 
 type GraphPayload = {
   nodes: RawNode[];
   edges: RawEdge[];
-  stats: { papers: number; cohorts: number; predictor_models: number; edges: number };
+  stats: {
+    papers: number;
+    cohorts: number;
+    predictor_models: number;
+    predictor_hubs: number;
+    outcome_hubs: number;
+    structural_edges: number;
+    topical_edges: number;
+    similar_to_edges: number;
+    edges: number;
+  };
 };
 
 type GraphNode = RawNode & { x?: number; y?: number; vx?: number; vy?: number };
-type GraphLink = { source: string; target: string; kind: RawEdge["kind"] };
+type GraphLink = {
+  source: string;
+  target: string;
+  kind: EdgeKind;
+  score?: number;
+  shared_predictors?: string[];
+};
 
 const NODE_COLOR: Record<NodeType, string> = {
-  Paper: "#ffd23f",
-  Cohort: "#7cc5ff",
-  PredictorModel: "#cfd2da",
+  Paper: "#ffd23f", // accent yellow
+  Cohort: "#7cc5ff", // link blue
+  PredictorModel: "#cfd2da", // fg-soft
+  Predictor: "#4ade80", // ok green — topical hub
+  OutcomeType: "#fbbf24", // warn orange — outcome hub
 };
 
 const NODE_RADIUS: Record<NodeType, number> = {
   Paper: 7,
   Cohort: 5,
   PredictorModel: 3.5,
+  Predictor: 6,
+  OutcomeType: 8,
+};
+
+const EDGE_BASE_COLOR: Record<EdgeKind, string> = {
+  HAS_COHORT: "rgba(140,147,166,0.30)",
+  REPORTS: "rgba(140,147,166,0.20)",
+  TESTS: "rgba(74,222,128,0.25)",
+  TARGETS: "rgba(251,191,36,0.25)",
+  SIMILAR_TO: "rgba(255,210,63,0.55)",
 };
 
 function parseBbox(bbox: unknown): number[] | null {
@@ -121,6 +156,10 @@ function NodeDetail({ node }: { node: RawNode | null }) {
     if (node.paper) pairs.push(["Paper", node.paper]);
     if (node.n != null && node.n !== "") pairs.push(["N", String(node.n)]);
     if (node.population) pairs.push(["Population", node.population]);
+  } else if (node.type === "Predictor" || node.type === "OutcomeType") {
+    pairs.push(["Hub kind", node.type]);
+    if (node.n_pms != null) pairs.push(["Predictor models", String(node.n_pms)]);
+    if (node.n_papers != null) pairs.push(["Papers", String(node.n_papers)]);
   } else {
     if (node.predictor) pairs.push(["Predictor", node.predictor]);
     if (node.outcome_type) pairs.push(["Outcome type", node.outcome_type]);
@@ -204,6 +243,8 @@ export default function GraphShell() {
       source: e.src,
       target: e.dst,
       kind: e.kind,
+      score: e.score,
+      shared_predictors: e.shared_predictors,
     }));
     return { nodes, links };
   }, [data]);
@@ -215,7 +256,7 @@ export default function GraphShell() {
       <div className="graph-controls">
         <span className="graph-stats">
           {stats
-            ? `${stats.papers} papers · ${stats.cohorts} cohorts · ${stats.predictor_models} predictor models · ${stats.edges} edges`
+            ? `${stats.papers} papers · ${stats.cohorts} cohorts · ${stats.predictor_models} models · ${stats.predictor_hubs} predictor hubs · ${stats.outcome_hubs} outcome hubs · ${stats.similar_to_edges} paper-paper links`
             : "loading graph..."}
         </span>
         <div className="graph-legend">
@@ -226,8 +267,15 @@ export default function GraphShell() {
             <span className="swatch" style={{ background: NODE_COLOR.Cohort }} /> Cohort
           </span>
           <span>
-            <span className="swatch" style={{ background: NODE_COLOR.PredictorModel }} />{" "}
-            PredictorModel
+            <span className="swatch" style={{ background: NODE_COLOR.PredictorModel }} /> PM
+          </span>
+          <span>
+            <span className="swatch" style={{ background: NODE_COLOR.Predictor }} /> Predictor
+            hub
+          </span>
+          <span>
+            <span className="swatch" style={{ background: NODE_COLOR.OutcomeType }} /> Outcome
+            hub
           </span>
         </div>
       </div>
@@ -242,8 +290,17 @@ export default function GraphShell() {
               height={size.h}
               backgroundColor="#0f1115"
               nodeRelSize={1}
-              linkColor={() => "rgba(140,147,166,0.25)"}
-              linkWidth={(l) => ((l as unknown as GraphLink).kind === "HAS_COHORT" ? 1.2 : 0.6)}
+              linkColor={(l) => EDGE_BASE_COLOR[(l as unknown as GraphLink).kind]}
+              linkWidth={(l) => {
+                const link = l as unknown as GraphLink;
+                if (link.kind === "SIMILAR_TO") {
+                  // Width tracks similarity strength: 0.20→1.0px, 1.0→4.0px.
+                  return 1 + 3 * (link.score ?? 0.2);
+                }
+                if (link.kind === "HAS_COHORT") return 1.2;
+                if (link.kind === "TESTS" || link.kind === "TARGETS") return 0.7;
+                return 0.6;
+              }}
               onNodeClick={(n) => setSelected(n as unknown as RawNode)}
               onBackgroundClick={() => setSelected(null)}
               nodeCanvasObject={(node, ctx, scale) => {
@@ -258,7 +315,8 @@ export default function GraphShell() {
                   ctx.strokeStyle = "#ffffff";
                   ctx.stroke();
                 }
-                if (n.type === "Paper" && scale > 1.2) {
+                if ((n.type === "Paper" || n.type === "Predictor" || n.type === "OutcomeType")
+                    && scale > 1.0) {
                   ctx.font = `${10 / scale}px ui-sans-serif, system-ui`;
                   ctx.fillStyle = "#cfd2da";
                   ctx.textAlign = "center";

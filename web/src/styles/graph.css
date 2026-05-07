@@ -77,6 +77,8 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 .graph-detail .type-pill.Paper          { background: rgba(255, 210, 63, 0.15); color: var(--accent); }
 .graph-detail .type-pill.Cohort         { background: rgba(124, 197, 255, 0.15); color: var(--link); }
 .graph-detail .type-pill.PredictorModel { background: rgba(140, 147, 166, 0.15); color: var(--fg-soft); }
+.graph-detail .type-pill.Predictor      { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
+.graph-detail .type-pill.OutcomeType    { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
 .graph-detail .kv-list {
   display: grid;
   grid-template-columns: 90px 1fr;

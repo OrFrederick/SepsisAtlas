@@ -449,3 +449,77 @@ class TestLi2024PostReextract:
             f"Li 2024 lactate HR=1.080 attached to multiple cohorts: {cohorts_with_hr}. "
             "Indicates predictor_extract is propagating Overall-cohort analyses to subgroups."
         )
+
+
+# ---------------------------------------------------------------------------
+# Seymour 2016 — POST-REEXTRACT verification target.
+# Sandbox under the redesigned cohort_enum_v1 prompt produced 10 cohorts
+# (vs 9 under old prompt). New ones: KPNC non-ICU subset, UPMC Validation
+# split into ICU and non-ICU subsets. Held-out gold; don't tune to it.
+# ---------------------------------------------------------------------------
+class TestSeymour2016PostReextract:
+    PAPER = "Seymour 2016"
+
+    @pytest.mark.xfail(reason="awaiting re-extract under redesigned cohort_enum prompt")
+    def test_kpnc_non_icu_subcohort(self, con):
+        labels = [(r["cohort_id"] or "").lower() for r in _cohort_rows(con, self.PAPER)]
+        assert any("kpnc" in l and "non-icu" in l for l in labels), (
+            f"missing KPNC non-ICU subset cohort; got {labels}"
+        )
+
+    @pytest.mark.xfail(reason="awaiting re-extract under redesigned cohort_enum prompt")
+    def test_upmc_validation_icu_split(self, con):
+        labels = [(r["cohort_id"] or "").lower() for r in _cohort_rows(con, self.PAPER)]
+        has_icu = any("upmc" in l and "validation" in l and " icu" in l and "non" not in l for l in labels)
+        has_non_icu = any("upmc" in l and "validation" in l and "non-icu" in l for l in labels)
+        assert has_icu and has_non_icu, (
+            f"UPMC Validation should split into ICU + non-ICU subsets; got {labels}"
+        )
+
+    @pytest.mark.xfail(reason="awaiting re-extract under redesigned cohort_enum prompt")
+    def test_at_least_eight_cohorts(self, con):
+        cohorts = _cohort_rows(con, self.PAPER)
+        assert len(cohorts) >= 8, (
+            f"Seymour 2016 should enumerate ≥8 cohorts (sandbox shows 10); got {len(cohorts)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Wang 2023 — POST-REEXTRACT verification target.
+# Old prompt: 44 predictor rows. Redesigned prompt sandbox: 87 rows.
+# LDH should have 4 model variations: descriptive (Mann-Whitney), Model 1
+# univariate OR, Model 2 multivariate adjusted OR, and ROC AUC.
+# Held-out gold; don't tune to it.
+# ---------------------------------------------------------------------------
+class TestWang2023PostReextract:
+    PAPER = "Wang 2023"
+
+    @pytest.mark.xfail(reason="awaiting re-extract under redesigned predictor_extract prompt")
+    def test_ldh_four_model_variations(self, con):
+        rows = _predictor_rows(con, self.PAPER)
+        ldh_rows = [
+            r for r in rows
+            if (r["predictors"] or "").upper().strip() == "LDH"
+        ]
+        kinds = {(r["model_specification"] or "").lower() for r in ldh_rows}
+        has_descriptive = any("mann-whitney" in k or "rank-sum" in k or "naive" in k for k in kinds)
+        has_model_1 = any("model 1" in k or ("univariate" in k and "logistic" in k) or "crude" in k for k in kinds)
+        has_model_2 = any("model 2" in k or "multivariate" in k or "adjusted" in k for k in kinds)
+        has_roc = any("auc" in k or "roc" in k or "ldh alone" in k for k in kinds)
+        missing = [
+            name for name, present in [
+                ("descriptive Mann-Whitney", has_descriptive),
+                ("Model 1 univariate OR", has_model_1),
+                ("Model 2 multivariate OR", has_model_2),
+                ("ROC AUC", has_roc),
+            ] if not present
+        ]
+        assert not missing, f"Wang 2023 LDH missing model variations: {missing}; saw kinds={kinds}"
+
+    @pytest.mark.xfail(reason="awaiting re-extract; sandbox showed 87 predictor rows under redesigned prompts")
+    def test_predictor_row_count_sane(self, con):
+        rows = _predictor_rows(con, self.PAPER)
+        assert len(rows) >= 60, (
+            f"Wang 2023 predictor rows dropped to {len(rows)}; sandbox under redesigned "
+            "prompt produced 87. Likely indicates predictor_extract regressed on table iteration."
+        )

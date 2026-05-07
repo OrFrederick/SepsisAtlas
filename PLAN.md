@@ -1,16 +1,15 @@
 # Sepsis Atlas — Hackathon Plan
 
-2-day paper-to-knowledge pipeline. Goal: win by delivering verifiable, structured evidence + a counterfactual mortality estimate, not "yet another RAG."
+2-day paper-to-knowledge pipeline. Goal: win by delivering verifiable, structured evidence, not "yet another RAG."
 
 ## Thesis
 
 > Other teams turn papers into chat. We turn papers into math.
 
-Three pillars judges will remember:
+Two pillars judges will remember:
 
 1. **Structured-first parsing** — Docling/GROBID, not chunking. Tables + bbox preserved.
 2. **Bbox-grounded UI** — every cell clickable; PDF.js highlights exact rectangle on the page.
-3. **Counterfactual layer** — random-effects meta-analysis on extracted effect sizes, pooled mortality estimate matched to registry cohort.
 
 Bonus: NLI-style verifier badge per cell, live PubMed expansion, OpenWebUI roadmap.
 
@@ -99,7 +98,6 @@ Schema-guided **structured extraction** (a.k.a. "document-to-table" / closed inf
                   │  • table (cells linked)  │
                   │  • PDF.js bbox highlight │
                   │  • forest plot           │
-                  │  • pooled mortality est. │
                   └──────────────────────────┘
 ```
 
@@ -504,7 +502,7 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 - Custom Next.js frontend (using OpenWebUI instead)
 - Figure / vision extraction (KM curves, ROC plots, forest plots) — production roadmap only
 - Lazy-fill schema (pick wide schema upfront for v1)
-- **UC2 (sepsis phenotype extraction)** — extra-points use case, schema-additive (2 new tables: `study_phenotype_summary`, `phenotype_cluster`). Reuses Docling parse, extractor harness, verifier, evidence-row + PDF-anchor UI 1:1. Defer to post-hackathon (~4–6h). UC1 + counterfactual is brief-aligned; UC2 splits attention without scoring lift.
+- **UC2 (sepsis phenotype extraction)** — extra-points use case, schema-additive (2 new tables: `study_phenotype_summary`, `phenotype_cluster`). Reuses Docling parse, extractor harness, verifier, evidence-row + PDF-anchor UI 1:1. Defer to post-hackathon (~4–6h). UC1 is brief-aligned; UC2 splits attention without scoring lift.
 - **UC3 (biomarker selection ranking)** — extra-points use case. Largely subsumed by UC1 predictor_model schema + a ranking view; defer dedicated tooling to post-hackathon.
 
 ## Two-day plan
@@ -532,28 +530,27 @@ Test iframe sandbox **before** building Tool surface:
 ## Pre-QA expert questions (priority order)
 
 ### Tier 1 — kill ambiguity
-1. Is counterfactual *computation* in-scope or off-brief? Brief says "not expected" — bonus or distraction?
-2. Will 20–30 PDFs be provided, or do we source ourselves?
-3. Source anchor granularity: page / section / sentence / bbox?
-4. Will registry cohort summary stats be provided, or do we mock?
+1. Will 20–30 PDFs be provided, or do we source ourselves?
+2. Source anchor granularity: page / section / sentence / bbox?
+3. Will registry cohort summary stats be provided, or do we mock?
 
 ### Tier 2 — schema + grounding
-5. Fixed schema or per-query schema?
-6. Row granularity: study, or study × predictor × stratum?
-7. Unit / effect-size harmonization expected?
-8. "Not reported" — explicit token, NULL, or sentinel?
-9. Cohort descriptor — free text or structured fields?
+4. Fixed schema or per-query schema?
+5. Row granularity: study, or study × predictor × stratum?
+6. Unit / effect-size harmonization expected?
+7. "Not reported" — explicit token, NULL, or sentinel?
+8. Cohort descriptor — free text or structured fields?
 
 ### Tier 3 — extra credit + logistics
-10. UC2 + UC3 weight?
-11. PubMed expansion rewarded or penalized (consistency risk)?
-12. Demo format, time per team, submission format?
-13. Hidden eval PDFs at presentation?
+9. UC2 + UC3 weight?
+10. PubMed expansion rewarded or penalized (consistency risk)?
+11. Demo format, time per team, submission format?
+12. Hidden eval PDFs at presentation?
 
 ### Tier 4 — judge intent (sneaky)
-14. "What would make you say 'this team gets it' in first 30s?"
-15. "Most common failure mode you expect?"
-16. "Is hallucinated source citation an instant DQ?"
+13. "What would make you say 'this team gets it' in first 30s?"
+14. "Most common failure mode you expect?"
+15. "Is hallucinated source citation an instant DQ?"
 
 ## Pitch line
 

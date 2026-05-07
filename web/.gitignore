@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.astro/
+.DS_Store
+public/pdfjs/
+public/pdfs/
+public/data/*.json

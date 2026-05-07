@@ -1,0 +1,94 @@
+---
+import Base from "../layouts/Base.astro";
+import SearchBox from "../components/SearchBox.astro";
+import SettingsDrawer from "../components/SettingsDrawer.astro";
+---
+<Base title="Sepsis Atlas — Chat" route="chat">
+  <SearchBox />
+  <div id="results"></div>
+  <div id="welcome" class="welcome">
+    <h2>Search the corpus</h2>
+    <p>Ask anything about sepsis predictors, mortality outcomes, or specific cohorts. Click an example to try it:</p>
+    <div class="chips">
+      <span class="chip" data-q="lactate and 28-day mortality">lactate and 28-day mortality</span>
+      <span class="chip" data-q="qSOFA in septic shock">qSOFA in septic shock</span>
+      <span class="chip" data-q="predictors from Schlapbach 2018">predictors from Schlapbach 2018</span>
+    </div>
+  </div>
+  <SettingsDrawer />
+  <script>
+    import { buildIndex, queryIndex } from "../lib/search";
+    import { renderCardHtml } from "../lib/cardTemplate";
+    import type { Row } from "../lib/types";
+
+    const base = import.meta.env.BASE_URL;
+    const b = base.endsWith("/") ? base : base + "/";
+
+    const resultsEl = document.getElementById("results")!;
+    const welcomeEl = document.getElementById("welcome")!;
+    let fuse: ReturnType<typeof buildIndex> | null = null;
+    let rows: Row[] | null = null;
+
+    async function loadRows(): Promise<Row[]> {
+      if (rows) return rows;
+      try {
+        const res = await fetch(`${b}data/rows.json`);
+        rows = (await res.json()) as Row[];
+      } catch {
+        rows = [];
+      }
+      return rows;
+    }
+
+    function escText(s: string): string {
+      return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    async function runQuery(q: string) {
+      const data = await loadRows();
+      if (!fuse) fuse = buildIndex(data);
+      const matches = queryIndex(fuse, q, 50);
+      if (matches.length === 0) {
+        // q is escaped; renderCardHtml escapes Row fields. Both safe.
+        resultsEl.innerHTML =
+          `<div class="welcome"><p>No matches for <strong>${escText(q)}</strong>.</p></div>`;
+        welcomeEl.style.display = "none";
+        return;
+      }
+      welcomeEl.style.display = "none";
+      // renderCardHtml escapes every row field via esc() — XSS safe.
+      resultsEl.innerHTML = matches.map((r) => renderCardHtml(r, b)).join("");
+    }
+
+    document.addEventListener("atlas:search", (e: Event) => {
+      const ce = e as CustomEvent<{ query: string }>;
+      runQuery(ce.detail.query);
+    });
+
+    // Card click delegation
+    resultsEl.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const card = target.closest(".card") as HTMLElement | null;
+      if (card?.dataset.href) location.href = card.dataset.href;
+    });
+    resultsEl.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key !== "Enter") return;
+      const card = (ke.target as HTMLElement).closest(".card") as HTMLElement | null;
+      if (card?.dataset.href) location.href = card.dataset.href;
+    });
+
+    // Welcome chips
+    document.querySelectorAll<HTMLElement>(".chip").forEach((el) => {
+      el.addEventListener("click", () => {
+        const q = el.dataset.q || "";
+        document.dispatchEvent(new CustomEvent("atlas:fill-query", { detail: { query: q } }));
+      });
+    });
+  </script>
+</Base>

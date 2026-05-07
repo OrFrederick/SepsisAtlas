@@ -319,6 +319,11 @@ def export_papers(engine: Engine, rows: list[dict], repo_root: Path) -> list[dic
         return (parsed_dir / fn).is_dir() or (parsed_dir / f"{fn}.json").exists()
 
     def _is_translated(fn: str) -> bool:
+        # The translate stage drops a sibling `<fn>.pre-translate.json` next
+        # to `<fn>.json` (the original parse) when it rewrites the parsed
+        # doc in English. Presence of that sidecar is the canonical marker.
+        if (parsed_dir / f"{fn}.pre-translate.json").exists():
+            return True
         if (parsed_dir / fn / "translated.json").exists():
             return True
         if translated_dir.exists():

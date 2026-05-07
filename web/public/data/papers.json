@@ -133,7 +133,7 @@
     "year": null,
     "journal": null,
     "parsed": true,
-    "translated": false,
+    "translated": true,
     "n_rows": 25,
     "verdicts": {
       "ok": 25,
@@ -165,7 +165,7 @@
     "year": null,
     "journal": null,
     "parsed": true,
-    "translated": false,
+    "translated": true,
     "n_rows": 16,
     "verdicts": {
       "ok": 10,

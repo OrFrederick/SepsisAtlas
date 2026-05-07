@@ -118,34 +118,65 @@ Schema-guided **structured extraction** (a.k.a. "document-to-table" / closed inf
 | Tracing      | Langfuse or Arize Phoenix (free tier)             |
 | Aug          | PubMed MCP for live corpus expansion              |
 
-## Schema (UC1, locked D1 morning)
+## Schema — reverse-engineered from organizer ground truth
 
-### `papers`
-- `doi`, `pmid`, `title`, `year`, `journal`, `authors`
-- `study_type` (RCT/cohort/case-control/review/meta)
-- `country`, `setting` (ED/ICU/ward), `n_total`
-- `sepsis_def` (Sepsis-1/-2/-3), `funding`, `coi_flag`
-- `source` (provided/pubmed/manual), `pdf_hash`, `parser_version`
-- `ingest_ts`, `run_id`
+Organizers shipped `Examples - Study&cohort-level.csv` + `Examples - predictor&model-level.csv` (see `data/ground_truth/`). These define the **target output schema**. Match them.
 
-### `cohorts`
-- `doi` (FK), `age_mean`, `age_sd`, `sex_pct_male`
-- `sofa_mean`, `sofa_sd`, `apache_mean`, `lactate_mean`, `lactate_sd`
-- `comorbidities[]`, `inclusion`, `exclusion`
+Two tables joined by composite `cohort_id` string `"Author Year [DataSet] [CohortType]"` (e.g. `"Gai 2022 Total Cohort"`, `"Seymour 2016 UPMC ICU Validation cohort"`). One paper → many cohorts (multi-site studies, train/test splits, derivation/validation, ICU vs non-ICU).
 
-### `rows` (one per study × predictor × stratum)
-- `id`, `doi`, `pipeline_version`, `schema_version`, `run_id`
-- **Predictor**: `predictor_raw`, `predictor_canonical`, `predictor_transform`
-- **Outcome**: `outcome_type` (`mortality`, `readmission`, ...), `outcome_window_days` (NULL for in-hosp), `outcome_raw`
-- **Timing**: `timing_raw`, `timing_when` (admission, 24h, ICU entry, ...)
-- **Method**: `method` (ROC, logistic, Cox, ...), `adjustment` (vars adjusted for, free text)
-- **Effect**: `effect_type` (OR/HR/RR/AUC/cutoff), `effect_value`, `ci_lo`, `ci_hi`, `p_value`
-- **Performance**: `auc`, `auc_ci_lo`, `auc_ci_hi`, `sens`, `spec`, `c_index`
-- **Anchor**: `anchor_page`, `anchor_bbox` (JSON), `anchor_section`, `anchor_text`, `anchor_char_offset`
-- **Verifier**: `verifier_model`, `verifier_verdict` (verified/partial/rejected), `verifier_score`, `verifier_rationale`
-- **Tracing**: `extractor_model`, `prompt_id`, `extracted_ts`, `cost_usd`, `tokens_in`, `tokens_out`, `latency_ms`
+### `papers` (internal metadata, our addition)
+- `doi`, `pmid`, `file_name` (e.g. `Gai_2022.pdf`), `title`, `year`, `journal`, `authors`
+- `pdf_hash`, `parser_version`, `source` (provided/pubmed/manual)
+- `ingest_ts`, `run_id`, `pipeline_version`
 
-Numeric outcome window stored separately from raw string → neighbor queries trivial in SQL.
+### `study_cohort` (matches organizer CSV)
+Required columns from CSV:
+- `cohort_id` (PK, composite string per organizer format)
+- `paper_ref` (e.g. "Gai 2022") + `doi` (FK → papers)
+- `encounters_period` (e.g. "2019–2021")
+- `population_location` (e.g. "Qinhuangdao, Hebei, China")
+- `data_sets` (e.g. "MIMIC-III", "UPMC", NULL if single-source)
+- `study_design` (free text; "Prospective observational study", "Retrospective cohort; Multiple imputation...")
+- `population_description` (eligibility free text)
+- `cohort_label` (e.g. "Total Cohort", "Survivors", "Training set", "Validation cohort")
+- `cohort_size_n` (int or string with commentary like "1388 (table sum=1492)")
+- `cohort_characteristics` (semi-structured key:value text — `Age: M 67.79 (SD 15.31); Male: 57.78%; ...`)
+- `cohort_characteristics_timepoint` (e.g. "Within 24 hours of ICU admission")
+- `mortality_rate_pct` (float or NULL)
+- `mortality_timepoint` (e.g. "In-Hospital Mortality", "28-day", "1-year", "In-ICU")
+
+Plus our internal columns:
+- `anchor_page`, `anchor_bbox` (JSON), `anchor_text`, `anchor_section`
+- `extractor_model`, `prompt_id`, `verifier_verdict`, `verifier_score`
+
+### `predictor_model` (matches organizer CSV)
+Required columns:
+- `id` (PK uuid)
+- `cohort_id` (FK → study_cohort)
+- `predictors` (free text, single or compound — e.g. "APACHE II score" OR "Race, Age, Mechanical ventilation, Lactate, ...")
+- `timing_predictor_measurement` (free text, e.g. "Within 24h of ICU admission")
+- `outcome` (free text, e.g. "28-day mortality", "In-hospital mortality")
+- `model_specification` (free text incl method + adjustments — e.g. "Multivariate logistic regression (Model III) Adjusted for age, gender, race, CHF, ...")
+- `effect_size_str` (full free text — e.g. "OR 1.449 (95% CI 1.208-1.738), p<0.001; AUC: 0.83 (95% CI 0.76-0.90)")
+
+Plus parsed numeric (our addition for meta-analysis):
+- `effect_type` (OR / HR / RR / AUC / AUROC / cutoff / mean_diff / nan)
+- `effect_value`, `ci_lo`, `ci_hi`, `p_value` (parsed)
+- `auc`, `auc_ci_lo`, `auc_ci_hi`, `sens`, `spec`, `ppv`, `npv`, `c_index`, `cutoff` (parsed)
+- `outcome_type` (mortality / readmission / LOS / ...), `outcome_window_days` (28, 30, 90, 365 — for tolerance queries)
+
+Plus internal:
+- `predictor_canonical` (lookup-mapped, e.g. lactate / SOFA / APACHE_II)
+- `anchor_page`, `anchor_bbox`, `anchor_text`, `anchor_section`
+- `extractor_model`, `prompt_id`, `verifier_verdict`, `verifier_score`, `verifier_rationale`
+- `extracted_ts`, `cost_usd`, `tokens_in`, `tokens_out`, `latency_ms`
+- `pipeline_version`, `schema_version`, `run_id`
+
+### Why dual storage (free-text + parsed)
+
+- **Free-text** = direct match to organizer CSV. Demo: "extracted vs gold, exact string overlap." Trivial validation.
+- **Parsed numeric** = enables forest plot, meta-analysis, neighbor queries, sorting/ranking.
+- Best of both: extraction LLM produces both (one prompt, structured JSON output). Verifier checks free-text against span; parsed values regex-extracted from free-text deterministically.
 
 ### `llm_calls` (append-only)
 - `call_id`, `ts`, `stage`, `row_id`, `paper_id`, `query_id`
@@ -160,16 +191,26 @@ Numeric outcome window stored separately from raw string → neighbor queries tr
 ## Storage layout
 
 ```
-papers/<doi>/
-  pdf/original.pdf
-  parsed/sections.json
-  figures/fig1.png + fig1.meta.json
-  tables/table2.json + table2.png
-db.sqlite             # all tables above
-logs/llm_calls.jsonl  # append-only audit log
+data/
+  papers/
+    _index.xlsx                # organizer file_name → DOI mapping (31 papers)
+    raw/<file_name>.pdf        # gitignored, copy from ~/Downloads/articles/
+    parsed/<file_name>.json    # Docling output: sections, tables, bbox
+    figures/<file_name>/figN.png + figN.meta.json
+  ground_truth/
+    study_cohort.csv           # organizer gold (4 papers covered)
+    predictor_model.csv        # organizer gold
+db.sqlite                      # papers, study_cohort, predictor_model, llm_calls, queries
+logs/llm_calls.jsonl           # append-only audit log
 runs/<run_id>/
-  manifest.json       # git SHA, models, prompt versions, paper list, totals
+  manifest.json                # git SHA, models, prompt versions, paper list, totals
 ```
+
+## Provided assets
+
+- **31 sepsis PDFs** — `data/papers/raw/*.pdf` (gitignored). Source: organizer dropbox via `~/Downloads/articles/`.
+- **DOI index** — `data/papers/_index.xlsx`. file_name → DOI mapping. Skips DOI extraction from PDFs.
+- **Ground truth CSVs** — `data/ground_truth/{study_cohort,predictor_model}.csv`. Cover Gai 2022, Seymour 2016, Wang 2023, Zhang 2021.
 
 ## Query path — exact
 
@@ -223,7 +264,42 @@ Flag in `notes`, prefer table over text, log discrepancy.
 
 ### Multi-cohort studies
 
-One row per stratum (ED vs ICU). `population_stratum` column.
+One row per cohort in `study_cohort` table. Cohort enumeration is **stage 1 of extraction** — LLM scans paper for sub-populations (training/testing splits, ICU/non-ICU, derivation/validation, multi-site datasets, survivors-only, dataset variants). Examples from ground truth:
+- Seymour 2016: 6 cohorts (KPNC ICU, KPNC non-ICU, KPNC overall, UPMC derivation, UPMC validation, VA, ALERTS)
+- Wang 2023: 4 cohorts (Training set, Training survivors, Training non-survivors, Testing set)
+- Zhang 2021: 4 cohorts (Development, Development survivors, Development non-survivors, Validation)
+- Gai 2022: 2 cohorts (Total, Survivors)
+
+Stage 2 fills `predictor_model` rows per cohort.
+
+## Validation against organizer ground truth
+
+`data/ground_truth/study_cohort.csv` + `predictor_model.csv` = gold standard from organizers covering 4 papers in our corpus: **Gai 2022, Seymour 2016, Wang 2023, Zhang 2021**.
+
+Use as eval set:
+
+### Field-level metrics
+- **Cohort recall**: did pipeline find every cohort in ground truth? (e.g. Seymour has 6 → must extract all 6 cohort_ids)
+- **Field exact match** per column: cohort_label, encounters_period, mortality_rate_pct, mortality_timepoint
+- **Effect size string overlap**: tokenize gold + extracted, F1 on token set
+- **Numeric exact match**: parse OR/AUC/CI from both, compare values within tolerance (1%)
+- **Anchor accuracy**: bbox lands on sentence containing gold value? (manual spot-check 20 cells)
+
+### Validation script
+`scripts/validate.py` — joins extracted rows w/ gold by `cohort_id` + `predictor`, outputs:
+- per-paper precision/recall
+- per-field accuracy
+- failure log (extracted-but-wrong, missed-from-gold)
+
+### Demo move
+Live during pitch: split screen, gold CSV on left, extracted DB on right, run `validate.py` → table of metrics. *"On 4 papers organizers gave us, extraction matches gold at 87% field accuracy, 4/4 cohorts on Seymour, 32/35 predictors total."*
+
+This is the killer "extraction quality" evidence. Most teams won't realize the Examples CSVs are validation gold — they'll treat them as schema docs only. We use them as eval set + brag in pitch.
+
+### What NOT to do
+
+- Don't train/tune extractor on these papers — they're test set. Hold out. If we tune prompts on Seymour, we leak. Use other 27 papers for prompt iteration.
+- Report metrics honestly. If 60% — say so. Judges trust honest > inflated.
 
 ## Observability — three layers
 
@@ -436,8 +512,12 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 ## Two-day plan
 
 ### Day 1
-- **AM** — Docling parse 10 papers → JSON w/ bbox. Lock UC1 schema. Set up SQLite + decorator + Langfuse.
-- **PM** — Extraction agent (Sonnet 4.6, structured JSON). Verifier pass (Haiku). Fill table for 10 papers. Sanity check on 3.
+- **AM** — Load DOI index from `_index.xlsx`. Docling parse all 31 papers → JSON w/ bbox (parallel, ~30 min). Lock schema to organizer CSV format (study_cohort + predictor_model). Set up SQLite + logged_llm_call decorator + Langfuse.
+- **PM** — Two-stage extraction agent (Sonnet 4.6, structured JSON):
+  - Stage 1: cohort enumeration per paper → `study_cohort` rows
+  - Stage 2: predictor/model rows per cohort → `predictor_model` rows
+  - Haiku verifier pass on each row.
+  - Run on 4 ground-truth papers first (Gai, Seymour, Wang, Zhang). Validate vs gold CSV. Iterate prompts on **other 27** papers (avoid leakage). End of day: validation script reports field-level accuracy.
 
 ### Day 2
 - **AM** — FastAPI backend (`/query`, `/viewer/<doi>`, `/forest_plot`, static PDF mount). Standalone PDF.js viewer page w/ bbox highlight overlay. OpenWebUI deploy via Docker. Pipeline file → markdown table + forest plot inline.

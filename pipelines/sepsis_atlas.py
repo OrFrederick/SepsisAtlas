@@ -129,27 +129,13 @@ class Pipeline:
             yield narrative[i : i + chunk]
         yield "\n\n"
         yield self._render_table(payload)
-        link = self._app_link(payload, user_message)
-        if link:
-            yield "\n\n" + link
 
     def _render(self, payload: dict, user_message: str) -> str:
         parts = [
             payload.get("summary", "") or "_(no summary)_",
             self._render_table(payload),
         ]
-        link = self._app_link(payload, user_message)
-        if link:
-            parts.append(link)
         return "\n\n".join(parts)
-
-    def _app_link(self, payload: dict, user_message: str) -> str:
-        if not (payload.get("rows") or []):
-            return ""
-        from urllib.parse import quote
-
-        url = f"{self.valves.PUBLIC_BACKEND_URL}/app?q={quote(user_message)}"
-        return f"[Open split-view (sortable table + PDF preview)]({url})"
 
     def _render_table(self, payload: dict) -> str:
         rows = payload.get("rows", []) or []

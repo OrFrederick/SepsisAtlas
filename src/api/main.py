@@ -18,7 +18,6 @@ import json
 import os
 import time
 import uuid
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from sepsis_atlas.config import PAPERS_RAW, ROOT, STATIC_DIR
+from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
 from sepsis_atlas.db import get_engine
 
 from api.query import (
@@ -79,20 +78,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 def _engine():
     url = os.getenv("SEPSIS_DB_URL")
     return get_engine(url)
-
-
-# In-memory cache of recent query results (query_id -> ranked rows).
-# Used by /table/{qid} to render an interactive sortable view of the same
-# rows the chat markdown table shows. Bounded to the last 256 queries so the
-# process doesn't grow unboundedly during a long demo session.
-_query_rows_cache: "dict[str, list[dict]]" = {}
-_QUERY_CACHE_MAX = 256
-
-
-def _cache_query_rows(query_id: str, rows: list[dict]) -> None:
-    if len(_query_rows_cache) >= _QUERY_CACHE_MAX:
-        _query_rows_cache.pop(next(iter(_query_rows_cache)))
-    _query_rows_cache[query_id] = rows
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +157,6 @@ def post_query(req: QueryRequest) -> QueryResponse:
 
     latency_ms = int((time.time() - t0) * 1000)
     _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(ranked), latency_ms)
-    _cache_query_rows(query_id, ranked)
 
     return QueryResponse(
         query_id=query_id,
@@ -210,136 +194,6 @@ def viewer(file_stem: str):
         media_type="text/html",
         headers={"Content-Security-Policy": "frame-ancestors *;"},
     )
-
-
-# ---------------------------------------------------------------------------
-# /table/{query_id} — sortable / filterable HTML view of a /query result
-# ---------------------------------------------------------------------------
-
-
-_TABLE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sepsis Atlas — results</title>
-  <link rel="stylesheet" href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css">
-  <style>
-    :root { color-scheme: dark; }
-    html, body { margin: 0; padding: 0; background: #0f1115; color: #e7e9ee;
-                 font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-    header { padding: 10px 18px; background: #181b22; border-bottom: 1px solid #2a2f3a;
-             display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 5; }
-    header strong { color: #ffd23f; letter-spacing: 0.4px; }
-    header span { color: #8c93a6; }
-    main { padding: 14px 18px 60px; }
-    .gridjs-container { color: #e7e9ee; }
-    .gridjs-table { background: #181b22; }
-    .gridjs-th, .gridjs-td { background: #181b22 !important; color: #e7e9ee !important;
-                             border-color: #2a2f3a !important; }
-    .gridjs-th-content { color: #ffd23f; }
-    .gridjs-search input, .gridjs-pagination { background: #181b22; color: #e7e9ee; }
-    .gridjs-search input { border: 1px solid #2a2f3a; padding: 6px 10px; border-radius: 6px; }
-    .gridjs-pages button { background: #232732; color: #e7e9ee; border-color: #2a2f3a; }
-    .verdict-ok { color: #4ade80; }
-    .verdict-weak { color: #fbbf24; }
-    .verdict-fail { color: #f87171; }
-    .verdict-unverified { color: #8c93a6; }
-    a { color: #ffd23f; }
-  </style>
-</head>
-<body>
-  <header>
-    <strong>Sepsis Atlas</strong>
-    <span>__N_ROWS__ rows · query <code>__QID__</code></span>
-  </header>
-  <main><div id="grid"></div></main>
-  <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
-  <script>
-    const ROWS = __ROWS_JSON__;
-    const PUBLIC = window.location.origin;
-    const VERDICT = { ok: '✓', pass: '✓', weak: '~', warn: '~', fail: '✗', unverified: '?' };
-    const VERDICT_CLS = { ok: 'verdict-ok', pass: 'verdict-ok', weak: 'verdict-weak',
-                          warn: 'verdict-weak', fail: 'verdict-fail', unverified: 'verdict-unverified' };
-
-    function studyLabel(r) {
-      const ref = r.paper_ref || '—';
-      const c = r.cohort_label;
-      return c && !['total cohort','total'].includes(String(c).toLowerCase()) ? `${ref} (${c})` : ref;
-    }
-    function bboxQs(r) {
-      try {
-        const v = typeof r.anchor_bbox === 'string' ? JSON.parse(r.anchor_bbox) : r.anchor_bbox;
-        if (Array.isArray(v) && v.length === 4)
-          return `&bbox=${v.map(x => Number(x).toFixed(2)).join(',')}&origin=tl`;
-      } catch (_) {}
-      return '';
-    }
-    function sourceLink(r) {
-      const stem = r.file_name || r.paper_ref;
-      if (!stem) return '';
-      const page = r.anchor_page || 1;
-      const url = `${PUBLIC}/viewer/${stem}?page=${page}${bboxQs(r)}`;
-      return gridjs.html(`<a href="${url}" target="_blank">${stem} p.${page}</a>`);
-    }
-    function verdict(r) {
-      const v = String(r.verifier_verdict || 'unverified').toLowerCase();
-      return gridjs.html(`<span class="${VERDICT_CLS[v] || ''}">${VERDICT[v] || '?'}</span>`);
-    }
-
-    new gridjs.Grid({
-      columns: [
-        { name: 'Study' },
-        { name: 'Population', width: '220px' },
-        { name: 'N' },
-        { name: 'Predictor' },
-        { name: 'Outcome' },
-        { name: 'Timing',    width: '180px' },
-        { name: 'Method',    width: '220px' },
-        { name: 'Effect',    width: '220px' },
-        { name: 'p',  formatter: c => c == null ? '—' : Number(c).toExponential(1) },
-        { name: 'AUC' },
-        { name: '✓',         width: '36px' },
-        { name: 'Source' },
-      ],
-      data: ROWS.map(r => [
-        studyLabel(r),
-        r.population_description || '—',
-        r.cohort_size_n || '—',
-        r.predictor_canonical || r.predictors || '—',
-        r.outcome || '—',
-        r.timing || '—',
-        r.model_specification || '—',
-        r.effect_size_str || '—',
-        r.p_value,
-        r.auc != null ? r.auc : '—',
-        verdict(r),
-        sourceLink(r),
-      ]),
-      sort: true,
-      search: true,
-      pagination: { limit: 25 },
-      resizable: true,
-      style: { table: { 'white-space': 'normal' } },
-    }).render(document.getElementById('grid'));
-  </script>
-</body>
-</html>"""
-
-
-@app.get("/table/{query_id}")
-def table_view(query_id: str):
-    if "/" in query_id or ".." in query_id:
-        raise HTTPException(400, "invalid query_id")
-    rows = _query_rows_cache.get(query_id)
-    if rows is None:
-        raise HTTPException(404, "query not found in cache (server restarted or evicted)")
-    html = (_TABLE_HTML
-            .replace("__ROWS_JSON__", json.dumps(rows))
-            .replace("__QID__", query_id)
-            .replace("__N_ROWS__", str(len(rows))))
-    return Response(content=html, media_type="text/html",
-                    headers={"Content-Security-Policy": "frame-ancestors *;"})
 
 
 def _safe_stem(stem: str) -> str:
@@ -392,17 +246,3 @@ def ingest_pubmed(req: IngestPubMedRequest):
 @app.get("/health")
 def health():
     return {"ok": True, "static": str(STATIC_DIR), "papers": str(PAPERS_RAW)}
-
-
-# ---------------------------------------------------------------------------
-# /app — split-view single-page UI (search + table + PDF viewer)
-# ---------------------------------------------------------------------------
-
-
-@app.get("/")
-@app.get("/app")
-def app_page():
-    p = STATIC_DIR / "app.html"
-    if not p.exists():
-        raise HTTPException(500, "app.html missing")
-    return Response(content=p.read_text(), media_type="text/html")

@@ -13,6 +13,9 @@ from sepsis_atlas.config import (
     LANGFUSE_PUBLIC_KEY,
     LANGFUSE_SECRET_KEY,
     LANGFUSE_HOST,
+    LLM_PROVIDER,
+    CLAUDE_CLI_BIN,
+    CLAUDE_CLI_TIMEOUT_S,
 )
 
 # Conditional Langfuse-traced OpenAI client. Falls back silently when keys absent
@@ -37,22 +40,41 @@ else:
 
 _LOG_PATH = LOGS_DIR / "llm_calls.jsonl"
 
-_client: OpenAI | None = None
+# Typed as `Any` because `claude-cli` returns our adapter, not an OpenAI client.
+# Both expose `.chat.completions.create(messages=..., model=..., **kwargs)`,
+# which is the only surface our extractors touch.
+_client: Any | None = None
 
 
-def get_client() -> OpenAI:
+def get_client() -> Any:
+    """Return whatever provider `LLM_PROVIDER` selects.
+
+    Default `openrouter` returns an OpenAI-shaped client pointing at
+    OpenRouter. `claude-cli` returns the local-CLI adapter; same
+    `.chat.completions.create()` surface, no API key required.
+    """
     global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=OPENROUTER_API_KEY,
-            base_url=OPENROUTER_BASE_URL,
-            timeout=300.0,
-            max_retries=3,
-            default_headers={
-                "HTTP-Referer": "https://github.com/sepsis-atlas",
-                "X-Title": "Sepsis Atlas",
-            },
-        )
+    if _client is not None:
+        return _client
+
+    provider = (LLM_PROVIDER or "openrouter").strip().lower()
+    if provider == "claude-cli":
+        from sepsis_atlas.providers.claude_cli import ClaudeCLIClient
+
+        _client = ClaudeCLIClient(bin_path=CLAUDE_CLI_BIN, timeout_s=CLAUDE_CLI_TIMEOUT_S)
+        return _client
+
+    # Default: OpenRouter via OpenAI client.
+    _client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url=OPENROUTER_BASE_URL,
+        timeout=300.0,
+        max_retries=3,
+        default_headers={
+            "HTTP-Referer": "https://github.com/sepsis-atlas",
+            "X-Title": "Sepsis Atlas",
+        },
+    )
     return _client
 
 

@@ -110,7 +110,6 @@ Schema-guided **structured extraction** (a.k.a. "document-to-table" / closed inf
 | Parse        | Docling (preferred) or GROBID                     |
 | Extract LLM  | OpenRouter → Claude Sonnet 4.6 (structured JSON)  |
 | Verifier     | Claude Haiku 4.5 (cheap judge)                    |
-| Vision       | Sonnet 4.6 vision for figures (lazy, top-cited)   |
 | DB           | SQLite (hackathon) → Postgres (50k scale)         |
 | Stats        | Python `statsmodels` / `metafor`-style pooling    |
 | UI           | **OpenWebUI** (Pipelines + Tools) + minimal PDF viewer page (FastAPI + PDF.js) |
@@ -196,7 +195,6 @@ data/
     _index.xlsx                # organizer file_name → DOI mapping (31 papers)
     raw/<file_name>.pdf        # gitignored, copy from ~/Downloads/articles/
     parsed/<file_name>.json    # Docling output: sections, tables, bbox
-    figures/<file_name>/figN.png + figN.meta.json
   ground_truth/
     study_cohort.csv           # organizer gold (4 papers covered)
     predictor_model.csv        # organizer gold
@@ -330,7 +328,7 @@ Click random cell → drawer opens, PDF.js loads page, yellow rectangle on bbox,
 - Two-pass extraction: cheap classifier flags relevant fields → targeted extract. ~60% cost cut.
 - Lazy fields: niche fields extracted on first query that needs them, then cached.
 - Schema versioning: add field → background re-extract just that field, not whole paper.
-- Postgres + S3 (PDFs/figures), not SQLite.
+- Postgres + S3 (PDFs), not SQLite.
 
 **Hybrid extract + RAG (production):**
 - Pre-extract structured fields (effect sizes, cohorts) — high stakes, stable
@@ -494,19 +492,17 @@ OpenRouter key configured in OpenWebUI for LLM #2 narrative + intent parse (or b
 - Tool/Pipeline ecosystem — extension story for post-hackathon
 - Pitch line: *"Drops into your existing OpenWebUI workflow."*
 
-## Images / figures / tables
+## Tables
 
-- **Tables (priority)**: Docling extracts cell-level JSON. Click cell in evidence row → PDF.js highlights *table cell*.
-- **Figures**: Docling/PaddleOCR detect figure regions. Vision LLM (Sonnet 4.6) digitizes Kaplan-Meier, ROC, forest plots → extract numeric data most teams miss.
-- Cost: ~$0.02/figure. Skip unless flagged "may contain effect size" by quick text scan.
-- Storage: `papers/<doi>/figures/fig1.png + fig1.meta.json`.
+- Docling extracts cell-level JSON w/ bbox. Click cell in evidence row → PDF.js highlights *table cell*.
+- Tables are the primary structured-data source after Results-section text.
 
 ## Non-goals (cut from scope)
 
 - Vector DB over chunks
 - Cross-paper knowledge graph
 - Custom Next.js frontend (using OpenWebUI instead)
-- Full vision figure extraction during hackathon
+- Figure / vision extraction (KM curves, ROC plots, forest plots) — production roadmap only
 - Lazy-fill schema (pick wide schema upfront for v1)
 
 ## Two-day plan

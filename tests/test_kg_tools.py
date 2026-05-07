@@ -294,6 +294,45 @@ def test_project_table_evidence(tools: KGTools):
     assert "lactate" in (sofa_row["co_tested"] or "")
 
 
+def test_find_predictor_label_after_promote(tools: KGTools, store: KGStore):
+    """After lateral_promote runs, _find should be able to look up
+    Predictor nodes by canonical name."""
+    from extract.kg_lateral_promote import run as promote
+    promote(store)
+    res = tools._find("Predictor", canonical="lactate")
+    assert any(n.get("canonical") == "lactate" for n in res["nodes"])
+
+
+def test_project_table_predictors_by_outcome(tools: KGTools, store: KGStore):
+    from extract.kg_lateral_promote import run as promote
+    promote(store)
+    res = tools._project_table("predictors_by_outcome", outcome_canonical="mortality")
+    assert "Predictor" in res["summary"]
+    assert any(r.get("predictor") == "lactate" for r in res["nodes"])
+    assert any(r.get("predictor") == "sofa" for r in res["nodes"])
+
+
+def test_project_table_methods_by_predictor(tools: KGTools, store: KGStore):
+    from extract.kg_lateral_promote import run as promote
+    promote(store)
+    res = tools._project_table("methods_by_predictor", predictor_canonical="lactate")
+    assert "Method" in res["summary"]
+    methods = {r["method"] for r in res["nodes"]}
+    assert "logistic regression" in methods or "Cox PH" in methods
+
+
+def test_project_table_cohorts_by_setting_unknown_when_no_setting_match(
+    tools: KGTools, store: KGStore
+):
+    """The seeded cohort's population_description ("ICU adult sepsis")
+    should match Setting.type = ICU after promote."""
+    from extract.kg_lateral_promote import run as promote
+    promote(store)
+    res = tools._project_table("cohorts_by_setting", setting_type="ICU")
+    assert any(r.get("cohort") == "ICU adults" for r in res["nodes"])
+    assert "Cohort" in res["summary"]
+
+
 def test_project_table_ranked_predictors(tools: KGTools):
     res = tools._project_table("ranked_predictors", predictor_model_ids=None)
     predictors = sorted(r["predictor"] for r in res["nodes"])

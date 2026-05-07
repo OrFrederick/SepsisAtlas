@@ -32,6 +32,12 @@ _VALID_NODE_TYPES = {
     "PaperTable",
     "Figure",
     "Reference",
+    # Lateral-promote labels.
+    "Predictor",
+    "Outcome",
+    "StatMethod",
+    "Setting",
+    "PhenotypeCluster",
 }
 
 _VALID_EDGE_KINDS = {
@@ -44,6 +50,13 @@ _VALID_EDGE_KINDS = {
     "CITES",
     "MENTIONS_PM",
     "MENTIONS_COHORT",
+    # Lateral-promote edges.
+    "USES_PREDICTOR",
+    "TARGETS_OUTCOME",
+    "USES_METHOD",
+    "IN_SETTING",
+    "DEFINES_CLUSTER",
+    "HAS_CLUSTER",
 }
 
 _PK_BY_TYPE = {
@@ -54,13 +67,22 @@ _PK_BY_TYPE = {
     "PaperTable": "table_id",
     "Figure": "figure_id",
     "Reference": "ref_id",
+    "Predictor": "canonical",
+    "Outcome": "outcome_id",
+    "StatMethod": "name",
+    "Setting": "type",
+    "PhenotypeCluster": "cluster_id",
 }
 
 _ARRAY_FIELDS = {"predictors_canonical", "outcomes_covered"}
 
 
 def _node_pk_value(node: dict) -> str | None:
-    for label in ("file_name", "cohort_id", "id", "section_id", "table_id", "figure_id", "ref_id"):
+    for label in (
+        "file_name", "cohort_id", "id", "section_id", "table_id",
+        "figure_id", "ref_id", "outcome_id", "cluster_id",
+        "canonical", "name", "type",
+    ):
         v = node.get(label)
         if v is not None:
             return str(v)
@@ -406,6 +428,10 @@ class KGTools:
         self,
         shape: str,
         predictor_model_ids: list[str] | None = None,
+        outcome_canonical: str | None = None,
+        predictor_canonical: str | None = None,
+        setting_type: str | None = None,
+        paper_file_name: str | None = None,
     ) -> ToolResult:
         if shape == "evidence":
             return self._project_evidence(predictor_model_ids or [])
@@ -413,6 +439,14 @@ class KGTools:
             return self._project_ranked_predictors(predictor_model_ids)
         if shape == "study_summary":
             return self._project_study_summary()
+        if shape == "predictors_by_outcome":
+            return self._project_predictors_by_outcome(outcome_canonical)
+        if shape == "methods_by_predictor":
+            return self._project_methods_by_predictor(predictor_canonical)
+        if shape == "cohorts_by_setting":
+            return self._project_cohorts_by_setting(setting_type)
+        if shape == "clusters_by_paper":
+            return self._project_clusters_by_paper(paper_file_name)
         return {
             "nodes": [],
             "edges": [],
@@ -674,6 +708,165 @@ class KGTools:
             "summary": " | ".join(columns),
         }
 
+    def _project_predictors_by_outcome(
+        self, outcome_canonical: str | None
+    ) -> ToolResult:
+        columns = ["#", "Predictor", "Category", "Studies", "PMs"]
+        if not outcome_canonical:
+            return {
+                "nodes": [],
+                "edges": [],
+                "summary": " | ".join(columns) + "  | (no outcome_canonical given)",
+            }
+        cypher = """
+        MATCH (o:Outcome)<-[:TARGETS_OUTCOME]-(pm:PredictorModel)-[:USES_PREDICTOR]->(p:Predictor)
+        WHERE toLower(o.canonical) CONTAINS toLower($outcome)
+        RETURN p.canonical AS predictor,
+               p.category AS category,
+               count(DISTINCT pm.paper_file_name) AS n_studies,
+               count(DISTINCT pm) AS n_pms
+        ORDER BY n_pms DESC
+        """
+        rows = self.store.run(cypher, outcome=outcome_canonical)
+        out = []
+        for i, r in enumerate(rows, start=1):
+            out.append({
+                "#": i,
+                "predictor": r["predictor"],
+                "category": r["category"],
+                "n_studies": r["n_studies"],
+                "n_pms": r["n_pms"],
+            })
+        return {
+            "nodes": out,
+            "edges": [],
+            "summary": " | ".join(columns),
+        }
+
+    def _project_methods_by_predictor(
+        self, predictor_canonical: str | None
+    ) -> ToolResult:
+        columns = ["#", "Method", "Family", "Studies", "PMs"]
+        if not predictor_canonical:
+            return {
+                "nodes": [],
+                "edges": [],
+                "summary": " | ".join(columns) + "  | (no predictor_canonical given)",
+            }
+        cypher = """
+        MATCH (p:Predictor {canonical: $canonical})<-[:USES_PREDICTOR]-(pm:PredictorModel)-[:USES_METHOD]->(m:StatMethod)
+        RETURN m.name AS method,
+               m.family AS family,
+               count(DISTINCT pm.paper_file_name) AS n_studies,
+               count(DISTINCT pm) AS n_pms
+        ORDER BY n_pms DESC
+        """
+        rows = self.store.run(cypher, canonical=predictor_canonical.strip().lower())
+        out = []
+        for i, r in enumerate(rows, start=1):
+            out.append({
+                "#": i,
+                "method": r["method"],
+                "family": r["family"],
+                "n_studies": r["n_studies"],
+                "n_pms": r["n_pms"],
+            })
+        return {
+            "nodes": out,
+            "edges": [],
+            "summary": " | ".join(columns),
+        }
+
+    def _project_cohorts_by_setting(self, setting_type: str | None) -> ToolResult:
+        columns = ["#", "Study", "Cohort", "N", "Population"]
+        if not setting_type:
+            return {
+                "nodes": [],
+                "edges": [],
+                "summary": " | ".join(columns) + "  | (no setting_type given)",
+            }
+        cypher = """
+        MATCH (s:Setting {type: $type})<-[:IN_SETTING]-(c:Cohort)
+        OPTIONAL MATCH (p:Paper)-[:HAS_COHORT]->(c)
+        RETURN p.paper_ref AS study,
+               p.file_name AS file_name,
+               c.cohort_id AS cohort_id,
+               c.cohort_label AS cohort_label,
+               c.cohort_size_n AS n,
+               c.population_description AS population
+        ORDER BY study, cohort_id
+        """
+        rows = self.store.run(cypher, type=setting_type)
+        out = []
+        for i, r in enumerate(rows, start=1):
+            out.append({
+                "#": i,
+                "study": r["study"],
+                "cohort": r["cohort_label"],
+                "n": r["n"],
+                "population": r["population"],
+                # SQL-shaped citation fields for frontend cards (matches
+                # _project_evidence convention).
+                "paper_ref": r["study"],
+                "file_name": r["file_name"],
+                "cohort_id": r["cohort_id"],
+                "cohort_label": r["cohort_label"],
+                "cohort_size_n": r["n"],
+                "population_description": r["population"],
+            })
+        return {
+            "nodes": out,
+            "edges": [],
+            "summary": " | ".join(columns),
+        }
+
+    def _project_clusters_by_paper(self, paper_file_name: str | None) -> ToolResult:
+        columns = ["#", "Study", "Cluster", "Size", "Key Features", "Description", "Outcomes", "Source"]
+        cypher_all = """
+        MATCH (p:Paper)-[:DEFINES_CLUSTER]->(c:PhenotypeCluster)
+        RETURN p.paper_ref AS study, p.file_name AS file_name, c
+        ORDER BY study, c.cluster_label
+        """
+        cypher_one = """
+        MATCH (p:Paper {file_name: $fn})-[:DEFINES_CLUSTER]->(c:PhenotypeCluster)
+        RETURN p.paper_ref AS study, p.file_name AS file_name, c
+        ORDER BY c.cluster_label
+        """
+        if paper_file_name:
+            rows = self.store.run(cypher_one, fn=paper_file_name)
+        else:
+            rows = self.store.run(cypher_all)
+        out = []
+        for i, r in enumerate(rows, start=1):
+            c = r["c"] or {}
+            # Build the same source markdown link as _project_evidence.
+            anchor_page = c.get("anchor_page")
+            file_name = r["file_name"]
+            source = None
+            if file_name and anchor_page is not None:
+                source = f"[{file_name} p.{anchor_page}](/viewer/{file_name}?page={anchor_page})"
+            out.append({
+                "#": i,
+                "study": r["study"],
+                "cluster": c.get("cluster_label"),
+                "size": c.get("cluster_size_n"),
+                "key_features": c.get("key_features"),
+                "description": c.get("clinical_description"),
+                "outcomes": c.get("outcomes"),
+                "source": source,
+                # SQL-shaped citation fields.
+                "paper_ref": r["study"],
+                "file_name": file_name,
+                "anchor_page": anchor_page,
+                "anchor_text": c.get("anchor_text"),
+                "verifier_verdict": c.get("verifier_verdict"),
+            })
+        return {
+            "nodes": out,
+            "edges": [],
+            "summary": " | ".join(columns),
+        }
+
     # ------------------------------------------------------------------
     # LangChain tool surface
     # ------------------------------------------------------------------
@@ -805,22 +998,38 @@ class KGTools:
         def project_table(
             shape: str,
             predictor_model_ids: Optional[list[str]] = None,
+            outcome_canonical: Optional[str] = None,
+            predictor_canonical: Optional[str] = None,
+            setting_type: Optional[str] = None,
+            paper_file_name: Optional[str] = None,
         ) -> dict:
             """Render a structured evidence table for downstream display.
 
             Args:
-                shape: One of "evidence" (14-column per-PM table),
-                    "ranked_predictors" (one row per predictor_canonical), or
-                    "study_summary" (one row per Paper).
+                shape: One of "evidence" (per-PM), "ranked_predictors"
+                    (per-Predictor), "study_summary" (per-Paper),
+                    "predictors_by_outcome" (per-Predictor for an Outcome),
+                    "methods_by_predictor" (per-StatMethod for a Predictor),
+                    "cohorts_by_setting" (per-Cohort for a Setting),
+                    "clusters_by_paper" (per-PhenotypeCluster).
                 predictor_model_ids: Required for "evidence"; optional for
                     "ranked_predictors" (None = whole graph).
+                outcome_canonical: Required for "predictors_by_outcome".
+                predictor_canonical: Required for "methods_by_predictor".
+                setting_type: Required for "cohorts_by_setting" (one of
+                    ICU/ED/ward/mixed/pediatric ICU/neonatal ICU/OR/prehospital/unknown).
+                paper_file_name: Optional for "clusters_by_paper" (None = all papers).
 
-            Returns a ToolResult whose `nodes` are the table rows (one dict per
-            row, lower-snake-case column keys) and whose `summary` is the
-            column header line joined by " | ".
+            Returns a ToolResult whose `nodes` are the table rows and whose
+            `summary` is the column header line joined by " | ".
             """
             return _safe("project_table", kg._project_table)(
-                shape, predictor_model_ids=predictor_model_ids
+                shape,
+                predictor_model_ids=predictor_model_ids,
+                outcome_canonical=outcome_canonical,
+                predictor_canonical=predictor_canonical,
+                setting_type=setting_type,
+                paper_file_name=paper_file_name,
             )
 
         return [find, expand, get, search_text, pool_effects, project_table]

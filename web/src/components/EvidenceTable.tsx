@@ -223,7 +223,14 @@ export default function EvidenceTable({
                 key={key}
                 className={[klass, dirCls].filter(Boolean).join(" ")}
                 aria-sort={ariaSort}
+                tabIndex={0}
                 onClick={() => onHeaderClick(key)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onHeaderClick(key);
+                  }
+                }}
               >
                 {label}
               </th>
@@ -237,6 +244,7 @@ export default function EvidenceTable({
           const active = activeRowKey === k;
           const verdict = verdictKind(row.verifier_verdict ?? row.verifier);
           const anchor = row.anchor_text ? String(row.anchor_text) : "";
+          const paper = paperCohort(row);
           const predictor = predictorOf(row);
           const outcome = outcomeOf(row);
           const effect = effectOf(row);
@@ -249,7 +257,7 @@ export default function EvidenceTable({
               onClick={() => onActivate(ri, row)}
               onKeyDown={(e) => handleKey(e, ri, row)}
             >
-              <td className="paper" title={paperCohort(row)}>{paperCohort(row)}</td>
+              <td className="paper" title={paper}>{paper}</td>
               <td className="predictor" title={predictor}>{predictor}</td>
               <td className="outcome" title={outcome}>{outcome}</td>
               <td className="effect num">{effect}</td>

@@ -17,6 +17,7 @@
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import EvidenceTable from "./EvidenceTable";
 
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
@@ -488,6 +489,22 @@ export default function ChatShell() {
           </button>
         </div>
         <span className="mode-hint">{MODE_HINT[mode]}</span>
+        <div className="backend-toggle view-toggle" role="tablist" aria-label="Row layout">
+          <button
+            type="button"
+            className={`mode-btn${view === "cards" ? " active" : ""}`}
+            onClick={() => setViewAndPersist("cards")}
+          >
+            Cards
+          </button>
+          <button
+            type="button"
+            className={`mode-btn${view === "table" ? " active" : ""}`}
+            onClick={() => setViewAndPersist("table")}
+          >
+            Table
+          </button>
+        </div>
         <button
           type="button"
           className="clear-btn"
@@ -524,19 +541,28 @@ export default function ChatShell() {
                         <div className="summary">{turn.assistant.summary}</div>
                       ) : null}
                       {turn.assistant.rows && turn.assistant.rows.length > 0 ? (
-                        <div className="rows">
-                          {turn.assistant.rows.map((row, ri) => {
-                            const k = `${ti}:${ri}`;
-                            return (
-                              <EvidenceCard
-                                key={k}
-                                row={row}
-                                active={activeRowKey === k}
-                                onActivate={() => activateRow(ti, ri, row)}
-                              />
-                            );
-                          })}
-                        </div>
+                        view === "table" ? (
+                          <EvidenceTable
+                            rows={turn.assistant.rows}
+                            turnIdx={ti}
+                            activeRowKey={activeRowKey}
+                            onActivate={(ri, row) => activateRow(ti, ri, row)}
+                          />
+                        ) : (
+                          <div className="rows">
+                            {turn.assistant.rows.map((row, ri) => {
+                              const k = `${ti}:${ri}`;
+                              return (
+                                <EvidenceCard
+                                  key={k}
+                                  row={row}
+                                  active={activeRowKey === k}
+                                  onActivate={() => activateRow(ti, ri, row)}
+                                />
+                              );
+                            })}
+                          </div>
+                        )
                       ) : null}
                     </>
                   )}

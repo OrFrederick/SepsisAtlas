@@ -14,6 +14,7 @@ class QueryResult(BaseModel):
     canonical_predictor: str | None = None
     fallback_note: str | None = None
     n_rows: int
+    meta: dict | None = None
 
 
 @runtime_checkable

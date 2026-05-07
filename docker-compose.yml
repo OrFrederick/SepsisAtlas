@@ -195,9 +195,32 @@ services:
     depends_on: [backend]
     restart: unless-stopped
 
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: sepsis_neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/sepsisatlas
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+    ports:
+      - "7687:7687"
+      - "7474:7474"
+    volumes:
+      - neo4j_data:/data
+    networks: [sepsis]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 networks:
   sepsis:
     driver: bridge
 
 volumes:
   openwebui_data:
+  neo4j_data:

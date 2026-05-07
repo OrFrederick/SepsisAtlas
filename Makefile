@@ -1,4 +1,4 @@
-.PHONY: install initdb parse ingest extract validate serve up down test fmt
+.PHONY: install initdb parse ingest extract validate serve up down test fmt kg-shell kg-inspect
 
 install:
 	pip install -e ".[dev]"
@@ -32,3 +32,9 @@ test:
 fmt:
 	ruff format src/ scripts/ tests/
 	ruff check --fix src/ scripts/ tests/
+
+kg-shell:
+	docker exec -it sepsis_neo4j cypher-shell -u neo4j -p sepsisatlas
+
+kg-inspect:
+	uv run python -m scripts.kg_inspect

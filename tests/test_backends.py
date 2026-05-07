@@ -112,6 +112,7 @@ def test_build_backends_unknown_name_raises(seeded_engine):
         build_backends(["nope"], seeded_engine)
 
 
+@pytest.mark.skip(reason="obsolete: KGBackend now Neo4j+agent; see test_kg_agent.py")
 def test_kg_backend_query_returns_seed_rows(seeded_engine):
     from api.backends import KGBackend
 
@@ -124,6 +125,7 @@ def test_kg_backend_query_returns_seed_rows(seeded_engine):
     assert isinstance(result.summary, str) and result.summary.strip()
 
 
+@pytest.mark.skip(reason="obsolete: KGBackend now Neo4j+agent; see test_kg_agent.py")
 def test_kg_backend_unknown_predictor_returns_empty(seeded_engine):
     from api.backends import KGBackend
 
@@ -132,6 +134,7 @@ def test_kg_backend_unknown_predictor_returns_empty(seeded_engine):
     assert "no matching" in result.summary.lower()
 
 
+@pytest.mark.skip(reason="obsolete: KGBackend now Neo4j+agent; see test_kg_agent.py")
 def test_kg_backend_builds_with_empty_db(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'kg-empty.sqlite'}"
     os.environ["SEPSIS_DB_URL"] = db_url
@@ -145,6 +148,7 @@ def test_kg_backend_builds_with_empty_db(tmp_path):
     assert result.n_rows == 0
 
 
+@pytest.mark.skip(reason="obsolete: KGBackend now Neo4j+agent; see test_kg_agent.py")
 def test_build_backends_registers_kg(seeded_engine):
     from api.backends import build_backends
 

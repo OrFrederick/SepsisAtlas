@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Sepsis Atlas dark theme — exposed as Tailwind v4 CSS variables so
+   21st.dev / shadcn-style components can theme via `bg-panel`,
+   `text-fg-muted`, etc. without hand-rolling palette utilities. */
+@theme {
+  --color-bg: #0f1115;
+  --color-panel: #181b22;
+  --color-panel-2: #11141b;
+  --color-border: #2a2f3a;
+  --color-border-strong: #ffd23f;
+  --color-fg: #e7e9ee;
+  --color-fg-muted: #8c93a6;
+  --color-fg-soft: #cfd2da;
+  --color-accent: #ffd23f;
+  --color-link: #7cc5ff;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-fail: #f87171;
+}

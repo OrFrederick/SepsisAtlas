@@ -7,6 +7,7 @@ deterministic keyword Jaccard score so the pipeline still returns ordered rows.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -15,7 +16,13 @@ _model_failed = False
 
 
 def _get_model():
+    """Lazy-load sentence-transformers MiniLM. Short-circuits to keyword
+    scoring when DISABLE_SEMANTIC_RERANK is set — useful when the HF
+    download stalls (e.g. during demos with no network for the model)."""
     global _model, _model_failed
+    if os.getenv("DISABLE_SEMANTIC_RERANK"):
+        _model_failed = True
+        return None
     if _model is not None or _model_failed:
         return _model
     try:

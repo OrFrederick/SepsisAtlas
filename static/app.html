@@ -74,6 +74,24 @@
     color: var(--fg-muted);
     font-size: 12px;
   }
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .clear-btn {
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+  .clear-btn:hover {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+    background: var(--panel);
+  }
   .split {
     display: grid;
     grid-template-columns: 480px 1px 1fr;
@@ -358,7 +376,10 @@
 <div id="app">
   <header class="topbar">
     <div class="brand"><span class="dot">&#9670;</span>Sepsis Atlas</div>
-    <div class="subtitle">Evidence-anchored sepsis Q&amp;A</div>
+    <div class="topbar-right">
+      <span class="subtitle">Evidence-anchored sepsis Q&amp;A</span>
+      <button id="clearBtn" class="clear-btn" type="button" title="Clear chat history">Clear chat</button>
+    </div>
   </header>
   <main class="split">
     <section class="chat">
@@ -647,7 +668,7 @@
 
     var payload;
     try {
-      var resp = await fetch(window.location.origin + "/query", {
+      var resp = await fetch("/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nl_text: text })
@@ -698,6 +719,24 @@
     }
   });
   input.addEventListener("input", autoGrow);
+
+  var clearBtn = document.getElementById("clearBtn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", function () {
+      try {
+        localStorage.removeItem(HISTORY_KEY);
+        localStorage.removeItem(VIEWER_KEY);
+      } catch (e) {}
+      while (scrollback.firstChild) scrollback.removeChild(scrollback.firstChild);
+      viewerFrame.removeAttribute("src");
+      viewerFrame.style.display = "none";
+      viewerEmpty.style.display = "";
+      ensureWelcomeOrClear();
+      input.value = "";
+      autoGrow();
+      input.focus();
+    });
+  }
 
   // Rehydrate history
   (function init() {

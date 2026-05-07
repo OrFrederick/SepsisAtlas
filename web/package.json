@@ -5,15 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "node scripts/seed-data.mjs && npm run vendor && astro build",
-    "vendor": "node scripts/vendor-pdfjs.mjs",
+    "build": "bun scripts/seed-data.mjs && bun run vendor && astro build",
+    "vendor": "bun scripts/vendor-pdfjs.mjs",
     "preview": "astro preview",
     "check": "astro check"
   },
+  "packageManager": "bun@1.3.13",
   "dependencies": {
+    "@astrojs/react": "^5.0.4",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "astro": "^5.0.0",
     "fuse.js": "^7.0.0",
-    "pdfjs-dist": "4.10.38"
+    "pdfjs-dist": "4.10.38",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",

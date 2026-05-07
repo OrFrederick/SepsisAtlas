@@ -131,6 +131,9 @@
     // Default 'tl' since most extracted cell bboxes are TOPLEFT in our parsed JSON.
     const bboxOrigin = (params.get("origin") || "tl").toLowerCase();
     const bbox = bboxStr ? bboxStr.split(",").map(Number) : null;
+    // Frozen target page for the highlight — the user navigating off this page
+    // must not drag the overlay along. Captured once from the URL.
+    const bboxPage = bbox ? pageNum : null;
 
     let scale = 1.5;
     let pdfDoc = null;
@@ -194,8 +197,8 @@
 
     function drawBbox(viewport, num) {
       overlay.style.display = "none";
-      jumpBtn.style.display = bbox ? "" : "none";
-      if (!bbox || bbox.length !== 4 || num !== pageNum) return;
+      jumpBtn.style.display = bbox && num === bboxPage ? "" : "none";
+      if (!bbox || bbox.length !== 4 || num !== bboxPage) return;
 
       // Input bbox: PDF user-space points (1pt = 1/72 inch), independent of zoom.
       let [x0, y0, x1, y1] = bbox;

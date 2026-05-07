@@ -66,9 +66,43 @@ services:
     environment:
       - WEBUI_AUTH=False                                # demo only
       - WEBUI_AUTH_TRUSTED_IFRAME_ORIGINS=http://backend:8000,http://localhost:8000
+      - ENABLE_SIGNUP=False
       - ENABLE_OPENAI_API=True
       - OPENAI_API_BASE_URLS=http://pipelines:9099
       - OPENAI_API_KEYS=0p3n-w3bu!
+      # Lockdown: this is a single-purpose demo for the sepsis_atlas pipeline.
+      # Disable every feature that doesn't serve that path so users can't
+      # upload files, run code, fetch the web, generate images, etc.
+      - ENABLE_OLLAMA_API=False
+      - ENABLE_CODE_INTERPRETER=False
+      - ENABLE_CODE_EXECUTION=False
+      - ENABLE_IMAGE_GENERATION=False
+      - ENABLE_WEB_SEARCH=False
+      - ENABLE_RAG_HYBRID_SEARCH=False
+      - ENABLE_RAG_LOCAL_WEB_FETCH=False
+      - ENABLE_AUTOCOMPLETE_GENERATION=False
+      - ENABLE_TITLE_GENERATION=False
+      - ENABLE_TAGS_GENERATION=False
+      - ENABLE_FOLLOW_UP_GENERATION=False
+      - ENABLE_RETRIEVAL_QUERY_GENERATION=False
+      - ENABLE_SEARCH_QUERY_GENERATION=False
+      - ENABLE_COMMUNITY_SHARING=False
+      - ENABLE_MESSAGE_RATING=False
+      - ENABLE_DIRECT_CONNECTIONS=False
+      - ENABLE_EVALUATION_ARENA_MODELS=False
+      - ENABLE_ADMIN_CHAT_ACCESS=False
+      - USER_PERMISSIONS_CHAT_FILE_UPLOAD=False
+      - USER_PERMISSIONS_CHAT_DELETE=False
+      - USER_PERMISSIONS_CHAT_EDIT=True
+      - USER_PERMISSIONS_CHAT_TEMPORARY=False
+      - USER_PERMISSIONS_FEATURES_CODE_INTERPRETER=False
+      - USER_PERMISSIONS_FEATURES_WEB_SEARCH=False
+      - USER_PERMISSIONS_FEATURES_IMAGE_GENERATION=False
+      - USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS=False
+      - USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS=False
+      - USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS=False
+      - USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS=False
+      - USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS=False
     volumes:
       - openwebui_data:/app/backend/data
     ports:

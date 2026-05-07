@@ -96,13 +96,13 @@ class Pipeline:
         with httpx.Client(timeout=self.valves.REQUEST_TIMEOUT_S) as client:
             r = client.post(
                 f"{self.valves.BACKEND_URL}/query",
-                json={"q": user_message},
+                json={"nl_text": user_message},
             )
             r.raise_for_status()
             return r.json()
 
     def _stream(self, payload: dict) -> Generator[str, None, None]:
-        narrative = payload.get("narrative", "") or ""
+        narrative = payload.get("summary", "") or ""
         # naive token-ish chunking; OpenWebUI re-renders markdown each frame
         chunk = 24
         for i in range(0, len(narrative), chunk):
@@ -115,7 +115,7 @@ class Pipeline:
     def _render(self, payload: dict) -> str:
         return "\n\n".join(
             [
-                payload.get("narrative", "") or "_(no narrative)_",
+                payload.get("summary", "") or "_(no summary)_",
                 self._render_table(payload),
                 self._render_plot(payload),
             ]

@@ -521,6 +521,38 @@ class KGTools:
                 "pop_relevance": None,
                 "verifier": pm.get("verifier_verdict"),
                 "source": source,
+                # SQL-shaped citation fields so the frontend evidence cards
+                # (static/app.html) and api.query.to_markdown_table render
+                # identically for /query and /query_kg responses.
+                "row_id": pm.get("id"),
+                "cohort_id": cohort.get("cohort_id") or pm.get("cohort_id"),
+                "paper_ref": paper.get("paper_ref"),
+                "file_name": paper_fn,
+                "doi": paper.get("doi"),
+                "cohort_label": cohort.get("cohort_label"),
+                "cohort_size_n": n_val,
+                "population_description": cohort.get("population_description"),
+                "population_location": cohort.get("population_location"),
+                "study_design": cohort.get("study_design"),
+                "mortality_rate_pct": cohort.get("mortality_rate_pct"),
+                "mortality_timepoint": cohort.get("mortality_timepoint"),
+                "predictors": pm.get("predictors"),
+                "predictor_canonical": pm.get("predictor_canonical"),
+                "outcome_type": pm.get("outcome_type"),
+                "outcome_window_days": pm.get("outcome_window_days"),
+                "model_specification": pm.get("model_specification"),
+                "effect_size_str": effect_str,
+                "effect_type": pm.get("effect_type"),
+                "effect_value": pm.get("effect_value"),
+                "ci_lo": pm.get("ci_lo"),
+                "ci_hi": pm.get("ci_hi"),
+                "p_value": pm.get("p_value"),
+                "auc": pm.get("auc"),
+                "anchor_page": anchor_page,
+                "anchor_bbox": pm.get("anchor_bbox"),
+                "anchor_text": pm.get("anchor_text"),
+                "verifier_verdict": pm.get("verifier_verdict"),
+                "verifier_score": pm.get("verifier_score"),
             }
             rows.append(row)
 

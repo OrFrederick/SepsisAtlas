@@ -127,10 +127,13 @@ def test_sql_injection_string_is_safe():
     assert r.status_code == 200, "backend should still be alive"
 
 
-@pytest.mark.parametrize("nl_text", [
-    "敗血症 mortality 🦠",
-    "Welche Biomarker sagen Sterblichkeit bei Sepsis vorher?",
-])
+@pytest.mark.parametrize(
+    "nl_text",
+    [
+        "敗血症 mortality 🦠",
+        "Welche Biomarker sagen Sterblichkeit bei Sepsis vorher?",
+    ],
+)
 def test_non_ascii_query(nl_text):
     out = _query(nl_text)
     assert isinstance(out["n_rows"], int)
@@ -147,18 +150,21 @@ def test_very_long_query_does_not_500():
     reason="pipelines container not running on :9099",
 )
 class TestPipelinesEndToEnd:
-    @pytest.mark.parametrize("message", [
-        "hi",
-        "hello",
-        "who are you?",
-        "thanks!",
-        "ok",
-        "tell me a joke",
-        "what's the weather like?",
-        "explain quantum physics",
-        "give me a recipe for pasta",
-        "how do I fix a python bug?",
-    ])
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "hi",
+            "hello",
+            "who are you?",
+            "thanks!",
+            "ok",
+            "tell me a joke",
+            "what's the weather like?",
+            "explain quantum physics",
+            "give me a recipe for pasta",
+            "how do I fix a python bug?",
+        ],
+    )
     def test_off_topic_returns_stock_out_of_scope(self, message):
         reply = _chat(message)
         assert OUT_OF_SCOPE_MARKER in reply, (

@@ -147,6 +147,7 @@ class Pipeline:
         if not (payload.get("rows") or []):
             return ""
         from urllib.parse import quote
+
         url = f"{self.valves.PUBLIC_BACKEND_URL}/app?q={quote(user_message)}"
         return f"[Open split-view (sortable table + PDF preview)]({url})"
 
@@ -203,6 +204,7 @@ class Pipeline:
         url = f"{self.valves.PUBLIC_BACKEND_URL}/viewer/{file_stem}?page={page}{bbox_q}"
         label = f"{file_stem} p.{page}"
         return f"[{label}]({url})"
+
 
 def _truncate(value, limit: int) -> str:
     if value is None:

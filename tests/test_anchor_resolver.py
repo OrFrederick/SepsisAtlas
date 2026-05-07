@@ -325,6 +325,184 @@ def test_zhang_2021_regression():
 
 
 # ---------------------------------------------------------------------------
+# Tier-2 normalization upgrades: dashes, NBSP, thousands-commas
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_endash_vs_hyphen():
+    """LLM emits an en-dash range; parsed text uses ASCII hyphen.
+
+    Both sides must be folded to a common dash before substring match.
+    """
+    full = "The hazard ratio was 1.2-1.5 in this cohort."
+    parsed = _make_parsed(
+        full,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(full),
+                "page": 2,
+                "bbox": _bbox(page=2),
+                "kind": "body",
+                "label": "text",
+                "section": "Results",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    # En-dash (U+2013) in the LLM output; resolver should still find it.
+    needle = "hazard ratio was 1.2–1.5"
+    hit = resolve(needle, None, idx)
+    assert hit is not None
+    assert hit["section"] == "Results"
+
+
+def test_resolve_thousands_comma_drops_to_match_plain_digits():
+    """`1,234 patients` (LLM) should match `1234 patients` (parsed)."""
+    full = "We enrolled 1234 patients with sepsis-3."
+    parsed = _make_parsed(
+        full,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(full),
+                "page": 1,
+                "bbox": _bbox(page=1),
+                "kind": "body",
+                "label": "text",
+                "section": "Methods",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    hit = resolve("1,234 patients", None, idx)
+    assert hit is not None
+    assert hit["section"] == "Methods"
+
+
+def test_resolve_nbsp_normalizes_to_regular_space():
+    """Anchor with NBSPs between tokens should match index entry with regular spaces."""
+    full = "AUC was 0.83 for in-hospital mortality."
+    parsed = _make_parsed(
+        full,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(full),
+                "page": 3,
+                "bbox": _bbox(page=3),
+                "kind": "body",
+                "label": "text",
+                "section": "Results",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    # NBSPs (U+00A0) instead of ASCII spaces in the needle.
+    needle = "AUC was 0.83 for in-hospital mortality"
+    hit = resolve(needle, None, idx)
+    assert hit is not None
+    assert hit["page"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Tier-4: token-set Jaccard fuzzy match
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_jaccard_tolerates_one_extra_word():
+    """Anchor missing one trailing token vs index entry — still matches at 0.85.
+
+    None of tiers 1-3 match (the anchor has trailing 'X' the index lacks),
+    so this exercises tier 4 specifically.
+    """
+    # Index entry: 12 tokens, no `<0.001` suffix.
+    full = "AUC value 0.636 with 95 percent confidence interval 0.598 to 0.674 in cohort"
+    parsed = _make_parsed(
+        full,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(full),
+                "page": 4,
+                "bbox": _bbox(page=4),
+                "kind": "body",
+                "label": "text",
+                "section": "Validation",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    # Needle adds one extra token (`<0.001`) the index doesn't have.
+    # 12 / 13 = 0.923 Jaccard, above threshold; substring will not match.
+    needle = "AUC value 0.636 with 95 percent confidence interval 0.598 to 0.674 in cohort <0.001"
+    hit = resolve(needle, None, idx)
+    assert hit is not None
+    assert hit["section"] == "Validation"
+
+
+def test_resolve_short_anchor_does_not_use_fuzzy():
+    """Anchors shorter than 30 chars must NOT engage tier 4.
+
+    Numeric-only short anchors are too dangerous to fuzzy-match — they
+    would latch onto any sentence that mentions the same number.
+    """
+    full = "Patient survival improved markedly after the intervention reached steady state."
+    parsed = _make_parsed(
+        full,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(full),
+                "page": 1,
+                "bbox": _bbox(page=1),
+                "kind": "body",
+                "label": "text",
+                "section": "Discussion",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    # 16 chars, no overlap with the index sentence — should NOT bind.
+    assert resolve("OR 1.42 (1.1-1.8)", None, idx) is None
+
+
+def test_resolve_jaccard_does_not_oversell_tiny_numeric_overlap():
+    """Precision guard.
+
+    A numeric anchor whose only token overlap with a long sentence is the
+    figure '0.83' must not bind via tier 4. Even if length passes the
+    >=30 char gate, Jaccard between {auc, was, 0.83, in, cohort, b} and
+    a long unrelated sentence containing '0.83' is far below 0.85.
+    """
+    long_unrelated = (
+        "We assessed multiple biomarkers including procalcitonin, lactate, "
+        "and C-reactive protein in our derivation cohort, where the cohort "
+        "discrimination index reached 0.83 across several model variants."
+    )
+    parsed = _make_parsed(
+        long_unrelated,
+        offsets=[
+            {
+                "start": 0,
+                "end": len(long_unrelated),
+                "page": 6,
+                "bbox": _bbox(page=6),
+                "kind": "body",
+                "label": "text",
+                "section": "Discussion",
+            }
+        ],
+    )
+    idx = build_index(parsed)
+    # 30 chars exactly; only token shared with the index entry is "0.83".
+    # Jaccard ~ 1 / 30 = 0.033 — far below 0.85.
+    needle = "AUC was 0.83 in subgroup B XYZQQQ"
+    assert len(needle) >= 30
+    assert resolve(needle, None, idx) is None
+
+
+# ---------------------------------------------------------------------------
 # to_flat_bbox
 # ---------------------------------------------------------------------------
 

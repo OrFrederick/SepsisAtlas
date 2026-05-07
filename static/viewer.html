@@ -110,6 +110,9 @@
   <div id="stage"></div>
 
   <script type="module">
+    // Stop the browser from restoring its remembered scroll position after we
+    // jump to the cited page on load.
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
@@ -368,16 +371,15 @@
         setupObservers();
         setStatus("");
 
-        // Jump to target on load — render that page synchronously first.
-        const target = pages[currentPage - 1];
+        // Jump to target on load. Capture target page before observers can
+        // clobber currentPage by reporting page 1 as most-visible.
+        const targetPage = currentPage;
+        const target = pages[targetPage - 1];
         if (target) {
           await renderPage(target);
-          // Two rAFs + 250ms safety re-scroll: stub heights settle on the
-          // first frame; observer-triggered renders can shift layout after
-          // the initial jump, so re-jump once layout has stabilized.
           const jump = () => {
-            if (bbox && currentPage === bboxPage) scrollToBbox({ behavior: "auto" });
-            else scrollToPage(currentPage, { behavior: "auto" });
+            if (bbox && targetPage === bboxPage) scrollToBbox({ behavior: "auto" });
+            else scrollToPage(targetPage, { behavior: "auto" });
           };
           requestAnimationFrame(() => requestAnimationFrame(() => {
             jump();

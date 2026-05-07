@@ -123,6 +123,9 @@ class Pipeline:
             return r.json()
 
     def _stream(self, payload: dict, user_message: str) -> Generator[str, None, None]:
+        if payload.get("refused"):
+            yield self._render_refused(payload)
+            return
         narrative = payload.get("summary", "") or ""
         chunk = 24
         for i in range(0, len(narrative), chunk):
@@ -134,6 +137,8 @@ class Pipeline:
             yield "\n\n" + link
 
     def _render(self, payload: dict, user_message: str) -> str:
+        if payload.get("refused"):
+            return self._render_refused(payload)
         parts = [
             payload.get("summary", "") or "_(no summary)_",
             self._render_table(payload),
@@ -142,6 +147,16 @@ class Pipeline:
         if link:
             parts.append(link)
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _render_refused(payload: dict) -> str:
+        reason = payload.get("refused_reason") or payload.get("summary") or "Out of scope."
+        return (
+            "**Sepsis Atlas can't answer this reliably.**\n\n"
+            f"{reason}\n\n"
+            "_The structured evidence DB only indexes predictors, outcomes, "
+            "papers, and population conditions. Try a question that pins one of those._"
+        )
 
     def _app_link(self, payload: dict, user_message: str) -> str:
         if not (payload.get("rows") or []):
@@ -157,14 +172,19 @@ class Pipeline:
             return "_No matching evidence rows. Try `expand_pubmed` to broaden the corpus._"
 
         lines = [
-            "| # | Study | Population | N | Predictor | Outcome | Timing | Method | Effect Size | ✓ | Source |",
-            "|---|-------|------------|---|-----------|---------|--------|--------|-------------|---|--------|",
+            "| # | Study | Population | Location | Design | N | Mort % | Mort timepoint | Predictor | Outcome | Timing | Method | Effect Size | ✓ | Source |",
+            "|---|-------|------------|----------|--------|---|--------|----------------|-----------|---------|--------|--------|-------------|---|--------|",
         ]
         for i, row in enumerate(rows, start=1):
             badge = VERIFIER_BADGE.get((row.get("verifier_verdict") or "").lower(), "?")
             study = self._study_label(row)
-            population = _truncate(row.get("population_description"), 60)
+            population = _truncate(row.get("population_description"), 50)
+            location = _truncate(row.get("population_location"), 25)
+            design = _truncate(row.get("study_design"), 25)
             n = row.get("cohort_size_n") or "—"
+            mort_pct = row.get("mortality_rate_pct")
+            mort_pct_s = f"{mort_pct}" if mort_pct not in (None, "") else "—"
+            mort_tp = _truncate(row.get("mortality_timepoint"), 25)
             predictor = row.get("predictor_canonical") or row.get("predictors") or "—"
             outcome = _truncate(row.get("outcome"), 30)
             timing = _truncate(row.get("timing"), 35)
@@ -172,8 +192,8 @@ class Pipeline:
             effect = _truncate(row.get("effect_size_str"), 60)
             src_md = self._source_link(row)
             lines.append(
-                f"| {i} | {study} | {population} | {n} | {predictor} | {outcome} | "
-                f"{timing} | {method} | {effect} | {badge} | {src_md} |"
+                f"| {i} | {study} | {population} | {location} | {design} | {n} | {mort_pct_s} | {mort_tp} | "
+                f"{predictor} | {outcome} | {timing} | {method} | {effect} | {badge} | {src_md} |"
             )
 
         return "\n".join(lines)
@@ -197,8 +217,11 @@ class Pipeline:
             try:
                 vals = json.loads(bbox_raw) if isinstance(bbox_raw, str) else bbox_raw
                 if isinstance(vals, list) and len(vals) == 4:
-                    # origin=tl: anchor cells from tables are TOPLEFT; viewer falls back for sections.
-                    bbox_q = f"&bbox={','.join(f'{v:.2f}' for v in vals)}&origin=tl"
+                    # Docling section bboxes are BOTTOMLEFT with t>b; table cells are TOPLEFT with t<b.
+                    # Pick origin from y-order rather than guessing per-source.
+                    _, y0, _, y1 = vals
+                    origin = "bl" if float(y0) > float(y1) else "tl"
+                    bbox_q = f"&bbox={','.join(f'{v:.2f}' for v in vals)}&origin={origin}"
             except Exception:
                 pass
         url = f"{self.valves.PUBLIC_BACKEND_URL}/viewer/{file_stem}?page={page}{bbox_q}"

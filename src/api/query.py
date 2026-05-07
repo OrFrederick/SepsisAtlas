@@ -12,16 +12,20 @@ through as the raw string and is matched LIKE.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from sepsis_atlas.config import MODEL_INTENT
 from sepsis_atlas.llm import logged_llm_call, get_client
 from sepsis_atlas.schemas import IntentParse
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +103,7 @@ Allowed JSON keys:
 - outcome_window_days: integer (28, 30, 60, 90, 180, 365) or null
 - predictor: short canonical predictor name (lactate, SOFA, APACHE_II, qSOFA, ...) or null
 - population: object with optional keys {condition, age_band, setting}
+- paper_ref: study citation in "Author YYYY" form when the user names a specific paper (e.g. "Zhang 2021", "Seymour 2016") or null
 - intent: one of [ranking, lookup, comparison, summary]
 
 Return ONLY the JSON object. No prose. No code fences.
@@ -127,7 +132,17 @@ def parse_intent(nl_text: str, *, query_id: str | None = None) -> IntentParse:
         raw = resp.choices[0].message.content
         data = json.loads(raw)
         return IntentParse(**data)
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.warning(
+            "intent_parse: bad JSON or schema (query_id=%s, err=%s); using heuristic fallback",
+            query_id, e,
+        )
+        return _heuristic_intent(nl_text)
     except Exception:
+        logger.exception(
+            "intent_parse: LLM call failed (query_id=%s); using heuristic fallback",
+            query_id,
+        )
         return _heuristic_intent(nl_text)
 
 
@@ -173,11 +188,17 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
 
     intent = "ranking" if any(w in text_l for w in ["best", "rank", "top", "compare"]) else "lookup"
 
+    paper_ref: str | None = None
+    m = re.search(r"\b([A-Z][a-zA-Z'\-]+)\s+((?:19|20)\d{2})\b", nl_text)
+    if m:
+        paper_ref = f"{m.group(1)} {m.group(2)}"
+
     return IntentParse(
         outcome_type=out_type,
         outcome_window_days=window,
         predictor=predictor,
         population=population,
+        paper_ref=paper_ref,
         intent=intent,
     )
 
@@ -238,6 +259,10 @@ SELECT
     sc.cohort_label       AS cohort_label,
     sc.cohort_size_n      AS cohort_size_n,
     sc.population_description AS population_description,
+    sc.population_location AS population_location,
+    sc.study_design       AS study_design,
+    sc.cohort_characteristics AS cohort_characteristics,
+    sc.encounters_period  AS encounters_period,
     sc.mortality_rate_pct AS mortality_rate_pct,
     sc.mortality_timepoint AS mortality_timepoint
 FROM predictor_model pm
@@ -264,6 +289,10 @@ def build_sql(intent: IntentParse, *, window_override: int | None = None) -> tup
         params["pcanon"] = canon.lower()
         params["plike"] = f"%{canon.lower()}%"
 
+    if intent.paper_ref:
+        where.append("LOWER(sc.paper_ref) LIKE :paper_ref")
+        params["paper_ref"] = f"%{intent.paper_ref.lower()}%"
+
     cond = (intent.population or {}).get("condition")
     if cond:
         where.append("LOWER(sc.population_description) LIKE :cond")
@@ -280,8 +309,47 @@ def build_sql(intent: IntentParse, *, window_override: int | None = None) -> tup
     sql = BASE_SQL
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " LIMIT 200"
+    sql += " ORDER BY pm.id LIMIT 200"
     return sql, params, canon
+
+
+VERDICT_RANK = {"ok": 3, "pass": 3, "partial": 2, "weak": 2, "warn": 2, "reject": 1, "fail": 1}
+
+
+def _dedupe_rows(rows: list[dict]) -> list[dict]:
+    """Collapse rows that report the same evidence under different anchors.
+
+    Same (cohort_id, predictors, outcome, model_specification, timing,
+    effect_size_str) → keep best by (verdict_rank, verifier_score, lowest row_id).
+    model_specification + timing in the key prevents merging univariate vs
+    multivariate (or pre-resus vs post-resus) results that share an effect string.
+    """
+    seen: dict[tuple, dict] = {}
+
+    def _score(r: dict) -> tuple[int, float, str]:
+        verdict = (r.get("verifier_verdict") or "").lower()
+        try:
+            vs = float(r.get("verifier_score") or 0.0)
+        except (TypeError, ValueError):
+            vs = 0.0
+        # row_id is a uuid string in current schema; use lex order as deterministic tiebreaker.
+        # Negate via leading "~" trick: smaller string sorts higher with reverse-key wrapper below.
+        rid = str(r.get("row_id") or "")
+        return (VERDICT_RANK.get(verdict, 0), vs, rid)
+
+    for r in rows:
+        key = (
+            (r.get("cohort_id") or "").strip(),
+            (r.get("predictors") or "").strip(),
+            (r.get("outcome") or "").strip(),
+            (r.get("model_specification") or "").strip(),
+            (r.get("timing") or "").strip(),
+            (r.get("effect_size_str") or "").strip(),
+        )
+        prev = seen.get(key)
+        if prev is None or _score(r) > _score(prev):
+            seen[key] = r
+    return list(seen.values())
 
 
 def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterResult]:
@@ -293,7 +361,8 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
     def _run(sql: str, params: dict[str, Any]) -> list[dict]:
         with engine.connect() as cx:
             res = cx.execute(text(sql), params)
-            return [dict(r._mapping) for r in res]
+            rows = [dict(r._mapping) for r in res]
+        return _dedupe_rows(rows)
 
     sql, params, canon = build_sql(intent)
     rows = _run(sql, params)
@@ -333,30 +402,41 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
 # ---------------------------------------------------------------------------
 
 TABLE_COLS = [
-    ("paper_ref", "Paper"),
-    ("cohort_label", "Cohort"),
-    ("predictors", "Predictor"),
-    ("outcome", "Outcome"),
-    ("effect_size_str", "Effect"),
-    ("verifier_verdict", "Verified"),
+    ("paper_ref", "Study", 0),
+    ("cohort_label", "Cohort", 0),
+    ("population_description", "Population", 50),
+    ("population_location", "Location", 25),
+    ("study_design", "Design", 25),
+    ("cohort_size_n", "N", 0),
+    ("mortality_rate_pct", "Mort %", 0),
+    ("mortality_timepoint", "Mort timepoint", 25),
+    ("cohort_characteristics", "Cohort chars", 60),
+    ("predictors", "Predictor", 40),
+    ("outcome", "Outcome", 30),
+    ("timing", "Timing", 35),
+    ("model_specification", "Method", 40),
+    ("effect_size_str", "Effect Size", 60),
+    ("verifier_verdict", "✓", 0),
+    ("anchor_page", "Page", 0),
 ]
 
 
 def to_markdown_table(rows: list[dict]) -> str:
     if not rows:
         return "_No rows._"
-    header = "| " + " | ".join(label for _, label in TABLE_COLS) + " |"
+    header = "| " + " | ".join(label for _, label, _ in TABLE_COLS) + " |"
     sep = "| " + " | ".join("---" for _ in TABLE_COLS) + " |"
     lines = [header, sep]
     for r in rows[:25]:
         cells = []
-        for k, _ in TABLE_COLS:
+        for k, _, limit in TABLE_COLS:
             v = r.get(k)
-            if v is None:
-                v = ""
-            v = str(v).replace("|", "\\|").replace("\n", " ")
-            if len(v) > 80:
-                v = v[:77] + "..."
-            cells.append(v)
+            if v is None or v == "":
+                cells.append("—")
+                continue
+            s = str(v).replace("|", "\\|").replace("\n", " ").strip()
+            if limit and len(s) > limit:
+                s = s[: limit - 1].rstrip() + "…"
+            cells.append(s)
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)

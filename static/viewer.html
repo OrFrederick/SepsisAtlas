@@ -196,10 +196,12 @@
       let [x0, y0, x1, y1] = bbox;
       // Normalize to top-left origin in points.
       if (bboxOrigin === "bl") {
+        // Order-agnostic: Docling bottom-left bboxes may be [x0,t,x1,b] (t>b) or [x0,b,x1,t] (b<t).
         const pageHeightPts = viewport.height / scale;
-        const ny0 = pageHeightPts - y1;
-        const ny1 = pageHeightPts - y0;
-        y0 = ny0; y1 = ny1;
+        const yMin = Math.min(y0, y1);
+        const yMax = Math.max(y0, y1);
+        y0 = pageHeightPts - yMax;  // screen top
+        y1 = pageHeightPts - yMin;  // screen bottom
       } else if (y0 > y1) {
         // defensive: if caller swapped y values, normalize
         [y0, y1] = [y1, y0];

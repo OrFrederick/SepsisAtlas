@@ -131,8 +131,11 @@
     function bboxQs(r) {
       try {
         const v = typeof r.anchor_bbox === 'string' ? JSON.parse(r.anchor_bbox) : r.anchor_bbox;
-        if (Array.isArray(v) && v.length === 4)
-          return `&bbox=${v.map(x => Number(x).toFixed(2)).join(',')}&origin=tl`;
+        if (Array.isArray(v) && v.length === 4) {
+          // Docling section bboxes use BOTTOMLEFT origin with y_top>y_bottom; table cells use TOPLEFT.
+          const origin = Number(v[1]) > Number(v[3]) ? 'bl' : 'tl';
+          return `&bbox=${v.map(x => Number(x).toFixed(2)).join(',')}&origin=${origin}`;
+        }
       } catch (_) {}
       return '';
     }
@@ -282,15 +285,38 @@
     (() => {
       const main = document.querySelector('main');
       const gutter = document.getElementById('gutter');
-      let dragging = false;
-      gutter.addEventListener('mousedown', () => { dragging = true; document.body.style.cursor = 'col-resize'; });
-      window.addEventListener('mousemove', e => {
-        if (!dragging) return;
-        const w = main.clientWidth;
-        const left = Math.max(280, Math.min(w - 320, e.clientX));
+      const right = document.getElementById('right');
+      let pointerId = null;
+
+      const onMove = e => {
+        if (pointerId === null) return;
+        const rect = main.getBoundingClientRect();
+        const w = rect.width;
+        const x = e.clientX - rect.left;
+        const left = Math.max(280, Math.min(w - 320, x));
         main.style.gridTemplateColumns = `${left}px 6px 1fr`;
+      };
+      const stop = e => {
+        if (pointerId === null) return;
+        try { gutter.releasePointerCapture(pointerId); } catch (_) {}
+        pointerId = null;
+        document.body.style.cursor = '';
+        right.style.pointerEvents = '';
+        gutter.removeEventListener('pointermove', onMove);
+        gutter.removeEventListener('pointerup', stop);
+        gutter.removeEventListener('pointercancel', stop);
+      };
+
+      gutter.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        pointerId = e.pointerId;
+        gutter.setPointerCapture(pointerId);
+        document.body.style.cursor = 'col-resize';
+        right.style.pointerEvents = 'none';
+        gutter.addEventListener('pointermove', onMove);
+        gutter.addEventListener('pointerup', stop);
+        gutter.addEventListener('pointercancel', stop);
       });
-      window.addEventListener('mouseup', () => { dragging = false; document.body.style.cursor = ''; });
     })();
   </script>
 </body>

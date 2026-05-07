@@ -113,6 +113,32 @@ class QueryResponse(BaseModel):
     canonical_predictor: str | None = None
     fallback_note: str | None = None
     n_rows: int
+    refused: bool = False
+    refused_reason: str | None = None
+
+
+def _assess_answerable(intent, nl_text: str) -> tuple[bool, str | None]:
+    """Decide whether the structured DB can serve this query.
+
+    Answerable iff intent pins at least one filter axis the schema indexes:
+    predictor, outcome_type, outcome_window_days, paper_ref, or population.condition.
+    Otherwise refuse rather than degrade to semantic rerank across all rows.
+    """
+    if intent.predictor:
+        return True, None
+    if intent.outcome_type or intent.outcome_window_days:
+        return True, None
+    if intent.paper_ref:
+        return True, None
+    cond = (intent.population or {}).get("condition")
+    # 100% of the corpus is sepsis, so generic "sepsis" alone does not narrow anything.
+    if cond and cond.lower() != "sepsis":
+        return True, None
+    return False, (
+        "Query did not pin any of: predictor, outcome (type/window), paper, or specific population. "
+        "Try e.g. 'lactate and 28-day mortality', 'qSOFA in septic shock', "
+        "or 'show predictors from Zhang 2021'."
+    )
 
 
 def _summary(rows: list[dict], intent_dict: dict, fallback_note: str | None) -> str:
@@ -164,10 +190,28 @@ def post_query(req: QueryRequest) -> QueryResponse:
     engine = _engine()
 
     intent = parse_intent(req.nl_text, query_id=query_id)
+    intent_dict = intent.model_dump()
+
+    answerable, refuse_reason = _assess_answerable(intent, req.nl_text)
+    if not answerable:
+        latency_ms = int((time.time() - t0) * 1000)
+        _persist_query(engine, query_id, req.nl_text, intent_dict, "", 0, latency_ms)
+        return QueryResponse(
+            query_id=query_id,
+            rows=[],
+            table_md="_Query out of scope for the structured evidence DB._",
+            summary=refuse_reason or "Cannot answer reliably from current schema.",
+            intent=intent_dict,
+            canonical_predictor=None,
+            fallback_note=None,
+            n_rows=0,
+            refused=True,
+            refused_reason=refuse_reason,
+        )
+
     rows, fr = run_query(engine, intent)
     ranked = rerank(req.nl_text, rows)
 
-    intent_dict = intent.model_dump()
     summary = _summary(ranked, intent_dict, fr.fallback_note)
 
     latency_ms = int((time.time() - t0) * 1000)

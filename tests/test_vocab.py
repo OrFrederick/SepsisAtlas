@@ -146,3 +146,21 @@ def test_parse_setting_none_or_empty():
 def test_parse_setting_combines_sources():
     # Caller can pass two strings; function should match against either.
     assert parse_setting("adults", "admitted to ICU") == "ICU"
+
+
+def test_parse_setting_pediatric_takes_priority_over_icu():
+    """If both pediatric and generic ICU keywords are present in the
+    same text, pediatric ICU must win because the pattern list puts
+    it first."""
+    assert parse_setting("PICU and general ICU cohort") == "pediatric ICU"
+
+
+def test_parse_setting_first_text_wins_over_later():
+    """parse_setting scans positional args in order. When the first
+    arg matches, later args don't override."""
+    assert parse_setting("ICU adults", "emergency department triage") == "ICU"
+
+
+def test_parse_method_news_and_news2_are_distinct():
+    assert parse_method("NEWS score") == ("score", "NEWS")
+    assert parse_method("NEWS2 early warning") == ("score", "NEWS2")

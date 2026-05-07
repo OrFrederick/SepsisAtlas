@@ -52,7 +52,6 @@ _PREDICTOR_CATEGORY: dict[str, str] = {
     "news": "score",
     "news2": "score",
     "mews": "score",
-    "siriss": "score",
     "sirs": "score",
     # demographics
     "age": "demographic",
@@ -117,7 +116,8 @@ _METHOD_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\bapache[\s-]?ii\b", re.IGNORECASE), "score", "APACHE-II"),
     (re.compile(r"\bqsofa\b", re.IGNORECASE), "score", "qSOFA"),
     (re.compile(r"\bsaps\b", re.IGNORECASE), "score", "SAPS"),
-    (re.compile(r"\bnews2?\b", re.IGNORECASE), "score", "NEWS"),
+    (re.compile(r"\bnews2\b", re.IGNORECASE), "score", "NEWS2"),
+    (re.compile(r"\bnews\b", re.IGNORECASE),  "score", "NEWS"),
 ]
 
 
@@ -148,9 +148,9 @@ _SETTING_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(picu|pediatric\s+(icu|intensive\s+care)|paediatric\s+(icu|intensive\s+care))\b", re.IGNORECASE), "pediatric ICU"),
     (re.compile(r"\b(nicu|neonatal\s+(icu|intensive\s+care))\b", re.IGNORECASE), "neonatal ICU"),
     (re.compile(r"\b(icu|intensive\s+care\s+unit|critical\s+care)\b", re.IGNORECASE), "ICU"),
-    (re.compile(r"\b(ed|emergency\s+department|emergency\s+room|er\b)\b", re.IGNORECASE), "ED"),
+    (re.compile(r"\b(ed|emergency\s+department|emergency\s+room|er)\b", re.IGNORECASE), "ED"),
     (re.compile(r"\b(operating\s+room|or\s+suite|perioperative)\b", re.IGNORECASE), "OR"),
-    (re.compile(r"\b(prehospital|pre[\s-]?hospital|ambulance|ems\b)\b", re.IGNORECASE), "prehospital"),
+    (re.compile(r"\b(prehospital|pre[\s-]?hospital|ambulance|ems)\b", re.IGNORECASE), "prehospital"),
     (re.compile(r"\b(general\s+ward|hospital\s+ward|ward\b|inpatient\s+ward)\b", re.IGNORECASE), "ward"),
     (re.compile(r"\bmixed\b", re.IGNORECASE), "mixed"),
 ]

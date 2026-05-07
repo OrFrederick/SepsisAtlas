@@ -17,8 +17,8 @@ DB_PATH = ROOT / "db.sqlite"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-MODEL_EXTRACT = os.getenv("MODEL_EXTRACT", "anthropic/claude-sonnet-4.5")
-MODEL_VERIFY = os.getenv("MODEL_VERIFY", "anthropic/claude-haiku-4.5")
+MODEL_EXTRACT = os.getenv("MODEL_EXTRACT", "anthropic/claude-opus-4.7")
+MODEL_VERIFY = os.getenv("MODEL_VERIFY", "anthropic/claude-sonnet-4.6")
 MODEL_INTENT = os.getenv("MODEL_INTENT", "anthropic/claude-haiku-4.5")
 MODEL_NARRATIVE = os.getenv("MODEL_NARRATIVE", "anthropic/claude-haiku-4.5")
 

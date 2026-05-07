@@ -2,18 +2,48 @@
 
 The local hybrid verifier used to be blind to cohort swaps: a predictor row
 whose numbers exactly matched the anchor span could pass even when the
-sentence described a *different* sub-cohort. These tests pin down the new
-cohort_context cross-check behaviour.
+sentence described a *different* sub-cohort. These tests pin down the
+cohort_context cross-check behaviour, which now runs through the tier-2
+LLM judge instead of the legacy DeBERTa NLI model.
 
-The NLI model is loaded lazily on first use (~750MB download) and is shared
-across the whole pytest session.
+We mock the LLM call so tests don't hit the network. The legacy
+``_nli_batch`` is still used by a couple of pure-NLI tests below — those
+keep working because the helper is left in place even though
+``run_verifier`` no longer calls it.
 """
 
 from __future__ import annotations
 
+import json
+import types
+from unittest.mock import patch
+
 import pytest
 
+from src.extract import verify_llm
 from src.extract.verify_nli import _nli_batch, run_verifier
+
+
+def _fake_resp(verdict: str, *, contradicted: list[str] | None = None,
+               supported: list[str] | None = None, rationale: str = ""):
+    payload = {
+        "verdict": verdict,
+        "score": 0.9 if verdict == "ok" else (0.2 if verdict == "reject" else 0.6),
+        "rationale": rationale or f"mock {verdict}",
+        "supported_atoms": supported or [],
+        "contradicted_atoms": contradicted or [],
+    }
+    msg = types.SimpleNamespace(content=json.dumps(payload), refusal=None)
+    choice = types.SimpleNamespace(message=msg)
+    usage = types.SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_cost=0.0)
+    return types.SimpleNamespace(choices=[choice], usage=usage)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cache(tmp_path, monkeypatch):
+    """Per-test cache + stub paper-text so we never touch db.sqlite or PDFs."""
+    monkeypatch.setattr(verify_llm, "DB_PATH", str(tmp_path / "cache.sqlite"))
+    monkeypatch.setattr(verify_llm, "_load_paper_text", lambda paper_id: "")
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +74,14 @@ def test_cohort_setting_mismatch_is_rejected():
         "in-hospital mortality."
     )
 
-    resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
+    fake = _fake_resp(
+        "reject",
+        contradicted=["population_location"],
+        supported=["effect_value", "ci_lo", "ci_hi"],
+        rationale="span describes medical ICU but cohort is surgical ICU",
+    )
+    with patch.object(verify_llm, "_call_verify_llm", return_value=fake):
+        resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
     assert resp.verdict in {"reject", "partial"}, (
         f"Expected reject/partial, got verdict={resp.verdict} "
         f"rationale={resp.rationale}"
@@ -73,7 +110,13 @@ def test_cohort_setting_match_is_ok():
         "high-normal phosphate had an adjusted hazard ratio of 0.72 "
         "(95% CI 0.55-0.94) for in-hospital mortality."
     )
-    resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
+    fake = _fake_resp(
+        "ok",
+        supported=["predictor", "outcome", "effect_value", "ci_lo", "ci_hi",
+                   "population_location"],
+    )
+    with patch.object(verify_llm, "_call_verify_llm", return_value=fake):
+        resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
     assert resp.verdict == "ok", (
         f"Expected ok, got verdict={resp.verdict} rationale={resp.rationale}"
     )
@@ -104,7 +147,14 @@ def test_outcome_window_mismatch_flags():
         "ratio of 1.45 (95% CI 1.10-1.92) for mortality assessed only "
         "at hospital discharge; no 28-day follow-up was performed."
     )
-    resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
+    fake = _fake_resp(
+        "reject",
+        contradicted=["outcome_window_days"],
+        supported=["predictor", "effect_value", "ci_lo", "ci_hi"],
+        rationale="span explicitly states no 28-day follow-up",
+    )
+    with patch.object(verify_llm, "_call_verify_llm", return_value=fake):
+        resp, _ = run_verifier(claim, span, cohort_context=cohort_context)
     # We accept any non-"ok" verdict here: the cross-check should at least
     # downgrade the row out of "ok".
     assert resp.verdict != "ok", (

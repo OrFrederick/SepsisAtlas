@@ -467,29 +467,34 @@ def run_verifier(
     row_id: str = "",
     extra_context: str = "",
     skip_nli: bool = False,
+    skip_llm: bool = False,
     cohort_context: dict | None = None,
     db_session: Any = None,
     **_kwargs: Any,
 ) -> tuple[VerifierResponse, dict]:
-    """Hybrid verifier. Drop-in replacement for `extractor.run_verifier`.
+    """Tiered verifier. Drop-in replacement for the previous NLI-based one.
 
-    Returns (VerifierResponse, meta). `meta` keeps `cost_usd=0.0` and
-    `latency_ms` so the caller's summary aggregation in `extractor.run`
-    keeps working.
+    Tier 1 — regex numeric atom check, identical to the legacy implementation.
+        * If any numeric atom contradicts → short-circuit "reject" (no LLM).
+        * If all numeric atoms match (and none absent) → short-circuit "ok"
+          (no LLM).
+
+    Tier 2 — Haiku-4.5 LLM judge with parent-section context. The LLM sees
+    the structured claim, the verbatim source_span, and the surrounding
+    paragraph or table (capped at 4000 chars). Responses are cached by
+    SHA-256 hash of inputs in ``verifier_llm_cache``.
 
     Parameters
     ----------
-    extra_context  : sibling cells / section heading / methods text appended
-                     to the NLI premise. Numeric check still uses only
-                     `source_span` so number provenance stays honest.
-    skip_nli       : regex-only mode (faster, used by tests).
-    cohort_context : dict of cohort-level fields (population_description,
-                     population_location, study_design, outcome_window_days)
-                     used to cross-check predictor_model rows against the
-                     anchor span. If None and ``db_session`` is given, the
-                     verifier looks up the cohort by ``claim['cohort_id']``.
-    db_session     : optional SQLAlchemy session OR sqlite3 connection used
-                     to resolve ``cohort_context`` when not passed directly.
+    skip_nli  : kept for backward-compat with ``reverify.py --regex-only``;
+                short-circuits to a regex-only verdict (no LLM call).
+    skip_llm  : explicit opt-out from the LLM tier (alias for skip_nli used
+                by tests). Either flag forces tier-1-only behaviour.
+
+    The LLM is called *unconditionally* on tier-2 cases; if it raises
+    (timeout / auth / network), the caller (`extractor.extract_paper` or
+    `reverify.reverify_table`) is expected to wrap the exception into a
+    ``partial`` verdict at the integration layer.
     """
     import time
 
@@ -497,37 +502,98 @@ def run_verifier(
 
     matched, contradicted, absent = _check_numeric_atoms(claim, source_span)
 
+    # Tier 1 short-circuits.
+    if contradicted:
+        resp = _aggregate(matched, contradicted, absent, [])
+        meta = {
+            "model": "local-regex",
+            "prompt_id": "verify_regex@v1",
+            "latency_ms": int((time.time() - t0) * 1000),
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            "tier": "regex",
+            "atoms_matched": list(matched),
+            "atoms_contradict": list(contradicted),
+            "atoms_absent": list(absent),
+        }
+        return resp, meta
+
+    # Pre-resolve cohort_context now so we can decide whether to short-circuit.
+    # The tier-1 "all atoms match → ok" rule is wrong when the surrounding
+    # sentence describes a *different* cohort. If we have cohort_context (or
+    # the claim itself carries population_description / population_location),
+    # always escalate to tier 2 so the LLM can do the cross-check.
     resolved_cohort = _resolve_cohort_context(claim, cohort_context, db_session)
+    has_cohort_xcheck = bool(
+        (resolved_cohort and (resolved_cohort.get("population_description")
+                              or resolved_cohort.get("population_location")))
+        or claim.get("population_description")
+        or claim.get("population_location")
+        or claim.get("outcome_window_days")
+    )
 
-    nli_results: list[tuple[str, str]] = []
-    if not skip_nli:
-        premise = source_span if not extra_context else f"{source_span}\n\n{extra_context}"
-        # If the premise is essentially a numeric table fragment (no prose
-        # context), the cohort/window cross-checks are noisy: the NLI model
-        # tends to hallucinate "contradict" when it can't ground the claim
-        # in any sentence at all. Drop the cohort_context atoms in that case
-        # but still run the predictor/outcome checks — they default to
-        # neutral on bare fragments and were the original behaviour.
-        word_count = len(re.findall(r"[A-Za-z]{3,}", premise or ""))
-        ctx_for_hyp = resolved_cohort if word_count >= 6 else None
-        hypotheses = _identifier_hypotheses(claim, ctx_for_hyp)
-        if hypotheses:
-            labels = [lbl for lbl, _ in hypotheses]
-            pairs = [(premise, hyp) for _, hyp in hypotheses]
-            verdicts = _nli_batch(pairs)
-            nli_results = list(zip(labels, verdicts))
+    if matched and not absent and not has_cohort_xcheck:
+        resp = _aggregate(matched, contradicted, absent, [])
+        meta = {
+            "model": "local-regex",
+            "prompt_id": "verify_regex@v1",
+            "latency_ms": int((time.time() - t0) * 1000),
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            "tier": "regex",
+            "atoms_matched": list(matched),
+            "atoms_contradict": [],
+            "atoms_absent": [],
+        }
+        return resp, meta
 
-    resp = _aggregate(matched, contradicted, absent, nli_results)
-    latency_ms = int((time.time() - t0) * 1000)
-    meta = {
-        "model": f"local-regex+{_NLI_MODEL_NAME}",
-        "prompt_id": "verify_nli@v1",
-        "latency_ms": latency_ms,
-        "tokens_in": 0,
-        "tokens_out": 0,
-        "cost_usd": 0.0,
-        "atoms_matched": list(matched) + [l for l, v in nli_results if v == "entail"],
-        "atoms_contradict": list(contradicted) + [l for l, v in nli_results if v == "contradict"],
-        "atoms_absent": list(absent) + [l for l, v in nli_results if v == "neutral"],
-    }
-    return resp, meta
+    # Tier 1 was inconclusive. If the caller asked for regex-only, fall back
+    # to the regex aggregate (pre-existing skip_nli behaviour).
+    if skip_nli or skip_llm:
+        resp = _aggregate(matched, contradicted, absent, [])
+        meta = {
+            "model": "local-regex",
+            "prompt_id": "verify_regex@v1",
+            "latency_ms": int((time.time() - t0) * 1000),
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            "tier": "regex",
+            "atoms_matched": list(matched),
+            "atoms_contradict": list(contradicted),
+            "atoms_absent": list(absent),
+        }
+        return resp, meta
+
+    # Tier 2 — LLM judge with full-paper context. Merge cohort fields into
+    # the claim so the judge can do the cohort/setting cross-check NLI used
+    # to do (resolved_cohort was computed above for short-circuit gating).
+    judge_claim = dict(claim)
+    if resolved_cohort:
+        for k in (
+            "population_description",
+            "population_location",
+            "study_design",
+            "cohort_label",
+        ):
+            v = resolved_cohort.get(k)
+            if v and not judge_claim.get(k):
+                judge_claim[k] = v
+
+    # Lazy import: keeps this module importable even when openrouter / openai
+    # isn't installed in a minimal environment.
+    from src.extract.verify_llm import _load_paper_text, run_llm_judge
+
+    paper_text = _load_paper_text(paper_id)
+    cache_con = _kwargs.get("cache_con")
+    return run_llm_judge(
+        judge_claim,
+        source_span,
+        paper_text,
+        paper_id=paper_id,
+        row_id=row_id,
+        run_id=run_id,
+        cache_con=cache_con,
+    )

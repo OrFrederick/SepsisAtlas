@@ -61,7 +61,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 
 .split {
   display: grid;
-  grid-template-columns: 480px 1px 1fr;
+  grid-template-columns: 1fr 1px 1fr;
   height: 100%;
   overflow: hidden;
 }

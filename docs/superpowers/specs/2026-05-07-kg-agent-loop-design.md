@@ -190,6 +190,35 @@ New columns:
 
 **Footer (when ≥3 rows of same `effect_type`):** `Pooled OR 1.84 (1.42–2.39), τ²=0.07, k=4 studies, I²=23%` from `pool_effects`.
 
+## What KG buys you over SQL — calibrating expectations
+
+The KG backend is not uniformly "better." It wins on certain query classes and ties on others. Spelling this out so expectations match reality before implementation.
+
+### Genuinely KG-native (the SQL adapter cannot easily match)
+
+- **Co-tested column** — sibling predictors on the same cohort, O(1) from the graph index. SQL would need a correlated subquery or self-join per row.
+- **Pooled-effect footer** — DerSimonian–Laird aggregate when ≥3 rows share an effect type. SQL has no path to this without an out-of-band call into `src/stats/meta.py`. The agent uses `pool_effects` as a first-class tool.
+- **Shape selection per query** — the agent picks `evidence` / `ranked_predictors` / `study_summary` based on the question. The SQL adapter renders one fixed shape. *"Which predictor has the highest AUC across the corpus?"* → `ranked_predictors` from KG (one row per predictor, best metric); the SQL adapter forces you to scan a per-row evidence table.
+- **Cross-modal grounding** — agent can pivot from a `PredictorModel` to its `Section` to embedding-RAG over the section's neighborhood text, all in one loop. SQL has no equivalent.
+
+### Marginally better (portable to SQL with a small precompute pass)
+
+- **Adjustment column** — parsed from `model_specification`.
+- **Performance column** — `AUC (95% CI)` already in DB.
+- **Population relevance** — heuristic on `population_description`.
+
+These can and should be added to the SQL adapter independently — small change to `pipelines/sepsis_atlas.py`'s table renderer, no agent loop required. They're only listed as "KG features" in this doc because they happen to ship with the KG path; treating them as KG-exclusive misrepresents the value.
+
+### Same (single-paper or single-predictor lookups)
+
+For *"what does Cao 2021 say about SOFA?"*, both backends produce essentially the same table. The KG adds +3 columns of context but nothing structural.
+
+### Implication for the implementation plan
+
+- Snapshot eval covers ~10 demo queries. The agent's row selection must meet a known floor on each (asserted in `tests/test_kg_agent.py`); otherwise the "better table" claim doesn't hold and the agent path isn't earning its credit cost.
+- The three portable columns (Adjustment / Performance / Pop. Relevance) are valuable enough that they should ship in `pipelines/sepsis_atlas.py` as a small follow-up regardless of the KG work — identical UX win for users on the SQL path.
+- The KG backend's distinguishing feature is **shape selection**, not column count. Agent prompts should bias toward picking the right shape, not toward producing a maximally-rich evidence table.
+
 ## Human query path
 
 For ad-hoc human inspection (not just the agent):

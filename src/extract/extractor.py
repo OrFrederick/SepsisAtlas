@@ -72,17 +72,16 @@ def _load_prompt(name: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _schema_response_format(name: str, model_cls) -> dict:
-    """Build OpenRouter/Anthropic-compatible response_format from a Pydantic model."""
-    schema = model_cls.model_json_schema()
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": name,
-            "strict": True,
-            "schema": schema,
-        },
-    }
+def _json_object_format() -> dict:
+    """OpenRouter+Anthropic-supported JSON-mode envelope. Strict json_schema with
+    Pydantic-derived $defs hits Cloudflare 524 on the upstream provider, so we
+    enforce the shape via prompt + post-hoc Pydantic validation instead."""
+    return {"type": "json_object"}
+
+
+def _schema_hint(model_cls) -> str:
+    """Compact JSON schema string to embed in the system prompt as a guide."""
+    return json.dumps(model_cls.model_json_schema(), separators=(",", ":"))
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +115,23 @@ def _call_verifier(messages, model, **kwargs):
 # ---------------------------------------------------------------------------
 
 
+def _slim_paper(paper_json: dict) -> dict:
+    """Drop bulky fields (full_text, offsets) the LLM does not need."""
+    return {k: v for k, v in paper_json.items() if k not in ("full_text", "offsets")}
+
+
+def _check_resp(resp, stage: str) -> str:
+    """Raise a useful error when OpenRouter returns no choices (timeout etc.)."""
+    if not getattr(resp, "choices", None):
+        err = getattr(resp, "error", None) or getattr(resp, "model_extra", {}).get("error")
+        raise RuntimeError(f"{stage}: provider returned no choices ({err!r})")
+    msg = resp.choices[0].message
+    content = getattr(msg, "content", None)
+    if not content:
+        raise RuntimeError(f"{stage}: empty content (refusal={getattr(msg,'refusal',None)!r})")
+    return content
+
+
 def run_cohort_enum(
     paper_json: dict,
     *,
@@ -127,19 +143,24 @@ def run_cohort_enum(
     sys_prompt, prompt_id = _load_prompt("cohort_enum_v1.md")
     user_payload = {
         "paper_id": paper_id,
-        "parsed_paper": paper_json,
+        "parsed_paper": _slim_paper(paper_json),
     }
+    sys_prompt_with_schema = (
+        sys_prompt
+        + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
+        + _schema_hint(CohortEnumResponse)
+    )
     messages = [
-        {"role": "system", "content": sys_prompt},
+        {"role": "system", "content": sys_prompt_with_schema},
         {
             "role": "user",
             "content": (
                 "Enumerate cohorts for the parsed paper below. Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]  # cap to avoid blowing context
+                + json.dumps(user_payload)[:200_000]
             ),
         },
     ]
-    rf = _schema_response_format("CohortEnumResponse", CohortEnumResponse)
+    rf = _json_object_format()
     t0 = time.time()
     resp = _call_cohort_enum(
         messages,
@@ -151,7 +172,7 @@ def run_cohort_enum(
         prompt_id=prompt_id,
     )
     latency_ms = int((time.time() - t0) * 1000)
-    raw = resp.choices[0].message.content
+    raw = _check_resp(resp, "cohort_enum")
     parsed = CohortEnumResponse.model_validate_json(_strip_fences(raw))
     meta = {
         "model": model,
@@ -185,10 +206,15 @@ def run_predictor_extract(
         "cohort_id": cohort.cohort_id,
         "cohort_label": cohort.cohort_label,
         "data_sets": cohort.data_sets,
-        "parsed_paper": paper_json,
+        "parsed_paper": _slim_paper(paper_json),
     }
+    sys_prompt_with_schema = (
+        sys_prompt
+        + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
+        + _schema_hint(PredictorExtractResponse)
+    )
     messages = [
-        {"role": "system", "content": sys_prompt},
+        {"role": "system", "content": sys_prompt_with_schema},
         {
             "role": "user",
             "content": (
@@ -199,7 +225,7 @@ def run_predictor_extract(
             ),
         },
     ]
-    rf = _schema_response_format("PredictorExtractResponse", PredictorExtractResponse)
+    rf = _json_object_format()
     t0 = time.time()
     resp = _call_predictor_extract(
         messages,
@@ -211,7 +237,7 @@ def run_predictor_extract(
         prompt_id=prompt_id,
     )
     latency_ms = int((time.time() - t0) * 1000)
-    raw = resp.choices[0].message.content
+    raw = _check_resp(resp, "predictor_extract")
     parsed = PredictorExtractResponse.model_validate_json(_strip_fences(raw))
     meta = {
         "model": model,
@@ -241,8 +267,13 @@ def run_verifier(
     model: str = MODEL_VERIFY,
 ) -> tuple[VerifierResponse, dict]:
     sys_prompt, prompt_id = _load_prompt("verifier_v1.md")
+    sys_prompt_with_schema = (
+        sys_prompt
+        + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
+        + _schema_hint(VerifierResponse)
+    )
     messages = [
-        {"role": "system", "content": sys_prompt},
+        {"role": "system", "content": sys_prompt_with_schema},
         {
             "role": "user",
             "content": json.dumps(
@@ -250,7 +281,7 @@ def run_verifier(
             ),
         },
     ]
-    rf = _schema_response_format("VerifierResponse", VerifierResponse)
+    rf = _json_object_format()
     t0 = time.time()
     resp = _call_verifier(
         messages,
@@ -263,7 +294,7 @@ def run_verifier(
         prompt_id=prompt_id,
     )
     latency_ms = int((time.time() - t0) * 1000)
-    raw = resp.choices[0].message.content
+    raw = _check_resp(resp, "verifier")
     parsed = VerifierResponse.model_validate_json(_strip_fences(raw))
     meta = {
         "model": model,

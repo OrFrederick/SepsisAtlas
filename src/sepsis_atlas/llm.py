@@ -25,6 +25,8 @@ def get_client() -> OpenAI:
         _client = OpenAI(
             api_key=OPENROUTER_API_KEY,
             base_url=OPENROUTER_BASE_URL,
+            timeout=300.0,
+            max_retries=3,
             default_headers={
                 "HTTP-Referer": "https://github.com/sepsis-atlas",
                 "X-Title": "Sepsis Atlas",

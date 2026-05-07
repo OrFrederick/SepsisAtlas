@@ -89,6 +89,51 @@ class VerifierResponse(BaseModel):
     rationale: str
 
 
+class StudyPhenotypeSummaryOut(BaseModel):
+    paper_ref: str
+    country: Optional[str] = None
+    setting: Optional[str] = None
+    sample_size_n: Optional[str] = None
+    sepsis_definition: Optional[str] = None
+    clustering_method: str
+    n_clusters: int
+    clustering_variables: Optional[str] = Field(
+        default=None,
+        description="Semicolon-separated verbatim list of variables used for clustering.",
+    )
+    external_assignment_feasible: Optional[str] = Field(
+        default=None,
+        description="'yes' / 'no' / 'partial' with optional rationale appended.",
+    )
+    cohort_id: Optional[str] = None
+    field_status: FieldStatus = "ok"
+    anchor: Anchor
+
+
+class PhenotypeClusterOut(BaseModel):
+    cluster_label: str = Field(description="A / B / C / alpha / 1 etc., as printed in the paper.")
+    cluster_size_n: Optional[str] = None
+    key_features: Optional[str] = Field(
+        default=None,
+        description=(
+            "Semicolon-separated key:value pairs verbatim from paper, e.g. "
+            "'Lactate: median 4.2; SOFA: median 8; Platelets: mean 180'."
+        ),
+    )
+    clinical_description: Optional[str] = None
+    outcomes: Optional[str] = None
+    notes: Optional[str] = None
+    field_status: FieldStatus = "ok"
+    anchor: Anchor
+
+
+class PhenotypeExtractResponse(BaseModel):
+    is_phenotype_paper: bool
+    rationale: str
+    summary: Optional[StudyPhenotypeSummaryOut] = None
+    clusters: list[PhenotypeClusterOut] = Field(default_factory=list)
+
+
 class IntentParse(BaseModel):
     outcome_type: Optional[str] = None
     outcome_window_days: Optional[int] = None

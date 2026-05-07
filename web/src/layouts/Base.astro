@@ -3,7 +3,7 @@ import "../styles/global.css";
 
 interface Props {
   title: string;
-  route?: "chat" | "papers" | "viewer" | "graph";
+  route?: "chat" | "papers" | "viewer" | "graph" | "rank";
 }
 
 const { title, route } = Astro.props;
@@ -24,6 +24,7 @@ const b = base.endsWith("/") ? base : base + "/";
         <a href={b} class={route === "chat" ? "active" : ""}>Chat</a>
         <a href={`${b}graph/`} class={route === "graph" ? "active" : ""}>Graph</a>
         <a href={`${b}papers/`} class={route === "papers" ? "active" : ""}>Papers</a>
+        <a href={`${b}rank/`} class={route === "rank" ? "active" : ""}>Rank predictors</a>
       </nav>
     </header>
     <main>

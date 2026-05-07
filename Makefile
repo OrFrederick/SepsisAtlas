@@ -1,4 +1,4 @@
-.PHONY: install initdb parse ingest extract validate serve up down test fmt kg-shell kg-inspect
+.PHONY: install initdb parse ingest extract validate serve up down test fmt kg-shell kg-inspect extract-phenotype eval-uc2 eval-uc3
 
 install:
 	pip install -e ".[dev]"
@@ -38,3 +38,12 @@ kg-shell:
 
 kg-inspect:
 	uv run python -m scripts.kg_inspect
+
+extract-phenotype:
+	python -m src.extract.run_phenotype --all
+
+eval-uc2:
+	python scripts/eval_uc2.py
+
+eval-uc3:
+	python scripts/eval_uc3.py

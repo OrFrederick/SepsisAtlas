@@ -66,7 +66,14 @@ services:
     environment:
       - WEBUI_AUTH=False                                # demo only
       - WEBUI_AUTH_TRUSTED_IFRAME_ORIGINS=http://backend:8000,http://localhost:8000
+      - WEBUI_NAME=Sepsis Atlas
+      - WEBUI_BANNERS=[]
+      - DEFAULT_LOCALE=en-US
+      - DEFAULT_MODELS=sepsis_atlas
+      - DEFAULT_PROMPT_SUGGESTIONS=[]
       - ENABLE_SIGNUP=False
+      - ENABLE_LOGIN_FORM=False
+      - ENABLE_API_KEY=False
       - ENABLE_OPENAI_API=True
       - OPENAI_API_BASE_URLS=http://pipelines:9099
       - OPENAI_API_KEYS=0p3n-w3bu!
@@ -91,20 +98,43 @@ services:
       - ENABLE_DIRECT_CONNECTIONS=False
       - ENABLE_EVALUATION_ARENA_MODELS=False
       - ENABLE_ADMIN_CHAT_ACCESS=False
+      - ENABLE_NOTES=False
+      - ENABLE_CHANNELS=False
+      - ENABLE_USER_WEBHOOKS=False
+      - AUDIO_STT_ENGINE=
+      - AUDIO_TTS_ENGINE=
       - USER_PERMISSIONS_CHAT_FILE_UPLOAD=False
       - USER_PERMISSIONS_CHAT_DELETE=False
       - USER_PERMISSIONS_CHAT_EDIT=True
       - USER_PERMISSIONS_CHAT_TEMPORARY=False
+      - USER_PERMISSIONS_CHAT_STT=False
+      - USER_PERMISSIONS_CHAT_TTS=False
+      - USER_PERMISSIONS_CHAT_CALL=False
+      - USER_PERMISSIONS_CHAT_MULTIPLE_MODELS=False
+      - USER_PERMISSIONS_CHAT_CONTROLS=False
+      - USER_PERMISSIONS_CHAT_SYSTEM_PROMPT=False
+      - USER_PERMISSIONS_CHAT_PARAMS=False
+      - USER_PERMISSIONS_CHAT_VALVES=False
       - USER_PERMISSIONS_FEATURES_CODE_INTERPRETER=False
       - USER_PERMISSIONS_FEATURES_WEB_SEARCH=False
       - USER_PERMISSIONS_FEATURES_IMAGE_GENERATION=False
       - USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS=False
+      - USER_PERMISSIONS_FEATURES_NOTES=False
+      - USER_PERMISSIONS_FEATURES_PLUGINS=False
       - USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS=False
       - USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS=False
       - USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS=False
       - USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS=False
+      - USER_PERMISSIONS_SHARING_PUBLIC_MODELS=False
+      - USER_PERMISSIONS_SHARING_PUBLIC_KNOWLEDGE=False
+      - USER_PERMISSIONS_SHARING_PUBLIC_PROMPTS=False
+      - USER_PERMISSIONS_SHARING_PUBLIC_TOOLS=False
+      # Some feature flags get cached into webui.db on first boot. Resetting
+      # the persistent config on every start keeps the lockdown deterministic.
+      - RESET_CONFIG_ON_START=true
     volumes:
       - openwebui_data:/app/backend/data
+      - ./static/openwebui-custom.css:/app/build/static/custom.css:ro
     ports:
       - "3000:8080"
     networks: [sepsis]

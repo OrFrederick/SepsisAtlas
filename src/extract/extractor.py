@@ -27,7 +27,6 @@ from sepsis_atlas.config import (
     GROUND_TRUTH,
     LOGS_DIR,
     MODEL_EXTRACT,
-    MODEL_VERIFY,
     PAPERS_PARSED,
     PIPELINE_VERSION,
     SCHEMA_VERSION,
@@ -51,7 +50,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.extract.anchor_resolver import build_index, resolve, to_flat_bbox
 from src.extract.parse_effect import parse_effect_size
-from src.extract.verify_nli import run_verifier as run_verifier_local
+from src.extract.verify_nli import run_verifier
 
 # ---------------------------------------------------------------------------
 # Prompt loading + IDs
@@ -100,13 +99,6 @@ def _call_cohort_enum(messages, model, **kwargs):
 
 @logged_llm_call(stage="predictor_extract")
 def _call_predictor_extract(messages, model, **kwargs):
-    return get_client().chat.completions.create(
-        messages=messages, model=model, **kwargs
-    )
-
-
-@logged_llm_call(stage="verifier")
-def _call_verifier(messages, model, **kwargs):
     return get_client().chat.completions.create(
         messages=messages, model=model, **kwargs
     )
@@ -252,63 +244,6 @@ def run_predictor_extract(
         ),
     }
     return parsed.rows, meta
-
-
-# ---------------------------------------------------------------------------
-# Verifier
-# ---------------------------------------------------------------------------
-
-
-def run_verifier(
-    claim: dict,
-    source_span: str,
-    *,
-    paper_id: str,
-    run_id: str,
-    row_id: str,
-    model: str = MODEL_VERIFY,
-) -> tuple[VerifierResponse, dict]:
-    sys_prompt, prompt_id = _load_prompt("verifier_v1.md")
-    sys_prompt_with_schema = (
-        sys_prompt
-        + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
-        + _schema_hint(VerifierResponse)
-    )
-    messages = [
-        {"role": "system", "content": sys_prompt_with_schema},
-        {
-            "role": "user",
-            "content": json.dumps(
-                {"claim": claim, "source_span": source_span}, ensure_ascii=False
-            ),
-        },
-    ]
-    rf = _json_object_format()
-    t0 = time.time()
-    resp = _call_verifier(
-        messages,
-        model,
-        response_format=rf,
-        temperature=0,
-        run_id=run_id,
-        paper_id=paper_id,
-        row_id=row_id,
-        prompt_id=prompt_id,
-    )
-    latency_ms = int((time.time() - t0) * 1000)
-    raw = _check_resp(resp, "verifier")
-    parsed = VerifierResponse.model_validate_json(_strip_fences(raw))
-    meta = {
-        "model": model,
-        "prompt_id": prompt_id,
-        "latency_ms": latency_ms,
-        "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
-        "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
-        "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-        ),
-    }
-    return parsed, meta
 
 
 def _strip_fences(s: str) -> str:
@@ -498,7 +433,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         for c in cohorts:
             _bind_anchor(c.anchor)
             try:
-                verdict, vmeta = run_verifier_local(
+                verdict, vmeta = run_verifier(
                     c.model_dump(mode="json"),
                     c.anchor.text or "",
                     paper_id=file_stem,
@@ -537,7 +472,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             for r in rows:
                 _bind_anchor(r.anchor)
                 try:
-                    verdict, vmeta = run_verifier_local(
+                    verdict, vmeta = run_verifier(
                         r.model_dump(mode="json"),
                         r.anchor.text or "",
                         paper_id=file_stem,

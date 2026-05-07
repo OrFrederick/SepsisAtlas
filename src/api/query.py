@@ -99,6 +99,7 @@ Allowed JSON keys:
 - outcome_window_days: integer (28, 30, 60, 90, 180, 365) or null
 - predictor: short canonical predictor name (lactate, SOFA, APACHE_II, qSOFA, ...) or null
 - population: object with optional keys {condition, age_band, setting}
+- paper_ref: study citation in "Author YYYY" form when the user names a specific paper (e.g. "Zhang 2021", "Seymour 2016") or null
 - intent: one of [ranking, lookup, comparison, summary]
 
 Return ONLY the JSON object. No prose. No code fences.
@@ -173,11 +174,17 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
 
     intent = "ranking" if any(w in text_l for w in ["best", "rank", "top", "compare"]) else "lookup"
 
+    paper_ref: str | None = None
+    m = re.search(r"\b([A-Z][a-zA-Z'\-]+)\s+((?:19|20)\d{2})\b", nl_text)
+    if m:
+        paper_ref = f"{m.group(1)} {m.group(2)}"
+
     return IntentParse(
         outcome_type=out_type,
         outcome_window_days=window,
         predictor=predictor,
         population=population,
+        paper_ref=paper_ref,
         intent=intent,
     )
 
@@ -238,6 +245,10 @@ SELECT
     sc.cohort_label       AS cohort_label,
     sc.cohort_size_n      AS cohort_size_n,
     sc.population_description AS population_description,
+    sc.population_location AS population_location,
+    sc.study_design       AS study_design,
+    sc.cohort_characteristics AS cohort_characteristics,
+    sc.encounters_period  AS encounters_period,
     sc.mortality_rate_pct AS mortality_rate_pct,
     sc.mortality_timepoint AS mortality_timepoint
 FROM predictor_model pm
@@ -263,6 +274,10 @@ def build_sql(intent: IntentParse, *, window_override: int | None = None) -> tup
         where.append("(LOWER(pm.predictor_canonical) = :pcanon OR LOWER(pm.predictors) LIKE :plike)")
         params["pcanon"] = canon.lower()
         params["plike"] = f"%{canon.lower()}%"
+
+    if intent.paper_ref:
+        where.append("LOWER(sc.paper_ref) LIKE :paper_ref")
+        params["paper_ref"] = f"%{intent.paper_ref.lower()}%"
 
     cond = (intent.population or {}).get("condition")
     if cond:
@@ -333,10 +348,16 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
 # ---------------------------------------------------------------------------
 
 TABLE_COLS = [
-    ("paper_ref", "Paper"),
+    ("paper_ref", "Study"),
     ("cohort_label", "Cohort"),
+    ("population_location", "Location"),
+    ("study_design", "Design"),
+    ("cohort_size_n", "N"),
+    ("mortality_rate_pct", "Mort %"),
+    ("mortality_timepoint", "Mort timepoint"),
     ("predictors", "Predictor"),
     ("outcome", "Outcome"),
+    ("model_specification", "Method"),
     ("effect_size_str", "Effect"),
     ("verifier_verdict", "Verified"),
 ]

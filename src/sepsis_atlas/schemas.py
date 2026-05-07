@@ -94,4 +94,5 @@ class IntentParse(BaseModel):
     outcome_window_days: Optional[int] = None
     population: dict = Field(default_factory=dict)
     predictor: Optional[str] = None
+    paper_ref: Optional[str] = None
     intent: Literal["ranking", "lookup", "comparison", "summary"] = "lookup"

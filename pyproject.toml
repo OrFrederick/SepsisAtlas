@@ -1,0 +1,43 @@
+[project]
+name = "sepsis-atlas"
+version = "0.1.0"
+description = "Paper-to-knowledge pipeline for sepsis literature"
+requires-python = ">=3.11"
+dependencies = [
+    "docling>=2.0.0",
+    "openai>=1.40.0",
+    "anthropic>=0.40.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "sqlalchemy>=2.0.0",
+    "statsmodels>=0.14.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
+    "langfuse>=2.40.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "tenacity>=8.5.0",
+    "rich>=13.7.0",
+    "sentence-transformers>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

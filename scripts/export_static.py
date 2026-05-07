@@ -101,11 +101,25 @@ def _coerce(val: Any, kind: str) -> Any:
     return val
 
 
+_VERDICT_BUCKETS = {
+    "ok": "ok", "pass": "ok",
+    "weak": "weak", "warn": "weak", "partial": "weak",
+    "fail": "fail", "reject": "fail",
+    "unverified": "unverified", "": None, None: None,
+}
+
+
 def _norm_verdict(v: Any) -> str | None:
+    """Map raw DB verdict strings into the closed enum
+    {ok, weak, fail, unverified} that web/src/lib/types.ts declares.
+    Anything unrecognized falls back to 'unverified' rather than leaking
+    through and breaking the TS contract."""
     if v is None:
         return None
     s = str(v).strip().lower()
-    return s or None
+    if not s:
+        return None
+    return _VERDICT_BUCKETS.get(s, "unverified")
 
 
 # ---------- core export ----------
@@ -189,7 +203,7 @@ def export_rows(engine: Engine) -> list[dict]:
                 "paper_ref": _coerce(r["sc_paper_ref"], "str"),
                 "cohort_label": _coerce(r["sc_cohort_label"], "str"),
                 "file_name": _coerce(r["sc_file_name"], "str"),
-                "cohort_size_n": _coerce(r["sc_cohort_size_n"], "str"),
+                "cohort_size_n": _coerce(r["sc_cohort_size_n"], "int"),
                 "population_description": _coerce(r["sc_population_description"], "str"),
                 "population_location": _coerce(r["sc_population_location"], "str"),
                 "study_design": _coerce(r["sc_study_design"], "str"),

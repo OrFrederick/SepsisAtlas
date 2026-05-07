@@ -5,15 +5,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      publish_data_only:
-        description: "Re-export JSON only; skip Astro build (uses last built dist)"
-        required: false
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
 
 permissions:
   contents: read
@@ -34,6 +25,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -46,7 +40,6 @@ jobs:
         run: python scripts/export_static.py --db db.sqlite --out-dir web/public
 
       - name: Set up Node
-        if: ${{ github.event.inputs.publish_data_only != 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -54,23 +47,12 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install npm deps
-        if: ${{ github.event.inputs.publish_data_only != 'true' }}
         working-directory: web
         run: npm ci
 
       - name: Build Astro site
-        if: ${{ github.event.inputs.publish_data_only != 'true' }}
         working-directory: web
         run: npm run build
-
-      - name: Refresh JSON in existing dist (publish-data-only mode)
-        if: ${{ github.event.inputs.publish_data_only == 'true' }}
-        run: |
-          if [ ! -d web/dist ]; then
-            echo "web/dist not found; cannot publish-data-only without a prior full build."
-            exit 1
-          fi
-          cp -R web/public/. web/dist/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

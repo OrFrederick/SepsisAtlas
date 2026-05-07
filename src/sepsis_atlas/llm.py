@@ -6,13 +6,34 @@ import functools
 from pathlib import Path
 from typing import Any, Callable
 
-from openai import OpenAI
-
 from sepsis_atlas.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     LOGS_DIR,
+    LANGFUSE_PUBLIC_KEY,
+    LANGFUSE_SECRET_KEY,
+    LANGFUSE_HOST,
 )
+
+# Conditional Langfuse-traced OpenAI client. Falls back silently when keys absent
+# or when langfuse import / network fails. The bug that broke this previously
+# was upstream Cloudflare 524 returning choices=None which Langfuse couldn't
+# handle; that's been fixed at the extractor level by switching off strict
+# json_schema, so the wrapper is safe to re-enable here.
+if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY:
+    import os as _os
+    _os.environ.setdefault("LANGFUSE_PUBLIC_KEY", LANGFUSE_PUBLIC_KEY)
+    _os.environ.setdefault("LANGFUSE_SECRET_KEY", LANGFUSE_SECRET_KEY)
+    _os.environ.setdefault("LANGFUSE_HOST", LANGFUSE_HOST)
+    try:
+        from langfuse.openai import OpenAI  # type: ignore
+        _LANGFUSE_ENABLED = True
+    except Exception:
+        from openai import OpenAI  # type: ignore
+        _LANGFUSE_ENABLED = False
+else:
+    from openai import OpenAI  # type: ignore
+    _LANGFUSE_ENABLED = False
 
 _LOG_PATH = LOGS_DIR / "llm_calls.jsonl"
 
@@ -66,6 +87,21 @@ def logged_llm_call(stage: str):
             model = kwargs.get("model") or (args[1] if len(args) > 1 else "")
 
             prompt_hash = _hash_prompt(messages or "")
+
+            if _LANGFUSE_ENABLED:
+                kwargs.setdefault("name", stage)
+                kwargs.setdefault(
+                    "metadata",
+                    {
+                        "stage": stage,
+                        "run_id": run_id,
+                        "row_id": row_id,
+                        "paper_id": paper_id,
+                        "query_id": query_id,
+                        "prompt_id": prompt_id,
+                        "prompt_hash": prompt_hash,
+                    },
+                )
             t0 = time.time()
             err = None
             resp = None

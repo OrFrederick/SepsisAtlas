@@ -44,6 +44,10 @@ VERIFIER_BADGE = {
 class Pipeline:
     class Valves(BaseModel):
         BACKEND_URL: str = "http://backend:8000"
+        # Browser-facing backend URL for viewer links in markdown output.
+        # Pipeline calls /query via BACKEND_URL (container DNS); the user clicks
+        # links from their browser, which can only reach localhost.
+        PUBLIC_BACKEND_URL: str = "http://localhost:8000"
         REQUEST_TIMEOUT_S: float = 30.0
         STREAM_NARRATIVE: bool = True
         # Comma-separated list of OpenWebUI model ids that should NOT be intercepted
@@ -135,20 +139,40 @@ class Pipeline:
             effect = row.get("effect_size_str") or "—"
             cohort = row.get("cohort_id") or "—"
             predictor = row.get("predictor_canonical") or row.get("predictors") or "—"
-            row_id = row.get("id") or row.get("row_id") or ""
-            # OpenWebUI does not have native row buttons in markdown tables.
-            # Emit a hint that the LLM can convert to an open_source tool call,
-            # plus a click-style anchor that the user can paste back.
-            src_hint = f"`open_source({row_id})`" if row_id else "—"
+            src_md = self._source_link(row)
             lines.append(
-                f"| {i} | {predictor} | {cohort} | {effect} | {badge} | {src_hint} |"
+                f"| {i} | {predictor} | {cohort} | {effect} | {badge} | {src_md} |"
             )
 
         legend = (
             "\n_Verifier: ✓ pass · ~ weak · ✗ fail · ? unverified. "
-            "Click any cell's `open_source(...)` to view the highlighted PDF span._"
+            "Click a Source link to open the highlighted PDF span in a new tab._"
         )
         return "\n".join(lines) + legend
+
+    def _source_link(self, row: dict) -> str:
+        """Build a markdown link to /viewer/<file>?page=&bbox=&origin=tl.
+
+        anchor_bbox is stored as a JSON string (e.g. "[66.1, 464.7, 528.9, 787.0]").
+        anchor cells extracted from tables are TOPLEFT origin; sections may be
+        BOTTOMLEFT but the viewer auto-falls-back via origin=tl by default.
+        """
+        file_stem = row.get("file_name") or row.get("paper_ref") or ""
+        if not file_stem:
+            return "—"
+        page = row.get("anchor_page") or 1
+        bbox_raw = row.get("anchor_bbox")
+        bbox_q = ""
+        if bbox_raw:
+            try:
+                vals = json.loads(bbox_raw) if isinstance(bbox_raw, str) else bbox_raw
+                if isinstance(vals, list) and len(vals) == 4:
+                    bbox_q = f"&bbox={','.join(f'{v:.2f}' for v in vals)}&origin=tl"
+            except Exception:
+                pass
+        url = f"{self.valves.PUBLIC_BACKEND_URL}/viewer/{file_stem}?page={page}{bbox_q}"
+        label = f"{file_stem} p.{page}"
+        return f"[{label}]({url})"
 
     def _render_plot(self, payload: dict) -> str:
         qid = payload.get("query_id")

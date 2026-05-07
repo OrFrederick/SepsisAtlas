@@ -114,6 +114,10 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
 
+    // Disable bfcache scroll restoration — otherwise back/forward into the
+    // iframe lands at the previous scroll position before our jump runs.
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
     const FILE_STEM = "__FILE_STEM__";
     const PDF_URL = `/papers/${FILE_STEM}/pdf`;
 
@@ -252,22 +256,23 @@
       entry.wrap.scrollIntoView({ behavior: opts.behavior || "smooth", block: "start" });
     }
 
-    function scrollToBbox() {
+    function scrollToBbox(opts = {}) {
       const entry = pages[bboxPage - 1];
       if (!entry || !bbox) return;
       const ensure = entry.rendered ? Promise.resolve() : renderPage(entry);
       ensure.then(() => {
         const overlay = entry.overlay;
         if (overlay.style.display === "none") {
-          scrollToPage(bboxPage);
+          scrollToPage(bboxPage, opts);
           return;
         }
+        const scroller = document.scrollingElement || document.documentElement;
         const wrapRect = entry.wrap.getBoundingClientRect();
-        const overlayTop = parseFloat(overlay.style.top);
-        const overlayHeight = parseFloat(overlay.style.height);
-        const targetY = window.scrollY + wrapRect.top + overlayTop
+        const overlayTop = parseFloat(overlay.style.top) || 0;
+        const overlayHeight = parseFloat(overlay.style.height) || 0;
+        const targetY = scroller.scrollTop + wrapRect.top + overlayTop
                         - window.innerHeight / 2 + overlayHeight / 2;
-        window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        scroller.scrollTo({ top: Math.max(0, targetY), behavior: opts.behavior || "smooth" });
       });
     }
 
@@ -367,15 +372,22 @@
         setupObservers();
         setStatus("");
 
-        // Jump to target on load — render that page synchronously first.
-        const target = pages[currentPage - 1];
+        // Capture the target page in a local before observers can clobber
+        // currentPage. Render synchronously, then double-rAF + a 250ms retry
+        // so layout settles even if neighbour pages render in between and
+        // shift the scroll target.
+        const targetPage = currentPage;
+        const target = pages[targetPage - 1];
         if (target) {
           await renderPage(target);
-          if (bbox && currentPage === bboxPage) {
-            requestAnimationFrame(() => scrollToBbox());
-          } else {
-            requestAnimationFrame(() => scrollToPage(currentPage, { behavior: "auto" }));
-          }
+          const jump = () => {
+            if (bbox && targetPage === bboxPage) scrollToBbox({ behavior: "auto" });
+            else scrollToPage(targetPage, { behavior: "auto" });
+          };
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            jump();
+            setTimeout(jump, 250);
+          }));
         }
 
         try {

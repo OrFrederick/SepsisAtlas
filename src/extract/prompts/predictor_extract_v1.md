@@ -62,10 +62,19 @@ JSON conforming to the `rows` schema. Per-row fields:
 
 ## Anchor (REQUIRED per row)
 
-- `page`, `bbox`, `text` (verbatim sentence or table cell), `section`
-  (`"Results"`, `"Table 2"`, etc.).
-- `text` MUST literally contain the numeric values you're claiming. The
-  verifier will reject rows whose numbers do not appear in the anchor text.
+- `page` (int, 1-indexed page in the parsed paper).
+- `text` MUST be a verbatim substring of the parsed paper containing the
+  value(s) you're claiming. Use a complete sentence (in body text) or a
+  complete cell (in tables), NOT a number-only snippet. The longer and more
+  specific the substring, the easier it is for the resolver to disambiguate.
+  The verifier rejects rows whose text isn't substring-present in the paper.
+- `section` is the parent section name as it appears in the parsed paper
+  (e.g. `"Results"`, `"Model Performance"`, `"Table 2"`). Used as a
+  disambiguation tiebreaker when multiple offsets contain `text`.
+
+Do NOT emit `bbox` — leave it `null` or omit. A deterministic resolver computes
+the bbox from the parsed paper after extraction. Emitting a bbox here is
+harmful because the LLM cannot see per-sentence bboxes.
 
 ## Guardrails
 

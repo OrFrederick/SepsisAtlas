@@ -345,26 +345,26 @@ def export_papers(engine: Engine, rows: list[dict], repo_root: Path) -> list[dic
     return out
 
 
-def copy_pdfs(repo_root: Path, out_dir: Path) -> int:
+def link_pdfs(repo_root: Path, out_dir: Path) -> int:
+    """Make `<out_dir>/pdfs` a relative symlink to `data/papers/raw` so the
+    PDFs aren't duplicated on disk. Astro's `npm run build` follows the
+    symlink when it copies `public/` into `dist/`."""
     src_dir = repo_root / "data" / "papers" / "raw"
     if not src_dir.exists():
-        print(f"warning: {src_dir} not found, skipping PDF copy", file=sys.stderr)
+        print(f"warning: {src_dir} not found, skipping PDF link", file=sys.stderr)
         return 0
     dst_dir = out_dir / "pdfs"
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    n = 0
-    for src in src_dir.glob("*.pdf"):
-        dst = dst_dir / src.name
-        if dst.exists():
-            try:
-                if dst.stat().st_mtime >= src.stat().st_mtime:
-                    n += 1
-                    continue
-            except OSError:
-                pass
-        shutil.copy2(src, dst)
-        n += 1
-    return n
+    if dst_dir.is_symlink() or dst_dir.exists():
+        if dst_dir.is_symlink():
+            dst_dir.unlink()
+        elif dst_dir.is_dir():
+            shutil.rmtree(dst_dir)
+        else:
+            dst_dir.unlink()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = os.path.relpath(src_dir, dst_dir.parent)
+    dst_dir.symlink_to(target, target_is_directory=True)
+    return sum(1 for _ in src_dir.glob("*.pdf"))
 
 
 def db_sha(db_path: Path) -> str:
@@ -407,7 +407,7 @@ def main() -> int:
     else:
         print(f"warning: DB not found at {db_path}; emitting empty rows/papers", file=sys.stderr)
 
-    n_pdfs = copy_pdfs(repo_root, out_dir)
+    n_pdfs = link_pdfs(repo_root, out_dir)
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),

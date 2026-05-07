@@ -1,0 +1,22 @@
+{
+  "name": "sepsis-atlas-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "node scripts/seed-data.mjs && npm run vendor && astro build",
+    "vendor": "node scripts/vendor-pdfjs.mjs",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "fuse.js": "^7.0.0",
+    "pdfjs-dist": "4.10.38"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "typescript": "^5.6.3"
+  }
+}

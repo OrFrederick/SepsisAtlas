@@ -110,6 +110,9 @@
   <div id="stage"></div>
 
   <script type="module">
+    // Stop the browser from restoring its remembered scroll position after we
+    // jump to the cited page on load.
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
@@ -249,25 +252,26 @@
     function scrollToPage(num, opts = {}) {
       const entry = pages[num - 1];
       if (!entry) return;
-      entry.wrap.scrollIntoView({ behavior: opts.behavior || "smooth", block: "start" });
+      entry.wrap.scrollIntoView({ behavior: opts.behavior || "auto", block: "start" });
     }
 
-    function scrollToBbox() {
+    function scrollToBbox(opts = {}) {
       const entry = pages[bboxPage - 1];
       if (!entry || !bbox) return;
       const ensure = entry.rendered ? Promise.resolve() : renderPage(entry);
       ensure.then(() => {
         const overlay = entry.overlay;
         if (overlay.style.display === "none") {
-          scrollToPage(bboxPage);
+          scrollToPage(bboxPage, opts);
           return;
         }
+        const scroller = document.scrollingElement || document.documentElement;
         const wrapRect = entry.wrap.getBoundingClientRect();
-        const overlayTop = parseFloat(overlay.style.top);
-        const overlayHeight = parseFloat(overlay.style.height);
-        const targetY = window.scrollY + wrapRect.top + overlayTop
+        const overlayTop = parseFloat(overlay.style.top) || 0;
+        const overlayHeight = parseFloat(overlay.style.height) || 0;
+        const targetY = scroller.scrollTop + wrapRect.top + overlayTop
                         - window.innerHeight / 2 + overlayHeight / 2;
-        window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        scroller.scrollTo({ top: Math.max(0, targetY), behavior: opts.behavior || "auto" });
       });
     }
 
@@ -367,15 +371,20 @@
         setupObservers();
         setStatus("");
 
-        // Jump to target on load — render that page synchronously first.
-        const target = pages[currentPage - 1];
+        // Jump to target on load. Capture target page before observers can
+        // clobber currentPage by reporting page 1 as most-visible.
+        const targetPage = currentPage;
+        const target = pages[targetPage - 1];
         if (target) {
           await renderPage(target);
-          if (bbox && currentPage === bboxPage) {
-            requestAnimationFrame(() => scrollToBbox());
-          } else {
-            requestAnimationFrame(() => scrollToPage(currentPage, { behavior: "auto" }));
-          }
+          const jump = () => {
+            if (bbox && targetPage === bboxPage) scrollToBbox({ behavior: "auto" });
+            else scrollToPage(targetPage, { behavior: "auto" });
+          };
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            jump();
+            setTimeout(jump, 250);
+          }));
         }
 
         try {

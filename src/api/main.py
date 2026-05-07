@@ -276,6 +276,78 @@ def post_query_kg(req: QueryRequest) -> QueryResponse:
 
 
 # ---------------------------------------------------------------------------
+# /kg/graph — JSON dump of the Paper/Cohort/PredictorModel subgraph for the
+# Graph view. Skips Section/PaperTable/Figure/Reference to keep the payload
+# under ~50KB at the corpus size we have; the frontend force-graph layout
+# starts to choke past ~3000 nodes anyway.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/kg/graph")
+def get_kg_graph() -> dict:
+    try:
+        store = _get_kg_backend()._store
+    except Exception as e:
+        # str(e) on neo4j.exceptions can echo the bolt URI including
+        # credentials; only the exception class name is safe to surface.
+        print(f"[kg/graph] backend failure: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"KG backend unavailable ({type(e).__name__})",
+        )
+
+    paper_rows = store.run(
+        "MATCH (p:Paper) RETURN p.file_name AS id, p.paper_ref AS label, "
+        "p.year AS year, p.n_cohorts AS n_cohorts, "
+        "p.n_predictor_models AS n_predictor_models"
+    )
+    cohort_rows = store.run(
+        "MATCH (c:Cohort) RETURN c.cohort_id AS id, c.cohort_label AS label, "
+        "c.paper_file_name AS paper, c.cohort_size_n AS n, "
+        "c.population_description AS population"
+    )
+    pm_rows = store.run(
+        "MATCH (pm:PredictorModel) RETURN pm.id AS id, "
+        "pm.predictor_canonical AS predictor, pm.outcome_type AS outcome_type, "
+        "pm.outcome AS outcome, pm.effect_size_str AS effect, "
+        "pm.cohort_id AS cohort, pm.paper_file_name AS paper, "
+        "pm.verifier_verdict AS verdict, pm.anchor_page AS page, "
+        "pm.anchor_bbox AS bbox"
+    )
+    edge_rows = store.run(
+        "MATCH (a)-[r:HAS_COHORT|REPORTS]->(b) "
+        "RETURN type(r) AS kind, "
+        "coalesce(a.file_name, a.cohort_id, a.id) AS src, "
+        "coalesce(b.file_name, b.cohort_id, b.id) AS dst"
+    )
+
+    nodes: list[dict] = []
+    for r in paper_rows:
+        nodes.append({"id": r["id"], "type": "Paper", "label": r["label"] or r["id"],
+                      "year": r.get("year"), "n_cohorts": r.get("n_cohorts"),
+                      "n_predictor_models": r.get("n_predictor_models")})
+    for r in cohort_rows:
+        nodes.append({"id": r["id"], "type": "Cohort", "label": r["label"] or r["id"],
+                      "paper": r.get("paper"), "n": r.get("n"),
+                      "population": r.get("population")})
+    for r in pm_rows:
+        nodes.append({"id": r["id"], "type": "PredictorModel",
+                      "label": r.get("predictor") or r["id"],
+                      "predictor": r.get("predictor"),
+                      "outcome_type": r.get("outcome_type"),
+                      "outcome": r.get("outcome"), "effect": r.get("effect"),
+                      "cohort": r.get("cohort"), "paper": r.get("paper"),
+                      "verdict": r.get("verdict"), "page": r.get("page"),
+                      "bbox": r.get("bbox")})
+
+    edges = [{"src": r["src"], "dst": r["dst"], "kind": r["kind"]} for r in edge_rows]
+
+    return {"nodes": nodes, "edges": edges,
+            "stats": {"papers": len(paper_rows), "cohorts": len(cohort_rows),
+                      "predictor_models": len(pm_rows), "edges": len(edges)}}
+
+
+# ---------------------------------------------------------------------------
 # /viewer
 # ---------------------------------------------------------------------------
 

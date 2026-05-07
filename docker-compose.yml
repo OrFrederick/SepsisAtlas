@@ -1,0 +1,139 @@
+# Sepsis Atlas — full demo stack
+#
+# Brings up:
+#   - backend       FastAPI (Agent 3): /query, /viewer, /forest_plot, /ingest_pubmed
+#   - openwebui     ghcr.io/open-webui/open-webui:main on :3000
+#   - pipelines     ghcr.io/open-webui/pipelines:main with our pipelines/ mount
+#   - open_source   FastAPI tool on :9101 (returns iframe HTMLResponse)
+#   - meta_analyze  FastAPI tool on :9102
+#   - expand_pubmed FastAPI tool on :9103
+#
+# All services share the `sepsis` network, so containers resolve each other by
+# name (the iframe URLs use http://backend:8000/...).
+#
+# Usage:
+#   docker compose up --build
+#   open http://localhost:3000
+#   then: Admin → Pipelines → connect http://pipelines:9099 (default key 0p3n-w3bu!)
+#         Admin → Tools     → register http://open_source:9101/openapi.json
+#                                       http://meta_analyze:9102/openapi.json
+#                                       http://expand_pubmed:9103/openapi.json
+#         Settings → Interface → enable "Allow Iframe Sandbox Same-Origin Access"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: sepsis_backend
+    environment:
+      - DATABASE_URL=sqlite:////app/db.sqlite
+      - PYTHONPATH=/app/src
+    volumes:
+      - ./data:/app/data
+      - ./db.sqlite:/app/db.sqlite
+      - ./static:/app/static
+      - ./runs:/app/runs
+      - ./logs:/app/logs
+      - ./src:/app/src           # editable mount for hot reload during demo
+    ports:
+      - "8000:8000"
+    networks: [sepsis]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    container_name: sepsis_pipelines
+    environment:
+      - PIPELINES_API_KEY=0p3n-w3bu!
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./pipelines:/app/pipelines
+    ports:
+      - "9099:9099"
+    networks: [sepsis]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sepsis_openwebui
+    environment:
+      - WEBUI_AUTH=False                                # demo only
+      - WEBUI_AUTH_TRUSTED_IFRAME_ORIGINS=http://backend:8000,http://localhost:8000
+      - ENABLE_OPENAI_API=True
+      - OPENAI_API_BASE_URLS=http://pipelines:9099
+      - OPENAI_API_KEYS=0p3n-w3bu!
+    volumes:
+      - openwebui_data:/app/backend/data
+    ports:
+      - "3000:8080"
+    networks: [sepsis]
+    depends_on: [pipelines, backend]
+    restart: unless-stopped
+
+  open_source:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tool
+      args:
+        TOOL_MODULE: tools.sepsis_atlas.open_source
+        TOOL_PORT: "9101"
+    container_name: sepsis_tool_open_source
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./tools:/app/tools
+    ports:
+      - "9101:9101"
+    networks: [sepsis]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  meta_analyze:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tool
+      args:
+        TOOL_MODULE: tools.sepsis_atlas.meta_analyze
+        TOOL_PORT: "9102"
+    container_name: sepsis_tool_meta_analyze
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./tools:/app/tools
+    ports:
+      - "9102:9102"
+    networks: [sepsis]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  expand_pubmed:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tool
+      args:
+        TOOL_MODULE: tools.sepsis_atlas.expand_pubmed
+        TOOL_PORT: "9103"
+    container_name: sepsis_tool_expand_pubmed
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./tools:/app/tools
+    ports:
+      - "9103:9103"
+    networks: [sepsis]
+    depends_on: [backend]
+    restart: unless-stopped
+
+networks:
+  sepsis:
+    driver: bridge
+
+volumes:
+  openwebui_data:

@@ -396,3 +396,56 @@ class TestLuo2022:
             or "hematocrit" in (r["predictors"] or "").lower()
             for r in rows
         ), "Luo 2022 hematocrit predictor absent"
+
+
+# ---------------------------------------------------------------------------
+# Li 2024 — POST-REEXTRACT verification target.
+# Paper has Table 4 multivariate Cox HR for lactate (1.080, 0.011) computed
+# once across the n=209 Overall cohort. Old prompt erroneously created
+# Survivors / Non-survivors as separate cohorts (descriptive Table-2 partitions)
+# and attached the same Table 4 HR to all three. New prompt (`bfb2c39`) excludes
+# outcome-stratified subgroups, so post-reextract Li 2024 should collapse to a
+# single Overall cohort, with the HR attached once.
+#
+# These tests are xfail on the current db (which still has the 3-cohort over-split
+# state). Re-extract removes the xfail.
+# ---------------------------------------------------------------------------
+class TestLi2024PostReextract:
+    PAPER = "Li 2024"
+
+    @pytest.mark.xfail(reason="awaiting re-extract under new cohort_enum prompt")
+    def test_no_survivor_or_nonsurvivor_cohort(self, con):
+        labels = {(r["cohort_label"] or "").lower() for r in _cohort_rows(con, self.PAPER)}
+        bad = {l for l in labels if l in {"survivors", "non-survivors", "non survivors"}
+               or "survival group" in l or "death group" in l}
+        assert not bad, (
+            f"Li 2024 should not have outcome-stratified cohorts; got {bad}. "
+            "Indicates cohort_enum prompt fix didn't propagate via re-extract."
+        )
+
+    @pytest.mark.xfail(reason="awaiting re-extract under new cohort_enum prompt")
+    def test_overall_cohort_n_209(self, con):
+        rows = [
+            r for r in _cohort_rows(con, self.PAPER)
+            if (r["cohort_label"] or "").lower() in {"overall cohort", "total cohort", "total"}
+        ]
+        assert rows, "Li 2024 Overall cohort missing"
+        n = (rows[0]["cohort_size_n"] or "").replace(",", "").strip()
+        assert "209" in n, f"Li 2024 Overall cohort N should be 209; got {n!r}"
+
+    @pytest.mark.xfail(reason="awaiting re-extract under new cohort_enum prompt")
+    def test_lactate_hr_attaches_only_to_overall(self, con):
+        rows = _predictor_rows(con, self.PAPER)
+        lactate_rows = [
+            r for r in rows
+            if "lactate" in (r["predictors"] or "").lower()
+            and "1.080" in (r["effect_size_str"] or "")
+        ]
+        assert lactate_rows, "Li 2024 lactate HR=1.080 row missing"
+        cohorts_with_hr = {r["cohort_id"] for r in lactate_rows}
+        # Multivariate Cox is computed once on the full n=209 cohort; should
+        # not duplicate to subgroup cohorts.
+        assert len(cohorts_with_hr) == 1, (
+            f"Li 2024 lactate HR=1.080 attached to multiple cohorts: {cohorts_with_hr}. "
+            "Indicates predictor_extract is propagating Overall-cohort analyses to subgroups."
+        )

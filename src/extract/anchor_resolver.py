@@ -13,17 +13,54 @@ This module does no LLM calls and no network IO.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Iterable
 
 
 _WS_RE = re.compile(r"\s+")
 
+# Dash-like characters we fold to ASCII hyphen-minus for matching purposes:
+# en-dash, em-dash, figure-dash, horizontal-bar, minus-sign, hyphen, non-break
+# hyphen.
+_DASHES = "‐‑‒–—―−"
+_DASH_TRANSLATE = str.maketrans({c: "-" for c in _DASHES})
+
+# Whitespace-like Unicode code points (NBSP, narrow NBSP, zero-width space,
+# zero-width non-joiner / joiner, BOM, ideographic space). Mapped to a regular
+# space so the existing whitespace collapsing handles them.
+_SPACE_LIKE = "    ​‌‍﻿　"
+_SPACE_TRANSLATE = str.maketrans({c: " " for c in _SPACE_LIKE})
+
+# Strip thousands-separator commas from runs of digits (`1,234,567` -> `1234567`)
+# but only when the comma is between digits — preserves list commas like
+# `0.83, 0.79`.
+_THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+
 
 def _norm(s: str) -> str:
-    """Collapse all runs of whitespace to a single space and strip."""
+    """Normalize a string for resolver matching.
+
+    Goals:
+
+    * fold Unicode compatibility forms (NFKC) so e.g. ligatures and full-width
+      digits become their plain-ASCII counterparts;
+    * collapse en/em-dashes / minus signs / non-breaking hyphens to ``-``;
+    * map NBSP and other zero-width whitespace to regular spaces;
+    * collapse all whitespace runs to a single space and lowercase;
+    * drop thousands-separator commas inside numeric runs (``1,234`` ->
+      ``1234``) without disturbing list commas.
+
+    The output is intentionally not the same string a human would read — it is
+    only meant to be compared against another ``_norm()``'d string.
+    """
     if s is None:
         return ""
-    return _WS_RE.sub(" ", s).strip()
+    s = unicodedata.normalize("NFKC", s)
+    s = s.translate(_SPACE_TRANSLATE)
+    s = s.translate(_DASH_TRANSLATE)
+    s = _THOUSANDS_RE.sub("", s)
+    s = _WS_RE.sub(" ", s).strip().lower()
+    return s
 
 
 def to_flat_bbox(bbox_dict: dict | None) -> list[float] | None:
@@ -124,7 +161,7 @@ def _substring_hits(needle: str, haystack: Iterable[dict]) -> list[dict]:
 
 
 def _normalized_hits(needle_norm: str, haystack: Iterable[dict]) -> list[dict]:
-    """Return entries whose whitespace-normalized text contains ``needle_norm``."""
+    """Return entries whose normalized text contains ``needle_norm``."""
     return [
         e
         for e in haystack
@@ -137,7 +174,8 @@ def _strip_all_ws(s: str) -> str:
 
 
 def _stripped_hits(needle_stripped: str, haystack: Iterable[dict]) -> list[dict]:
-    """Return entries whose all-whitespace-stripped text contains ``needle_stripped``.
+    """Return entries whose all-whitespace-stripped (and normalized) text
+    contains ``needle_stripped``.
 
     Last-ditch fallback for cases where Docling inserts stray spaces inside
     citations / parentheses (e.g. ``Figure 2B )`` vs ``Figure 2B)``).
@@ -146,51 +184,69 @@ def _stripped_hits(needle_stripped: str, haystack: Iterable[dict]) -> list[dict]
         e
         for e in haystack
         if needle_stripped
-        and needle_stripped in _strip_all_ws(e.get("text") or "")
+        and needle_stripped in _strip_all_ws(_norm(e.get("text") or ""))
     ]
 
 
-def resolve(
-    anchor_text: str,
-    anchor_section: str | None,
-    index: list[dict],
-) -> dict | None:
-    """Find the best matching index entry for ``anchor_text``.
+_TOKEN_RE = re.compile(r"[\w.]+", re.UNICODE)
 
-    Tiered strategy:
 
-    1. **Exact substring**: any entry whose ``text`` contains ``anchor_text``
-       verbatim. Single hit wins immediately.
-    2. **Section disambiguation**: when there are multiple substring hits and
-       the LLM gave us a non-empty ``anchor_section``, filter to entries whose
-       section matches case-insensitively. Single survivor wins.
-    3. **Smallest text**: among remaining candidates, pick the one with the
-       shortest ``text`` (most specific containing element).
+def _tokens(s: str) -> set[str]:
+    return set(_TOKEN_RE.findall(_norm(s)))
 
-    If exact-substring yields nothing, retry on whitespace-normalized text on
-    both sides. Returns ``None`` if every tier fails.
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    return inter / len(a | b)
+
+
+def _fuzzy_hits(
+    needle: str,
+    haystack: Iterable[dict],
+    threshold: float = 0.85,
+) -> list[dict]:
+    """Token-set Jaccard fallback.
+
+    Returns entries whose token set has Jaccard similarity ``>= threshold``
+    with the needle's token set. Caller is responsible for length-gating —
+    short needles aren't safe here.
     """
-    if not anchor_text or not index:
-        return None
+    needle_tokens = _tokens(needle)
+    if not needle_tokens:
+        return []
+    out: list[dict] = []
+    for e in haystack:
+        text = e.get("text") or ""
+        if not text:
+            continue
+        if _jaccard(needle_tokens, _tokens(text)) >= threshold:
+            out.append(e)
+    return out
 
-    hits = _substring_hits(anchor_text, index)
 
-    if not hits:
-        needle_norm = _norm(anchor_text)
-        hits = _normalized_hits(needle_norm, index)
+def _window_hits(needle_norm: str, haystack: Iterable[dict], window: int = 60) -> list[dict]:
+    """Sliding-window fallback.
 
-    if not hits:
-        needle_stripped = _strip_all_ws(anchor_text)
-        # Require a reasonable length so we don't over-match short numeric tokens.
-        if len(needle_stripped) >= 12:
-            hits = _stripped_hits(needle_stripped, index)
+    Take the first ``window`` chars of the normalized needle and look for any
+    entry whose normalized text contains it. Caller gates on needle length.
+    """
+    head = needle_norm[:window]
+    if not head:
+        return []
+    return [e for e in haystack if head in _norm(e.get("text") or "")]
 
-    if not hits:
-        return None
 
+def _disambiguate(
+    hits: list[dict],
+    anchor_section: str | None,
+) -> dict:
+    """Apply section-equality filter, then smallest-text tiebreak."""
     if len(hits) == 1:
         return hits[0]
-
     if anchor_section:
         section_norm = anchor_section.strip().lower()
         filtered = [
@@ -202,6 +258,69 @@ def resolve(
             return filtered[0]
         if filtered:
             hits = filtered
-
-    # Length tiebreak: smallest text == most specific element containing the needle.
     return min(hits, key=lambda e: len(e.get("text") or ""))
+
+
+def resolve(
+    anchor_text: str,
+    anchor_section: str | None,
+    index: list[dict],
+) -> dict | None:
+    """Find the best matching index entry for ``anchor_text``.
+
+    Tiered strategy (each tier feeds into the same disambiguation routine —
+    section-equality, then smallest-text tiebreak):
+
+    1. **Exact substring** — entry whose verbatim ``text`` contains the
+       verbatim ``anchor_text``.
+    2. **Normalized substring** — same comparison after :func:`_norm` is
+       applied to both sides (NFKC, dashes, NBSP, thousands-commas,
+       whitespace, lowercase).
+    3. **All-whitespace-stripped** — drop every whitespace character on both
+       sides and compare. Catches Docling's stray ``Figure 2B )`` artifacts.
+       Gated on ``len(stripped) >= 12`` so we don't latch onto short numeric
+       tokens.
+    4. **Fuzzy token-set Jaccard** — for anchors of length ``>= 30``,
+       tokenize both sides and accept any entry with Jaccard ``>= 0.85``.
+       Catches paraphrase-level whitespace / punctuation drift the
+       substring tiers miss.
+    5. **Sliding-window head match** — last-ditch: for anchors of length
+       ``>= 60`` whose first 60 normalized characters appear *uniquely* in
+       exactly one index entry, accept that entry. Ambiguous (>1) hits are
+       ignored to keep precision up.
+
+    Returns ``None`` if every tier fails.
+    """
+    if not anchor_text or not index:
+        return None
+
+    # Tier 1: exact substring.
+    hits = _substring_hits(anchor_text, index)
+
+    # Tier 2: normalized substring.
+    if not hits:
+        needle_norm = _norm(anchor_text)
+        if needle_norm:
+            hits = _normalized_hits(needle_norm, index)
+
+    # Tier 3: all-whitespace-stripped.
+    if not hits:
+        needle_stripped = _strip_all_ws(_norm(anchor_text))
+        if len(needle_stripped) >= 12:
+            hits = _stripped_hits(needle_stripped, index)
+
+    # Tier 4: fuzzy token-set Jaccard. Only for non-trivial anchors.
+    if not hits and len(anchor_text) >= 30:
+        hits = _fuzzy_hits(anchor_text, index, threshold=0.85)
+
+    # Tier 5: sliding-window head match. Only when unique.
+    if not hits and len(anchor_text) >= 60:
+        needle_norm = _norm(anchor_text)
+        window_hits = _window_hits(needle_norm, index, window=60)
+        if len(window_hits) == 1:
+            hits = window_hits
+
+    if not hits:
+        return None
+
+    return _disambiguate(hits, anchor_section)

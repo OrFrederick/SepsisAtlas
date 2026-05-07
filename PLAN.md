@@ -2,6 +2,16 @@
 
 2-day paper-to-knowledge pipeline. Goal: win by delivering verifiable, structured evidence, not "yet another RAG."
 
+> NOTE (2026-05-07): Several stages have evolved past the original sketch
+> below. The active implementation differs in three load-bearing places:
+> (1) bboxes are no longer LLM-emitted — a deterministic resolver
+> (`src/extract/anchor_resolver.py`) maps `anchor_text` back to the parsed
+> Docling JSON to recover `(page, bbox)`. (2) The verifier is a local
+> regex+NLI hybrid (`src/extract/verify_nli.py`), not a Haiku LLM judge.
+> (3) The query layer adds an answerability gate (refuses queries that
+> don't pin predictor / outcome / paper / non-trivial population) and a
+> `paper_ref` filter. Inline notes flag the affected sections.
+
 ## Thesis
 
 > Other teams turn papers into chat. We turn papers into math.
@@ -39,17 +49,27 @@ Schema-guided **structured extraction** (a.k.a. "document-to-table" / closed inf
                           ┌─────────────────────┐
                           │  EXTRACT (per paper)│
                           │  schema-fill agent  │
-                          │  Sonnet 4.6 + JSON  │
+                          │  Sonnet 4.5 + JSON  │
                           │  for each schema    │
                           │  slot: locate span  │
-                          │  → value + bbox     │
+                          │  → value + anchor   │
+                          │  text + section     │
                           └──────────┬──────────┘
                                      ↓
                           ┌─────────────────────┐
-                          │  VERIFY             │
-                          │  Haiku judge: span  │
-                          │  entail value? ✓/⚠/✗│
-                          │  retry rejected     │
+                          │  RESOLVE ANCHOR     │
+                          │  deterministic;     │
+                          │  anchor_text →      │
+                          │  (page, bbox) via   │
+                          │  parsed Docling JSON│
+                          └──────────┬──────────┘
+                                     ↓
+                          ┌─────────────────────┐
+                          │  VERIFY (local)     │
+                          │  regex on numeric   │
+                          │  atoms + NLI on     │
+                          │  free-text + cohort │
+                          │  cross-check ✓/~/✗  │
                           └──────────┬──────────┘
                                      ↓
                           ┌─────────────────────┐
@@ -106,8 +126,8 @@ Schema-guided **structured extraction** (a.k.a. "document-to-table" / closed inf
 | Layer        | Choice                                            |
 |--------------|---------------------------------------------------|
 | Parse        | Docling (preferred) or GROBID                     |
-| Extract LLM  | OpenRouter → Claude Sonnet 4.6 (structured JSON)  |
-| Verifier     | Claude Haiku 4.5 (cheap judge)                    |
+| Extract LLM  | OpenRouter → Claude Sonnet 4.5 (structured JSON)  |
+| Verifier     | Local hybrid: regex over numeric atoms + DeBERTa-MNLI on free-text + cohort cross-check (no LLM, no network) |
 | DB           | SQLite (hackathon) → Postgres (50k scale)         |
 | Stats        | Python `statsmodels` / `metafor`-style pooling    |
 | UI           | **OpenWebUI** (Pipelines + Tools) + minimal PDF viewer page (FastAPI + PDF.js) |
@@ -212,16 +232,18 @@ runs/<run_id>/
 
 User query: *"What predicts 28-day mortality in septic shock?"*
 
-1. **LLM #1 (Haiku, intent parse)** — NL → JSON `{outcome_type:"mortality", outcome_window_days:28, population:{condition:"septic shock"}, intent:"ranking"}`. Sees only the query. Cost ~$0.0002.
-2. **Field canonicalization** — predictor/outcome strings mapped via lookup table + embedding fallback (cosine ≥ 0.85).
-3. **SQL filter (deterministic code)** — parametrized query against Postgres. Hard filters from intent.
-4. **Rerank** — semantic similarity over already-extracted row text (not chunks). Hundreds of rows max.
-5. **Population score (UC1)** — weighted mean of: sepsis-def match, age/SOFA/lactate distribution overlap, setting match. Sort.
-6. **Meta-analysis** — random-effects pooling on harmonized effect sizes. I², τ², forest plot. Pure Python.
-7. **LLM #2 (optional, Haiku)** — narrative summary from rows. Numbers in UI come from DB, not LLM.
-8. **Render** — table + forest plot + clickable bbox anchors.
+1. **LLM #1 (Haiku, intent parse)** — NL → JSON `{outcome_type:"mortality", outcome_window_days:28, population:{condition:"septic shock"}, paper_ref:null, intent:"ranking"}`. Sees only the query. Cost ~$0.0002. The intent schema also exposes `paper_ref` (e.g. `"Zhang 2021"`) so users can scope a query to a single study.
+2. **Answerability gate** — `_assess_answerable` in `src/api/main.py` refuses queries that don't pin at least one of: predictor, outcome (type or window), `paper_ref`, or a non-trivial `population.condition`. Bare "sepsis" is rejected because the corpus is 100% sepsis and would not narrow the result set. Refusal returns `refused=true` + a hint string instead of fabricating rows.
+3. **Field canonicalization** — predictor/outcome strings mapped via lookup table (`PREDICTOR_SYNONYMS`).
+4. **SQL filter (deterministic code)** — parametrized query against `predictor_model` LEFT JOIN `study_cohort`. Hard filters from intent, including `paper_ref` LIKE-match against `study_cohort.paper_ref`.
+5. **Tiered window relaxation** — exact `outcome_window_days` → ±5d snap to nearest common window (28/30/60/90/180/365) → drop window entirely. Banner explains which tier matched.
+6. **Rerank** — `src/api/rank.py` re-orders by similarity over already-extracted row text. Hundreds of rows max.
+7. **Population score (UC1)** — weighted mean of: sepsis-def match, age/SOFA/lactate distribution overlap, setting match. Sort.
+8. **Meta-analysis** — random-effects pooling on harmonized effect sizes. I², τ², forest plot. Pure Python.
+9. **LLM #2 (optional, Haiku)** — narrative summary from rows. Numbers in UI come from DB, not LLM.
+10. **Render** — table + forest plot + clickable bbox anchors.
 
-Per-query cost: <$0.01. Latency: <2s.
+Per-query cost: <$0.01. Latency: <2s. Aggregate spend across all stages is exposed via `GET /health/cost` (totals + by_stage + by_model + token counts; supports `run_id` and `since` filters).
 
 ### Numbers separation rule
 
@@ -260,11 +282,19 @@ Flag in `notes`, prefer table over text, log discrepancy.
 
 ### Multi-cohort studies
 
-One row per cohort in `study_cohort` table. Cohort enumeration is **stage 1 of extraction** — LLM scans paper for sub-populations (training/testing splits, ICU/non-ICU, derivation/validation, multi-site datasets, survivors-only, dataset variants). Examples from ground truth:
+One row per cohort in `study_cohort` table. Cohort enumeration is **stage 1 of extraction** — LLM scans paper for sub-populations (training/testing splits, ICU/non-ICU, derivation/validation, multi-site datasets, dataset variants). Examples from ground truth:
 - Seymour 2016: 6 cohorts (KPNC ICU, KPNC non-ICU, KPNC overall, UPMC derivation, UPMC validation, VA, ALERTS)
-- Wang 2023: 4 cohorts (Training set, Training survivors, Training non-survivors, Testing set)
-- Zhang 2021: 4 cohorts (Development, Development survivors, Development non-survivors, Validation)
-- Gai 2022: 2 cohorts (Total, Survivors)
+- Wang 2023: 2 cohorts (Training set, Testing set)
+- Zhang 2021: 2 cohorts (Development, Validation)
+- Gai 2022: 1 cohort (Total)
+
+> NOTE (2026-05-07): The current `cohort_enum_v1` prompt explicitly excludes
+> outcome-stratified subgroups (survivors / non-survivors). Those splits
+> are an artifact of how the original ground-truth CSV was tabulated for
+> Table-1 characteristics; they are not analytic cohorts and would
+> double-count predictor rows. Stage 1 only enumerates analytic units
+> (training/testing, derivation/validation, multi-site datasets, ICU vs
+> non-ICU). See `data/dev_set/study_cohort.csv` for the corrected gold.
 
 Stage 2 fills `predictor_model` rows per cohort.
 

@@ -7,6 +7,8 @@ GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-
 GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
 GET  /static/*                    Static mount (PDF.js bundle, viewer.html assets)
 POST /ingest_pubmed               Stub for live corpus expansion
+GET  /health                      Liveness ping
+GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
 CORS + iframe headers are set globally so OpenWebUI's artifact pane can iframe
 `/viewer/<file_stem>` without the browser blocking the embed.
@@ -24,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import inspect as sqla_inspect, text
 
 from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
 from sepsis_atlas.db import get_engine
@@ -285,3 +287,137 @@ def ingest_pubmed(req: IngestPubMedRequest):
 @app.get("/health")
 def health():
     return {"ok": True, "static": str(STATIC_DIR), "papers": str(PAPERS_RAW)}
+
+
+# ---------------------------------------------------------------------------
+# /health/cost — aggregate LLM telemetry from llm_calls
+# ---------------------------------------------------------------------------
+
+
+def _empty_cost_payload(run_id: str | None, since: str | None) -> dict:
+    return {
+        "total_cost_usd": 0.0,
+        "n_calls": 0,
+        "by_stage": {},
+        "by_model": {},
+        "tokens_in_total": 0,
+        "tokens_out_total": 0,
+        "since": since,
+        "run_id": run_id,
+    }
+
+
+@app.get("/health/cost")
+def health_cost(run_id: str | None = None, since: str | None = None):
+    """Aggregate LLM spend pulled from the append-only ``llm_calls`` table.
+
+    Read-only. Returns zeroes if the table is missing, empty, or lacks
+    expected columns (older snapshots predate the ``run_id`` column).
+
+    Query params:
+      - ``run_id``: filter to a single extraction run.
+      - ``since``: ISO timestamp; only entries with ``ts > since``.
+    """
+    engine = _engine()
+    payload = _empty_cost_payload(run_id, since)
+
+    try:
+        insp = sqla_inspect(engine)
+        if "llm_calls" not in insp.get_table_names():
+            return payload
+        cols = {c["name"] for c in insp.get_columns("llm_calls")}
+    except Exception:
+        return payload
+
+    has_run_id = "run_id" in cols
+    has_ts = "ts" in cols
+    has_stage = "stage" in cols
+    has_model = "model" in cols
+
+    where: list[str] = []
+    params: dict[str, object] = {}
+    if run_id is not None:
+        if not has_run_id:
+            # Schema doesn't carry run_id — filter cannot match anything;
+            # honor the request by returning zeroes rather than full totals.
+            return payload
+        where.append("run_id = :run_id")
+        params["run_id"] = run_id
+    if since is not None:
+        if not has_ts:
+            return payload
+        # SQLAlchemy persists DateTime as ``YYYY-MM-DD HH:MM:SS`` in SQLite,
+        # while clients typically pass an ISO-8601 ``T``-separated string.
+        # String comparison would otherwise mis-order due to ``' ' < 'T'``.
+        normalized = since.replace("T", " ")
+        where.append("ts > :since")
+        params["since"] = normalized
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    try:
+        with engine.connect() as cx:
+            row = cx.execute(
+                text(
+                    "SELECT COUNT(*) AS n, "
+                    "COALESCE(SUM(cost_usd), 0.0) AS cost, "
+                    "COALESCE(SUM(tokens_in), 0) AS t_in, "
+                    "COALESCE(SUM(tokens_out), 0) AS t_out "
+                    f"FROM llm_calls{where_sql}"
+                ),
+                params,
+            ).fetchone()
+            if row is not None:
+                payload["n_calls"] = int(row.n or 0)
+                payload["total_cost_usd"] = float(row.cost or 0.0)
+                payload["tokens_in_total"] = int(row.t_in or 0)
+                payload["tokens_out_total"] = int(row.t_out or 0)
+
+            if has_stage:
+                stage_rows = cx.execute(
+                    text(
+                        "SELECT COALESCE(stage, '') AS stage, "
+                        "COUNT(*) AS n, "
+                        "COALESCE(SUM(cost_usd), 0.0) AS cost, "
+                        "COALESCE(SUM(tokens_in), 0) AS t_in, "
+                        "COALESCE(SUM(tokens_out), 0) AS t_out "
+                        f"FROM llm_calls{where_sql} GROUP BY stage"
+                    ),
+                    params,
+                ).fetchall()
+                payload["by_stage"] = {
+                    (r.stage or "unknown"): {
+                        "cost_usd": float(r.cost or 0.0),
+                        "n": int(r.n or 0),
+                        "tokens_in": int(r.t_in or 0),
+                        "tokens_out": int(r.t_out or 0),
+                    }
+                    for r in stage_rows
+                }
+
+            if has_model:
+                model_rows = cx.execute(
+                    text(
+                        "SELECT COALESCE(model, '') AS model, "
+                        "COUNT(*) AS n, "
+                        "COALESCE(SUM(cost_usd), 0.0) AS cost, "
+                        "COALESCE(SUM(tokens_in), 0) AS t_in, "
+                        "COALESCE(SUM(tokens_out), 0) AS t_out "
+                        f"FROM llm_calls{where_sql} GROUP BY model"
+                    ),
+                    params,
+                ).fetchall()
+                payload["by_model"] = {
+                    (r.model or "unknown"): {
+                        "cost_usd": float(r.cost or 0.0),
+                        "n": int(r.n or 0),
+                        "tokens_in": int(r.t_in or 0),
+                        "tokens_out": int(r.t_out or 0),
+                    }
+                    for r in model_rows
+                }
+    except Exception:
+        # Don't 500 — this is a health endpoint. Return whatever we managed.
+        return payload
+
+    return payload

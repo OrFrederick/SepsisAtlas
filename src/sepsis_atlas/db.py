@@ -133,6 +133,73 @@ class PredictorModel(Base):
     run_id: Mapped[Optional[str]] = mapped_column(String, index=True)
 
 
+class StudyPhenotypeSummary(Base):
+    __tablename__ = "study_phenotype_summary"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    paper_ref: Mapped[Optional[str]] = mapped_column(String, index=True)
+    file_name: Mapped[Optional[str]] = mapped_column(ForeignKey("papers.file_name"), index=True)
+    country: Mapped[Optional[str]] = mapped_column(String)
+    setting: Mapped[Optional[str]] = mapped_column(String)
+    sample_size_n: Mapped[Optional[str]] = mapped_column(String)
+    sepsis_definition: Mapped[Optional[str]] = mapped_column(String)
+    clustering_method: Mapped[Optional[str]] = mapped_column(String)
+    n_clusters: Mapped[Optional[int]] = mapped_column(Integer)
+    clustering_variables: Mapped[Optional[str]] = mapped_column(Text)
+    external_assignment_feasible: Mapped[Optional[str]] = mapped_column(String)
+    cohort_id: Mapped[Optional[str]] = mapped_column(ForeignKey("study_cohort.cohort_id"))
+
+    anchor_page: Mapped[Optional[int]] = mapped_column(Integer)
+    anchor_bbox: Mapped[Optional[dict]] = mapped_column(JSON)
+    anchor_text: Mapped[Optional[str]] = mapped_column(Text)
+    anchor_section: Mapped[Optional[str]] = mapped_column(String)
+
+    extractor_model: Mapped[Optional[str]] = mapped_column(String)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String)
+    verifier_verdict: Mapped[Optional[str]] = mapped_column(String)
+    verifier_score: Mapped[Optional[float]] = mapped_column(Float)
+    verifier_rationale: Mapped[Optional[str]] = mapped_column(Text)
+    field_status: Mapped[Optional[str]] = mapped_column(String)
+
+    extracted_ts: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
+    run_id: Mapped[Optional[str]] = mapped_column(String, index=True)
+    pipeline_version: Mapped[Optional[str]] = mapped_column(String)
+    schema_version: Mapped[Optional[str]] = mapped_column(String)
+
+
+class PhenotypeCluster(Base):
+    __tablename__ = "phenotype_cluster"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    study_phenotype_summary_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("study_phenotype_summary.id"), index=True
+    )
+    paper_ref: Mapped[Optional[str]] = mapped_column(String, index=True)
+    cluster_label: Mapped[Optional[str]] = mapped_column(String)
+    cluster_size_n: Mapped[Optional[str]] = mapped_column(String)
+    key_features: Mapped[Optional[str]] = mapped_column(Text)
+    clinical_description: Mapped[Optional[str]] = mapped_column(Text)
+    outcomes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    anchor_page: Mapped[Optional[int]] = mapped_column(Integer)
+    anchor_bbox: Mapped[Optional[dict]] = mapped_column(JSON)
+    anchor_text: Mapped[Optional[str]] = mapped_column(Text)
+    anchor_section: Mapped[Optional[str]] = mapped_column(String)
+
+    extractor_model: Mapped[Optional[str]] = mapped_column(String)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String)
+    verifier_verdict: Mapped[Optional[str]] = mapped_column(String)
+    verifier_score: Mapped[Optional[float]] = mapped_column(Float)
+    verifier_rationale: Mapped[Optional[str]] = mapped_column(Text)
+    field_status: Mapped[Optional[str]] = mapped_column(String)
+
+    extracted_ts: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
+    run_id: Mapped[Optional[str]] = mapped_column(String, index=True)
+    pipeline_version: Mapped[Optional[str]] = mapped_column(String)
+    schema_version: Mapped[Optional[str]] = mapped_column(String)
+
+
 class LLMCall(Base):
     __tablename__ = "llm_calls"
 

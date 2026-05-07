@@ -30,7 +30,12 @@ from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
 
 from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
-from sepsis_atlas.db import get_engine
+from sepsis_atlas.db import (
+    PhenotypeCluster,
+    StudyPhenotypeSummary,
+    get_engine,
+)
+from sqlalchemy.orm import sessionmaker
 
 from api.query import (
     parse_intent,
@@ -38,6 +43,10 @@ from api.query import (
     to_markdown_table,
 )
 from api.rank import rerank
+from api.rank_predictors import (
+    rank_predictors_with_meta,
+    rank_row_to_dict,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +285,86 @@ def post_query_kg(req: QueryRequest) -> QueryResponse:
 
 
 # ---------------------------------------------------------------------------
+# /rank_predictors — UC3 ranked-predictors view
+# ---------------------------------------------------------------------------
+
+
+class RankPredictorsRequest(BaseModel):
+    outcome_type: str | None = "mortality"
+    outcome_window_days: int | None = None
+    paper_ref: str | None = None
+    population_contains: str | None = None
+    top_k: int = 50
+
+
+class RankPredictorsResponse(BaseModel):
+    rows: list[dict]
+    n_predictors: int
+    fallback_note: str | None = None
+    filters: dict
+
+
+def _rank_predictors_core(
+    *,
+    outcome_type: str | None,
+    outcome_window_days: int | None,
+    paper_ref: str | None,
+    population_contains: str | None,
+    top_k: int,
+) -> RankPredictorsResponse:
+    engine = _engine()
+    ranked, note, _matched = rank_predictors_with_meta(
+        engine,
+        outcome_type=outcome_type,
+        outcome_window_days=outcome_window_days,
+        paper_ref=paper_ref,
+        population_contains=population_contains,
+        top_k=top_k,
+    )
+    rows = [rank_row_to_dict(rr) for rr in ranked]
+    return RankPredictorsResponse(
+        rows=rows,
+        n_predictors=len(rows),
+        fallback_note=note,
+        filters={
+            "outcome_type": outcome_type if outcome_type is not None else "mortality",
+            "outcome_window_days": outcome_window_days,
+            "paper_ref": paper_ref,
+            "population_contains": population_contains,
+            "top_k": top_k,
+        },
+    )
+
+
+@app.post("/rank_predictors", response_model=RankPredictorsResponse)
+def post_rank_predictors(req: RankPredictorsRequest) -> RankPredictorsResponse:
+    return _rank_predictors_core(
+        outcome_type=req.outcome_type,
+        outcome_window_days=req.outcome_window_days,
+        paper_ref=req.paper_ref,
+        population_contains=req.population_contains,
+        top_k=req.top_k,
+    )
+
+
+@app.get("/rank_predictors", response_model=RankPredictorsResponse)
+def get_rank_predictors(
+    outcome_type: str | None = "mortality",
+    outcome_window_days: int | None = None,
+    paper_ref: str | None = None,
+    population_contains: str | None = None,
+    top_k: int = 50,
+) -> RankPredictorsResponse:
+    return _rank_predictors_core(
+        outcome_type=outcome_type,
+        outcome_window_days=outcome_window_days,
+        paper_ref=paper_ref,
+        population_contains=population_contains,
+        top_k=top_k,
+    )
+
+
+# ---------------------------------------------------------------------------
 # /viewer
 # ---------------------------------------------------------------------------
 
@@ -485,6 +574,128 @@ def health_cost(run_id: str | None = None, since: str | None = None):
         return payload
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# /phenotypes — UC2 phenotype catalog
+# ---------------------------------------------------------------------------
+
+
+def _phenotype_cluster_dict(c: PhenotypeCluster, file_name: str | None) -> dict:
+    return {
+        "cluster_label": c.cluster_label,
+        "cluster_size_n": c.cluster_size_n,
+        "key_features": c.key_features,
+        "clinical_description": c.clinical_description,
+        "outcomes": c.outcomes,
+        "notes": c.notes,
+        "anchor_page": c.anchor_page,
+        "anchor_section": c.anchor_section,
+        "anchor_text": c.anchor_text,
+        "file_name": file_name,
+        "verifier_verdict": c.verifier_verdict,
+    }
+
+
+def _phenotype_paper_dict(s: StudyPhenotypeSummary, clusters: list[PhenotypeCluster]) -> dict:
+    return {
+        "paper_ref": s.paper_ref,
+        "file_name": s.file_name,
+        "country": s.country,
+        "setting": s.setting,
+        "sample_size_n": s.sample_size_n,
+        "sepsis_definition": s.sepsis_definition,
+        "clustering_method": s.clustering_method,
+        "n_clusters": s.n_clusters,
+        "clustering_variables": s.clustering_variables,
+        "external_assignment_feasible": s.external_assignment_feasible,
+        "cohort_id": s.cohort_id,
+        "anchor_page": s.anchor_page,
+        "anchor_section": s.anchor_section,
+        "anchor_text": s.anchor_text,
+        "verifier_verdict": s.verifier_verdict,
+        "clusters": [_phenotype_cluster_dict(c, s.file_name) for c in clusters],
+    }
+
+
+@app.get("/phenotypes")
+def list_phenotypes():
+    """List every paper that emitted a study_phenotype_summary row, with its
+    clusters. Returns ``{"papers": [...]}`` matching the agreed shape.
+
+    Read-only. Returns ``{"papers": []}`` if the underlying tables are
+    missing (e.g. fresh DB before UC2 has been run).
+    """
+    engine = _engine()
+    try:
+        insp = sqla_inspect(engine)
+        names = set(insp.get_table_names())
+        if "study_phenotype_summary" not in names or "phenotype_cluster" not in names:
+            return {"papers": []}
+    except Exception:
+        return {"papers": []}
+
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        summaries = (
+            session.query(StudyPhenotypeSummary)
+            .order_by(StudyPhenotypeSummary.paper_ref)
+            .all()
+        )
+        if not summaries:
+            return {"papers": []}
+        ids = [s.id for s in summaries]
+        clusters = (
+            session.query(PhenotypeCluster)
+            .filter(PhenotypeCluster.study_phenotype_summary_id.in_(ids))
+            .all()
+        )
+        by_summary: dict[str, list[PhenotypeCluster]] = {sid: [] for sid in ids}
+        for c in clusters:
+            by_summary.setdefault(c.study_phenotype_summary_id, []).append(c)
+        # Keep cluster_label order stable (alphabetical).
+        for sid, cs in by_summary.items():
+            cs.sort(key=lambda c: (c.cluster_label or ""))
+        papers = [
+            _phenotype_paper_dict(s, by_summary.get(s.id, [])) for s in summaries
+        ]
+    return {"papers": papers}
+
+
+@app.get("/phenotypes/{paper_ref}")
+def get_phenotype(paper_ref: str):
+    """Return the full phenotype payload (summary + clusters) for one paper.
+
+    ``paper_ref`` matches the value stored on ``study_phenotype_summary``
+    (typically ``"<FirstAuthor> <Year>"``). 404 if no summary row exists.
+    """
+    engine = _engine()
+    try:
+        insp = sqla_inspect(engine)
+        names = set(insp.get_table_names())
+        if "study_phenotype_summary" not in names:
+            raise HTTPException(404, f"phenotype paper not found: {paper_ref!r}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(404, f"phenotype paper not found: {paper_ref!r}")
+
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        s = (
+            session.query(StudyPhenotypeSummary)
+            .filter(StudyPhenotypeSummary.paper_ref == paper_ref)
+            .first()
+        )
+        if s is None:
+            raise HTTPException(404, f"phenotype paper not found: {paper_ref!r}")
+        clusters = (
+            session.query(PhenotypeCluster)
+            .filter(PhenotypeCluster.study_phenotype_summary_id == s.id)
+            .order_by(PhenotypeCluster.cluster_label)
+            .all()
+        )
+        return _phenotype_paper_dict(s, clusters)
 
 
 # ---------------------------------------------------------------------------

@@ -314,11 +314,16 @@ def get_kg_graph() -> dict:
         "pm.verifier_verdict AS verdict, pm.anchor_page AS page, "
         "pm.anchor_bbox AS bbox"
     )
+    # PredictorModel carries both `id` (PK) and `cohort_id` (denormalized FK);
+    # the coalesce has to favour `id` first or every REPORTS edge becomes a
+    # self-loop on the parent Cohort instead of pointing at the PM. Paper
+    # only has file_name, Cohort only has cohort_id, so this ordering yields
+    # each label's PK without ambiguity.
     edge_rows = store.run(
         "MATCH (a)-[r:HAS_COHORT|REPORTS]->(b) "
         "RETURN type(r) AS kind, "
-        "coalesce(a.file_name, a.cohort_id, a.id) AS src, "
-        "coalesce(b.file_name, b.cohort_id, b.id) AS dst"
+        "coalesce(a.id, a.cohort_id, a.file_name) AS src, "
+        "coalesce(b.id, b.cohort_id, b.file_name) AS dst"
     )
 
     nodes: list[dict] = []

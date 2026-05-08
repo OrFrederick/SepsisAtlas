@@ -357,9 +357,15 @@
         }).promise;
 
         // Build all page stubs sized correctly so total scroll height is right immediately.
+        // Initial scale fits page 1 to the viewer width — avoids the iframe overflowing
+        // when the chat shell embeds it in a narrow split.
         const total = pdfDoc.numPages;
+        const firstPage = await pdfDoc.getPage(1);
+        const baseViewport = firstPage.getViewport({ scale: 1 });
+        const available = Math.max(stage.clientWidth - 32, 240);
+        scale = Math.max(0.5, Math.min(4, available / baseViewport.width));
         for (let n = 1; n <= total; n++) {
-          const page = await pdfDoc.getPage(n);
+          const page = n === 1 ? firstPage : await pdfDoc.getPage(n);
           const viewport = page.getViewport({ scale });
           pages.push(buildPageStub(n, viewport));
         }
@@ -416,6 +422,15 @@
     });
     fitBtn.addEventListener("click", fitWidth);
     jumpBtn.addEventListener("click", scrollToBbox);
+
+    // Re-fit when the iframe size changes (chat split resize, window resize),
+    // debounced so dragging doesn't spam rerenders.
+    let resizeTimer = 0;
+    new ResizeObserver(() => {
+      if (!pdfDoc) return;
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(fitWidth, 120);
+    }).observe(stage);
 
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;

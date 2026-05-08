@@ -1,8 +1,7 @@
-"""FastAPI app: query API, PDF.js viewer, and the research-shell SPA.
+"""FastAPI app: headless query API + PDF.js viewer for the Astro frontend.
 
 Endpoints
 ---------
-GET  /                            static/app.html — the research-shell SPA
 POST /query                       NL question → ranked rows + markdown table + summary
 GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-side
 GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
@@ -11,7 +10,7 @@ POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-The SPA at `/` iframes `/viewer/<stem>` for source previews, so we keep the
+The Astro app iframes `/viewer/<stem>` for source previews, so we keep the
 permissive frame headers below.
 """
 
@@ -862,14 +861,3 @@ def get_phenotype(paper_ref: str):
         return _phenotype_paper_dict(s, clusters)
 
 
-# ---------------------------------------------------------------------------
-# /  — research-shell SPA
-# ---------------------------------------------------------------------------
-
-
-@app.get("/")
-def app_root():
-    p = STATIC_DIR / "app.html"
-    if not p.exists():
-        raise HTTPException(500, "app.html missing")
-    return Response(content=p.read_text(), media_type="text/html")

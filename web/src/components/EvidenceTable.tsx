@@ -232,12 +232,12 @@ export default function EvidenceTable({
     ["paper", "Paper · Cohort", ""],
     ["predictor", "Predictor", ""],
     ["outcome", "Outcome", ""],
-    ["effect", "Effect", ""],
   ];
   if (showRankedColumn) columns.push(["ranked", "Ranked by", "num"]);
   columns.push(["n", "N", "num"]);
   columns.push(["page", "Page", "num"]);
   columns.push(["verdict", "✓", "verdict"]);
+  columns.push(["effect", "Effect", ""]);
 
   return (
     <div className="evidence-table-scroll">
@@ -294,7 +294,6 @@ export default function EvidenceTable({
               <td className="paper" title={paper}>{paper}</td>
               <td className="predictor" title={predictor}>{predictor}</td>
               <td className="outcome" title={outcome}>{outcome}</td>
-              <td className="effect">{effect}</td>
               {showRankedColumn ? (
                 <td className="num" title={rankedByOf(row)}>{rankedByOf(row)}</td>
               ) : null}
@@ -308,6 +307,7 @@ export default function EvidenceTable({
                   {verdict.glyph}
                 </span>
               </td>
+              <td className="effect">{effect}</td>
             </tr>
           );
         })}

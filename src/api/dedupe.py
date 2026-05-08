@@ -25,6 +25,12 @@ def _numeric_tokens(text: str | None) -> list[str]:
     return _NUM_RE.findall(text)
 
 
+def _norm_text(text: Any) -> str:
+    if text is None:
+        return ""
+    return re.sub(r"\s+", " ", str(text).strip().lower())
+
+
 def _jaccard(a: set[str], b: set[str]) -> float:
     union = a | b
     if not union:
@@ -233,6 +239,45 @@ def collapse_descriptive_pairs(rows: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Pass 2: collapse_exact_facts
+# ---------------------------------------------------------------------------
+
+
+def _exact_fact_key(row: dict) -> tuple | None:
+    effect = _norm_text(row.get("effect_size_str"))
+    if not effect:
+        return None
+    return (
+        row.get("paper_ref"),
+        row.get("cohort_id"),
+        row.get("predictor_canonical"),
+        row.get("outcome"),
+        row.get("effect_type"),
+        effect,
+        _norm_text(row.get("model_specification")),
+    )
+
+
+def collapse_exact_facts(rows: list[dict]) -> list[dict]:
+    """Drop exact duplicate non-AUC facts while preserving first occurrence.
+
+    AUC duplicates still go through `collapse_repeated_facts`, which can choose
+    a better source by section priority. This pass catches repeated OR/table
+    rows from reruns that share the same semantic row content.
+    """
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for row in rows:
+        key = _exact_fact_key(row)
+        if key is not None and key in seen:
+            continue
+        if key is not None:
+            seen.add(key)
+        out.append(row)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Pass 2: collapse_repeated_facts
 # ---------------------------------------------------------------------------
 
@@ -312,5 +357,6 @@ def dedupe_rows(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
     rows = collapse_descriptive_pairs(rows)
+    rows = collapse_exact_facts(rows)
     rows = collapse_repeated_facts(rows)
     return rows

@@ -210,7 +210,7 @@ def _load_paper(file_stem: str) -> dict:
         raise FileNotFoundError(
             f"Parsed paper not found: {path}. Run `python -m parse.run_parse` first."
         )
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def extract_phenotype_paper(

@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for p in paths:
         try:
-            parsed = json.loads(p.read_text())
+            parsed = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
             print(f"[FAIL] {p.name}: cannot read JSON ({e})", file=sys.stderr)
             n_failed += 1

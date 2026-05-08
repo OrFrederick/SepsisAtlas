@@ -310,7 +310,7 @@ ZHANG = REPO_ROOT / "data" / "papers" / "parsed" / "Zhang_2021.json"
 
 @pytest.mark.skipif(not ZHANG.exists(), reason="Zhang_2021.json not available")
 def test_zhang_2021_regression():
-    parsed = json.loads(ZHANG.read_text())
+    parsed = json.loads(ZHANG.read_text(encoding="utf-8"))
     idx = build_index(parsed)
     needle = (
         "In the validation set, we evaluated the discrimination and "
@@ -570,7 +570,7 @@ def test_to_flat_bbox_handles_none():
 @pytest.mark.skipif(not ZHANG.exists(), reason="Zhang_2021.json not available")
 def test_resolver_bbox_top_left_after_resolve():
     """A resolved Zhang-2021 anchor should expose a TOPLEFT (y0 < y1) bbox."""
-    parsed = json.loads(ZHANG.read_text())
+    parsed = json.loads(ZHANG.read_text(encoding="utf-8"))
     idx = build_index(parsed, file_stem="Zhang_2021")
     needle = (
         "In the validation set, we evaluated the discrimination and "

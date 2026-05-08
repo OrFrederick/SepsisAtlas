@@ -319,7 +319,7 @@ def _load_paper_text(paper_id: str) -> str:
     if not path.exists():
         return ""
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return ""
 

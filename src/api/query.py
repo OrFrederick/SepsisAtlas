@@ -31,8 +31,8 @@ from sepsis_atlas.schemas import IntentParse
 # ---------------------------------------------------------------------------
 PREDICTOR_SYNONYMS: dict[str, list[str]] = {
     "lactate": ["lactate", "lac", "serum lactate", "blood lactate"],
-    "SOFA": ["sofa", "sofa score", "sequential organ failure assessment"],
     "qSOFA": ["qsofa", "quick sofa", "q-sofa"],
+    "SOFA": ["sofa", "sofa score", "sequential organ failure assessment"],
     "APACHE_II": ["apache ii", "apache 2", "apache-ii", "apache ii score"],
     "APACHE_IV": ["apache iv", "apache 4", "apache-iv"],
     "SAPS_II": ["saps ii", "saps 2", "saps-ii", "simplified acute physiology score ii"],
@@ -70,6 +70,15 @@ PREDICTOR_SYNONYMS: dict[str, list[str]] = {
     "CRP": ["crp", "c-reactive protein", "c reactive protein"],
     "WBC": ["wbc", "white blood cell", "white blood cell count", "leukocyte"],
 }
+
+
+def _synonym_pattern(synonym: str) -> re.Pattern:
+    escaped = re.escape(synonym.lower()).replace(r"\ ", r"\s+")
+    return re.compile(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", re.I)
+
+
+def _contains_synonym(text: str, synonym: str) -> bool:
+    return bool(_synonym_pattern(synonym).search(text.lower()))
 
 # Outcome types matching PredictorModel.outcome_type literal.
 OUTCOME_TYPES = {"mortality", "readmission", "los", "organ_failure", "other"}
@@ -160,11 +169,11 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
                 break
 
     predictor: str | None = None
-    # Word-boundary match so "shock" doesn't trigger "ck", "ck" doesn't match inside "track", etc.
+    # Boundary match so "shock" doesn't trigger "ck", and qSOFA does not
+    # get consumed by the shorter SOFA synonym.
     for canon, syns in PREDICTOR_SYNONYMS.items():
-        for s in syns:
-            pat = r"\b" + re.escape(s) + r"\b"
-            if re.search(pat, text_l):
+        for s in sorted(syns, key=len, reverse=True):
+            if _contains_synonym(text_l, s):
                 predictor = canon
                 break
         if predictor:
@@ -214,10 +223,11 @@ def _canonicalize_predictor(p: str | None) -> str | None:
     if not p:
         return None
     p_l = p.lower().strip()
-    if p_l in PREDICTOR_SYNONYMS:
-        return p_l
+    for canon in PREDICTOR_SYNONYMS:
+        if canon.lower() == p_l:
+            return canon
     for canon, syns in PREDICTOR_SYNONYMS.items():
-        if canon.lower() == p_l or any(s == p_l for s in syns) or any(s in p_l for s in syns):
+        if any(s == p_l for s in syns) or any(_contains_synonym(p_l, s) for s in syns):
             return canon
     return p_l
 

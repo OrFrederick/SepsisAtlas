@@ -84,7 +84,7 @@ def _get_index(
         cache[file_name] = None
         return None
     try:
-        parsed = json.loads(path.read_text())
+        parsed = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         cache[file_name] = None
         return None

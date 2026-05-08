@@ -137,7 +137,7 @@ def classify_evidence_row(row: dict) -> EvidenceType:
         return "cutoff_performance"
 
     # 2. AUC performance
-    if et_upper == "AUC" or (auc is not None and not effect_type):
+    if et_upper == "AUC" or auc is not None:
         return "performance_auc"
 
     combined = anchor + " " + model_spec
@@ -219,18 +219,37 @@ _METRIC_PASS_SET: dict[MetricType | None, set[str]] = {
 _RE_COMPOSITE = re.compile(r"or\s+icu|length of stay|\blos\b|composite", re.I)
 
 
-def _predictor_matches(row: dict, predictor: str) -> bool:
-    """True iff predictor is in predictor_canonical or first 40 chars of model_spec.
+def _norm_predictor_text(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _same_predictor_name(left: str | None, right: str | None) -> bool:
+    return _norm_predictor_text(left) == _norm_predictor_text(right)
+
+
+def _model_spec_mentions_predictor(row: dict, predictor: str) -> bool:
+    target = _norm_predictor_text(predictor)
+    if not target:
+        return False
+    # Use token boundaries so qSOFA does not match SOFA by substring.
+    pattern = re.compile(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", re.I)
+    hay = _norm_predictor_text(row.get("model_specification") or "")
+    return bool(pattern.search(hay))
+
+
+def _predictor_matches(row: dict, predictor: str, *, allow_model_spec: bool = False) -> bool:
+    """True iff predictor directly matches the row predictor.
 
     Anchor-text mention does NOT count — IMPROVEMENTS.md explicitly excludes
     "lactate appears in anchor_text" as evidence of a lactate-specific row.
+    Model-spec matching is opt-in for paper evidence queries, and uses token
+    boundaries so `qSOFA` and `SOFA` remain distinct.
     """
-    p = predictor.lower()
-    canon = (row.get("predictor_canonical") or "").lower()
-    if canon and (canon == p or p in canon or canon in p):
+    if _same_predictor_name(row.get("predictor_canonical"), predictor):
         return True
-    ms = (row.get("model_specification") or "")[:40].lower()
-    if p in ms:
+    if _same_predictor_name(row.get("predictors"), predictor):
+        return True
+    if allow_model_spec and _model_spec_mentions_predictor(row, predictor):
         return True
     return False
 
@@ -258,7 +277,11 @@ def filter_evidence_rows(
             continue
         if et not in pass_set:
             continue
-        if direct_predictor_only and predictor and not _predictor_matches(r, predictor):
+        if direct_predictor_only and predictor:
+            allow_model_spec = metric_type is None
+            if not _predictor_matches(r, predictor, allow_model_spec=allow_model_spec):
+                continue
+        if metric_type == "auc" and r.get("auc") is None:
             continue
         if drop_composite_outcomes and _RE_COMPOSITE.search(r.get("outcome") or ""):
             continue
@@ -439,6 +462,18 @@ def _build_table(
     }
 
 
+def _sort_filtered_rows(rows: list[dict], metric_type: MetricType | None) -> list[dict]:
+    if metric_type == "auc":
+        return sorted(
+            rows,
+            key=lambda r: (
+                r.get("auc") is None,
+                -(float(r.get("auc")) if r.get("auc") is not None else -1.0),
+            ),
+        )
+    return rows
+
+
 def apply_evidence_projection(
     rows: list[dict], *, nl_text: str, predictor: str | None,
 ) -> tuple[list[dict], dict]:
@@ -474,6 +509,7 @@ def apply_evidence_projection(
         direct_predictor_only=direct,
         drop_composite_outcomes=drop_composite,
     )
+    filtered = _sort_filtered_rows(filtered, metric_type)
 
     table = _build_table(filtered, metric_type=metric_type, query_mode=query_mode) if filtered else None
     meta = {"metric_type": metric_type, "query_mode": query_mode, "table": table}

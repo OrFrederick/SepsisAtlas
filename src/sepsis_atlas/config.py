@@ -14,6 +14,12 @@ RUNS_DIR = ROOT / "runs"
 STATIC_DIR = ROOT / "static"
 DB_PATH = ROOT / "db.sqlite"
 
+# KG_DB_PATH is the SQLite file used by everything in the KG/extract path
+# (verifier-cache writes in ``extract.verify_llm``, etc.). Hardcoded to a
+# sibling file so the canonical SQL pipeline ``db.sqlite`` is never opened
+# by the KG pipeline — no env var, no flag, no way to misconfigure.
+KG_DB_PATH = ROOT / "db_kg.sqlite"
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 

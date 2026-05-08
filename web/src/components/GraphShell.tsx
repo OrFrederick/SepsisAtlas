@@ -80,12 +80,15 @@ type GraphLink = {
   shared_predictors?: string[];
 };
 
+// Editorial Clinical palette — light-mode friendly. Colors chosen for
+// contrast against the off-white canvas (#FAFAF7) and to read as a
+// coherent set with the chat shell's deep-teal accent.
 const NODE_COLOR: Record<NodeType, string> = {
-  Paper: "#ffd23f", // accent yellow
-  Cohort: "#7cc5ff", // link blue
-  PredictorModel: "#cfd2da", // fg-soft
-  Predictor: "#4ade80", // ok green — topical hub
-  OutcomeType: "#fbbf24", // warn orange — outcome hub
+  Paper: "#0F4C5C", // brand teal — the load-bearing entity
+  Cohort: "#3E5641", // forest green — secondary entity
+  PredictorModel: "#8E8576", // warm grey — leaf row
+  Predictor: "#2D6E48", // verdant — predictor hub
+  OutcomeType: "#A6571E", // burnt amber — outcome hub
 };
 
 const NODE_RADIUS: Record<NodeType, number> = {
@@ -97,11 +100,11 @@ const NODE_RADIUS: Record<NodeType, number> = {
 };
 
 const EDGE_BASE_COLOR: Record<EdgeKind, string> = {
-  HAS_COHORT: "rgba(140,147,166,0.30)",
-  REPORTS: "rgba(140,147,166,0.20)",
-  TESTS: "rgba(74,222,128,0.25)",
-  TARGETS: "rgba(251,191,36,0.25)",
-  SIMILAR_TO: "rgba(255,210,63,0.55)",
+  HAS_COHORT: "rgba(64, 58, 51, 0.28)",
+  REPORTS: "rgba(110, 102, 90, 0.22)",
+  TESTS: "rgba(45, 110, 72, 0.30)",
+  TARGETS: "rgba(166, 87, 30, 0.30)",
+  SIMILAR_TO: "rgba(15, 76, 92, 0.45)",
 };
 
 function parseBbox(bbox: unknown): number[] | null {
@@ -138,7 +141,7 @@ function NodeDetail({ node }: { node: RawNode | null }) {
     return (
       <div className="graph-detail">
         <div className="placeholder">
-          Click any node to inspect its attributes. Yellow = paper, blue = cohort, grey =
+          Click any node to inspect its attributes. Teal = paper, green = cohort, grey =
           predictor model.
         </div>
       </div>
@@ -288,7 +291,7 @@ export default function GraphShell() {
               graphData={graph}
               width={size.w}
               height={size.h}
-              backgroundColor="#0f1115"
+              backgroundColor="#FAFAF7"
               nodeRelSize={1}
               linkColor={(l) => EDGE_BASE_COLOR[(l as unknown as GraphLink).kind]}
               linkWidth={(l) => {
@@ -312,13 +315,13 @@ export default function GraphShell() {
                 ctx.fill();
                 if (selected && selected.id === n.id) {
                   ctx.lineWidth = 2 / scale;
-                  ctx.strokeStyle = "#ffffff";
+                  ctx.strokeStyle = "#1A1614";
                   ctx.stroke();
                 }
                 if ((n.type === "Paper" || n.type === "Predictor" || n.type === "OutcomeType")
                     && scale > 1.0) {
                   ctx.font = `${10 / scale}px ui-sans-serif, system-ui`;
-                  ctx.fillStyle = "#cfd2da";
+                  ctx.fillStyle = "#403A33";
                   ctx.textAlign = "center";
                   ctx.textBaseline = "top";
                   ctx.fillText(n.label, n.x ?? 0, (n.y ?? 0) + r * Math.sqrt(scale) + 2);

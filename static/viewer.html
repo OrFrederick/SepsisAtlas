@@ -8,49 +8,87 @@
         href="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/web/pdf_viewer.css">
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #0f1115;
-      --panel: #181b22;
-      --panel-2: #232732;
-      --fg: #e7e9ee;
-      --muted: #8c93a6;
-      --accent: #ffd23f;
+      color-scheme: light;
+      --bg: #FAFAF7;
+      --panel: #FFFFFF;
+      --panel-2: #F4F1EA;
+      --panel-3: #EFEAE0;
+      --border: #DDD7C7;
+      --border-strong: #BCB39C;
+      --fg: #1A1614;
+      --fg-soft: #403A33;
+      --muted: #6B6258;
+      --faint: #8E8576;
+      --accent: #0F4C5C;
+      --serif: "Iowan Old Style", "Charter", "Source Serif 4", Georgia, "Times New Roman", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
     }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
-                 font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--panel-3); color: var(--fg);
+      font: 13px/1.45 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
     #toolbar {
       position: sticky; top: 0; z-index: 10;
-      display: flex; gap: 8px; align-items: center;
-      padding: 8px 14px;
-      background: var(--panel);
-      border-bottom: 1px solid #2a2f3a;
-      backdrop-filter: blur(8px);
+      display: flex; gap: 6px; align-items: center;
+      padding: 5px 12px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      min-height: 32px;
     }
-    #toolbar strong { color: var(--accent); letter-spacing: 0.4px; }
-    #toolbar .sep { width: 1px; height: 22px; background: #2a2f3a; margin: 0 6px; }
+    #toolbar strong {
+      font-family: var(--serif);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--fg);
+      letter-spacing: 0;
+    }
+    #toolbar strong::first-letter { color: var(--accent); }
+    #toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
     #toolbar button {
-      background: var(--panel-2); color: var(--fg);
-      border: 1px solid #2f3543;
-      padding: 4px 10px; border-radius: 5px; cursor: pointer;
-      font: inherit;
-      transition: background 0.12s;
+      background: var(--panel); color: var(--fg-soft);
+      border: 1px solid var(--border);
+      padding: 2px 9px; border-radius: 3px; cursor: pointer;
+      font: inherit; font-size: 12px; line-height: 1.4;
+      white-space: nowrap; flex-shrink: 0;
+      display: inline-flex; align-items: center; gap: 4px;
+      transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
     }
-    #toolbar button:hover:not(:disabled) { background: #2f3543; }
+    #toolbar button:hover:not(:disabled) {
+      background: var(--panel-2);
+      border-color: var(--border-strong);
+      color: var(--fg);
+    }
     #toolbar button:disabled { opacity: 0.4; cursor: default; }
-    #pageinfo { color: var(--muted); min-width: 80px; text-align: center; }
-    #zoominfo { color: var(--muted); min-width: 50px; text-align: center; }
-    #filename { color: var(--muted); margin-left: auto; font-feature-settings: "tnum"; }
-    #status { color: var(--muted); }
+    #pageinfo {
+      color: var(--muted); min-width: 80px; text-align: center;
+      font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+    }
+    #zoominfo {
+      color: var(--muted); min-width: 50px; text-align: center;
+      font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+    }
+    #filename {
+      color: var(--muted); margin-left: auto;
+      font-family: var(--mono); font-size: 12px;
+      font-feature-settings: "tnum";
+    }
+    #status { color: var(--muted); font-style: italic; }
 
     #stage {
       display: flex; flex-direction: column; align-items: center;
-      padding: 24px 16px 60px;
-      gap: 16px;
+      padding: 28px 16px 80px;
+      gap: 22px;
+      background: var(--panel-3);
     }
     .pageWrap {
       position: relative;
-      box-shadow: 0 4px 32px rgba(0,0,0,0.55);
       background: #fff;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
       /* width/height set in JS to viewport CSS pixels */
     }
     .pdfCanvas {
@@ -65,7 +103,7 @@
       user-select: text;
       forced-color-adjust: none;
     }
-    .textLayer ::selection { background: rgba(0, 120, 255, 0.35); }
+    .textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
     .textLayer span, .textLayer br {
       color: transparent;
       position: absolute;
@@ -76,14 +114,16 @@
     .bboxOverlay {
       position: absolute;
       pointer-events: none;
-      background: rgba(255, 235, 59, 0.45);
+      background: rgba(255, 226, 92, 0.55);
       mix-blend-mode: multiply;
       border-radius: 1px;
       display: none;
+      box-shadow: 0 0 0 1px rgba(204, 150, 16, 0.55);
     }
     .pageLabel {
-      position: absolute; left: 8px; top: 8px;
-      color: rgba(0,0,0,0.35); font-size: 11px;
+      position: absolute; left: 10px; top: 10px;
+      color: var(--faint); font-size: 11px;
+      font-family: var(--mono);
       font-feature-settings: "tnum";
       pointer-events: none;
     }

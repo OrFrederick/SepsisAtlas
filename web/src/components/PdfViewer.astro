@@ -8,51 +8,75 @@ const b = base.endsWith("/") ? base : base + "/";
 ---
 <link rel="stylesheet" href={`${b}pdfjs/web/pdf_viewer.css`} />
 <style>
-  body { margin: 0; }
+  body { margin: 0; background: var(--panel-3); }
   #viewer-toolbar {
-    position: sticky; top: 42px; z-index: 10;
+    position: sticky; top: 48px; z-index: 10;
     display: flex; gap: 8px; align-items: center;
-    padding: 8px 14px;
-    background: var(--panel);
+    padding: 10px 18px;
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
-    backdrop-filter: blur(8px);
+    font-size: 13px;
   }
-  #viewer-toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 6px; }
+  #viewer-toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; }
   #viewer-toolbar button {
-    background: var(--panel-2); color: var(--fg);
+    background: var(--panel); color: var(--fg-soft);
     border: 1px solid var(--border);
-    padding: 4px 10px; border-radius: 5px; cursor: pointer;
+    padding: 5px 12px; border-radius: 4px; cursor: pointer;
+    font-size: 12.5px;
+    transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
   }
-  #viewer-toolbar button:hover:not(:disabled) { background: #2f3543; }
+  #viewer-toolbar button:hover:not(:disabled) {
+    background: var(--panel-2);
+    border-color: var(--border-strong);
+    color: var(--fg);
+  }
   #viewer-toolbar button:disabled { opacity: 0.4; cursor: default; }
-  #pageinfo { color: var(--fg-muted); min-width: 80px; text-align: center; }
-  #zoominfo { color: var(--fg-muted); min-width: 50px; text-align: center; }
-  #vstatus { color: var(--fg-muted); }
-  #filename { color: var(--fg-muted); margin-left: auto; font-feature-settings: "tnum"; }
+  #pageinfo {
+    color: var(--fg-muted); min-width: 80px; text-align: center;
+    font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  }
+  #zoominfo {
+    color: var(--fg-muted); min-width: 50px; text-align: center;
+    font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  }
+  #vstatus { color: var(--fg-muted); font-style: italic; }
+  #filename {
+    color: var(--fg-muted); margin-left: auto;
+    font-family: var(--mono); font-size: 12px;
+    font-feature-settings: "tnum";
+  }
   #stage {
     display: flex; flex-direction: column; align-items: center;
-    padding: 24px 16px 60px; gap: 16px;
+    padding: 28px 16px 80px; gap: 22px;
+    background: var(--panel-3);
   }
-  .pageWrap { position: relative; box-shadow: 0 4px 32px rgba(0,0,0,0.55); background: #fff; }
+  .pageWrap {
+    position: relative;
+    background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
+  }
   .pdfCanvas { position: absolute; left: 0; top: 0; }
   .textLayer {
     position: absolute; left: 0; top: 0; overflow: hidden;
     opacity: 1; line-height: 1.0; user-select: text;
     forced-color-adjust: none;
   }
-  .textLayer ::selection { background: rgba(0,120,255,0.35); }
+  .textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
   .textLayer span, .textLayer br {
     color: transparent; position: absolute; white-space: pre;
     cursor: text; transform-origin: 0% 0%;
   }
   .bboxOverlay {
     position: absolute; pointer-events: none;
-    background: rgba(255, 235, 59, 0.45);
+    background: rgba(255, 226, 92, 0.55);
     mix-blend-mode: multiply; border-radius: 1px; display: none;
+    box-shadow: 0 0 0 1px rgba(204, 150, 16, 0.55);
   }
   .pageLabel {
-    position: absolute; left: 8px; top: 8px;
-    color: rgba(0,0,0,0.35); font-size: 11px;
+    position: absolute; left: 10px; top: 10px;
+    color: var(--fg-faint); font-size: 11px;
+    font-family: var(--mono);
     font-feature-settings: "tnum"; pointer-events: none;
   }
   /* Viewer pages need to escape the narrow main container. */

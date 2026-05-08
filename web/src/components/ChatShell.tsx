@@ -17,7 +17,34 @@
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
+
+// Editorial Clinical motion language: short fade-ups, gentle stagger, no
+// springs. Tuned for prose-density UIs where motion should feel like
+// turning a page, not bouncing a ball.
+const FADE_UP = {
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.42, ease: [0.2, 0.7, 0.2, 1] as const },
+};
+const SLIDE_IN_RIGHT = {
+  initial: { opacity: 0, x: 12 },
+  animate: { opacity: 1, x: 0 },
+  transition: { duration: 0.32, ease: [0.2, 0.7, 0.2, 1] as const },
+};
+const STAGGER_PARENT = {
+  initial: {},
+  animate: {
+    transition: { staggerChildren: 0.1, delayChildren: 0.05 },
+  },
+};
+const STAGGER_CHILD = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.42, ease: [0.2, 0.7, 0.2, 1] as const } },
+};
 
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
@@ -246,7 +273,10 @@ function EvidenceCard({
   };
 
   return (
-    <div
+    <motion.div
+      variants={STAGGER_CHILD}
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.18 }}
       className={`card${active ? " active" : ""}`}
       role="button"
       tabIndex={0}
@@ -285,7 +315,7 @@ function EvidenceCard({
       {row.anchor_text && String(row.anchor_text).trim() ? (
         <div className="quote">{String(row.anchor_text)}</div>
       ) : null}
-    </div>
+    </motion.div>
   );
 }
 
@@ -293,21 +323,34 @@ function EvidenceCard({
 
 function Welcome({ onChip }: { onChip: (q: string) => void }) {
   return (
-    <div className="welcome">
-      <h2>Sepsis Atlas</h2>
+    <motion.div
+      className="welcome"
+      initial={FADE_UP.initial}
+      animate={FADE_UP.animate}
+      transition={FADE_UP.transition}
+    >
+      <h2>Evidence, anchored.</h2>
       <p>
         Ask about sepsis predictors, biomarkers, or outcomes. Answers are pinned to verbatim quotes
         from peer-reviewed papers; click any evidence row to inspect the cited PDF passage. Toggle
         KG mode for cross-paper, agent-driven retrieval.
       </p>
       <div className="chips">
-        {SAMPLE_QUERIES.map((q) => (
-          <button key={q} type="button" className="chip" onClick={() => onChip(q)}>
+        {SAMPLE_QUERIES.map((q, i) => (
+          <motion.button
+            key={q}
+            type="button"
+            className="chip"
+            onClick={() => onChip(q)}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.32, delay: 0.18 + i * 0.06, ease: [0.2, 0.7, 0.2, 1] }}
+          >
             {q}
-          </button>
+          </motion.button>
         ))}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -470,6 +513,7 @@ export default function ChatShell() {
   }, [input]);
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="chat-shell">
       <div className="controls">
         <div className="backend-toggle" role="tablist" aria-label="Query backend">
@@ -513,28 +557,60 @@ export default function ChatShell() {
             ) : null}
             {history.map((turn, ti) => (
               <div key={turn.ts} className="turn">
-                <div className="bubble-user">{turn.user_text}</div>
+                <motion.div
+                  className="bubble-user"
+                  initial={SLIDE_IN_RIGHT.initial}
+                  animate={SLIDE_IN_RIGHT.animate}
+                  transition={SLIDE_IN_RIGHT.transition}
+                >
+                  {turn.user_text}
+                </motion.div>
                 <div className="assistant">
                   {turn.assistant.refused ? (
-                    <div className="refused">
+                    <motion.div
+                      className="refused"
+                      initial={FADE_UP.initial}
+                      animate={FADE_UP.animate}
+                      transition={FADE_UP.transition}
+                    >
                       {turn.assistant.refused_reason || "Request refused."}
-                    </div>
+                    </motion.div>
                   ) : (
                     <>
                       {turn.assistant.summary ? (
-                        <div className="summary">{turn.assistant.summary}</div>
+                        <motion.div
+                          className="summary"
+                          initial={FADE_UP.initial}
+                          animate={FADE_UP.animate}
+                          transition={{ ...FADE_UP.transition, delay: 0.08 }}
+                        >
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {turn.assistant.summary}
+                          </ReactMarkdown>
+                        </motion.div>
                       ) : null}
                       {turn.assistant.rows && turn.assistant.rows.length > 0 ? (
                         <>
                           {view === "table" ? (
-                            <EvidenceTable
-                              rows={turn.assistant.rows}
-                              turnIdx={ti}
-                              activeRowKey={activeRowKey}
-                              onActivate={(ri, row) => activateRow(ti, ri, row)}
-                            />
+                            <motion.div
+                              initial={FADE_UP.initial}
+                              animate={FADE_UP.animate}
+                              transition={{ ...FADE_UP.transition, delay: 0.18 }}
+                            >
+                              <EvidenceTable
+                                rows={turn.assistant.rows}
+                                turnIdx={ti}
+                                activeRowKey={activeRowKey}
+                                onActivate={(ri, row) => activateRow(ti, ri, row)}
+                              />
+                            </motion.div>
                           ) : (
-                            <div className="rows">
+                            <motion.div
+                              className="rows"
+                              variants={STAGGER_PARENT}
+                              initial="initial"
+                              animate="animate"
+                            >
                               {turn.assistant.rows.map((row, ri) => {
                                 const k = `${ti}:${ri}`;
                                 return (
@@ -546,7 +622,7 @@ export default function ChatShell() {
                                   />
                                 );
                               })}
-                            </div>
+                            </motion.div>
                           )}
                           <div
                             className="backend-toggle view-toggle"
@@ -578,9 +654,14 @@ export default function ChatShell() {
             {pending ? (
               <div className="turn">
                 <div className="assistant">
-                  <div className="thinking">
+                  <motion.div
+                    className="thinking"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                  >
                     {mode === "kg" ? "thinking (agent loop)..." : "thinking..."}
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             ) : null}
@@ -612,5 +693,6 @@ export default function ChatShell() {
         </section>
       </main>
     </div>
+    </MotionConfig>
   );
 }

@@ -458,7 +458,13 @@ def apply_evidence_projection(
         r2["_evidence_type"] = classify_evidence_row(r)
         classified.append(r2)
 
-    direct = predictor is not None and metric_type in {"auc", "cutoff", "or", "hr", "rr"}
+    # Force direct matching when a specific predictor is named: either a metric
+    # keyword is present (lactate AUC) OR the query is paper-scoped evidence
+    # browse (qSOFA in Seymour 2016) where baseline-model rows must not satisfy.
+    direct = predictor is not None and (
+        metric_type in {"auc", "cutoff", "or", "hr", "rr"}
+        or query_mode == "paper_evidence"
+    )
     drop_composite = predictor is not None and not composite_intent
 
     filtered = filter_evidence_rows(

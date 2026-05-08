@@ -142,7 +142,7 @@ def _assess_answerable(intent) -> tuple[bool, str | None]:
 def _summary(rows: list[dict], intent_dict: dict, fallback_note: str | None) -> str:
     n = len(rows)
     if n == 0:
-        return "No matching evidence rows in DB. Consider /ingest_pubmed to expand the corpus."
+        return "No matching evidence was found in the current indexed papers."
     bits: list[str] = [f"{n} extracted row(s) match."]
     if intent_dict.get("outcome_type"):
         bits.append(f"Outcome: {intent_dict['outcome_type']}")

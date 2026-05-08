@@ -8,6 +8,7 @@ const forward = { target: API_TARGET, changeOrigin: true };
 export default defineConfig({
   output: "static",
   integrations: [react()],
+  devToolbar: { enabled: false },
   vite: {
     plugins: [tailwindcss()],
     server: {

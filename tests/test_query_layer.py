@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from api.main import _assess_answerable
-from api.query import _heuristic_intent, build_sql, run_query
+from api.query import _canonicalize_predictor, _heuristic_intent, build_sql, run_query
 from sepsis_atlas.schemas import IntentParse
 
 
@@ -51,6 +51,30 @@ def test_paper_ref_lands_in_sql():
     sql, params, _ = build_sql(intent)
     assert "LOWER(sc.paper_ref) LIKE :paper_ref" in sql
     assert params["paper_ref"] == "%schlapbach 2018%"
+
+
+def test_qsofa_does_not_canonicalize_to_sofa():
+    assert _heuristic_intent("qSOFA in septic shock").predictor == "qSOFA"
+    assert _canonicalize_predictor("qSOFA") == "qSOFA"
+    assert _canonicalize_predictor("qsofa") == "qSOFA"
+
+
+def test_qsofa_sql_uses_qsofa_not_sofa():
+    intent = _heuristic_intent("qSOFA in septic shock")
+    sql, params, canon = build_sql(intent)
+    assert canon == "qSOFA"
+    assert params["pcanon"] == "qsofa"
+    assert params["plike"] == "%qsofa%"
+    assert "pm.predictor_canonical" in sql
+
+
+def test_in_hospital_window_is_zero_not_dropped():
+    intent = _heuristic_intent("top predictors for in-hospital mortality")
+    assert intent.outcome_type == "mortality"
+    assert intent.outcome_window_days == 0
+    sql, params, _canon = build_sql(intent)
+    assert "pm.outcome_window_days = :owd" in sql
+    assert params["owd"] == 0
 
 
 # ---------------------------------------------------------------------------

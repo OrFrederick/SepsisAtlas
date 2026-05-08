@@ -159,6 +159,50 @@
     white-space: pre-wrap;
     word-wrap: break-word;
   }
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+  }
+  .table-title {
+    padding: 8px 10px;
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .evidence-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 820px;
+  }
+  .evidence-table th,
+  .evidence-table td {
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    padding: 7px 8px;
+    text-align: left;
+    vertical-align: top;
+    color: var(--fg-soft);
+    font-size: 11.5px;
+  }
+  .evidence-table th {
+    color: var(--accent);
+    font-weight: 650;
+    background: var(--panel-2);
+  }
+  .evidence-table tr:last-child td {
+    border-bottom: 0;
+  }
+  .evidence-table th:last-child,
+  .evidence-table td:last-child {
+    border-right: 0;
+  }
+  .source-note {
+    color: var(--fg-muted);
+    font-size: 11px;
+    padding: 2px 2px 0;
+  }
   .refused {
     color: var(--fg-muted);
     font-style: italic;
@@ -566,6 +610,47 @@
     return card;
   }
 
+  function renderEvidenceTable(payload) {
+    var table = payload && payload.meta && payload.meta.table;
+    if (!table || !Array.isArray(table.columns) || !Array.isArray(table.rows) || table.rows.length === 0) {
+      return null;
+    }
+    var wrap = el("div", "table-wrap");
+    if (table.title) {
+      var titleText = table.title;
+      if (table.displayed_rows != null && table.total_rows != null) {
+        titleText += " (" + table.displayed_rows + " of " + table.total_rows + " rows)";
+      }
+      if (table.truncated) titleText += " — truncated";
+      wrap.appendChild(el("div", "table-title", titleText));
+    }
+    var tbl = el("table", "evidence-table");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    table.columns.forEach(function (c) {
+      var th = document.createElement("th");
+      th.textContent = c;
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    tbl.appendChild(thead);
+
+    var tbody = document.createElement("tbody");
+    table.rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      table.columns.forEach(function (c) {
+        var td = document.createElement("td");
+        var val = r[c];
+        td.textContent = val == null || val === "" ? "not reported" : String(val);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    wrap.appendChild(tbl);
+    return wrap;
+  }
+
   function renderAssistant(turnEl, payload) {
     var holder = el("div", "assistant");
     if (payload && payload.refused) {
@@ -576,6 +661,16 @@
     }
     if (payload && payload.summary) {
       holder.appendChild(el("div", "summary", payload.summary));
+    }
+    var tableEl = renderEvidenceTable(payload);
+    if (tableEl) {
+      holder.appendChild(tableEl);
+      var table = payload && payload.meta && payload.meta.table;
+      var sourceText = "Source cards below are for PDF review and highlighting.";
+      if (table && table.truncated) {
+        sourceText = "Table is truncated; source cards below include the returned rows for PDF review and highlighting.";
+      }
+      holder.appendChild(el("div", "source-note", sourceText));
     }
     var rows = (payload && Array.isArray(payload.rows)) ? payload.rows : [];
     if (rows.length > 0) {
@@ -697,6 +792,7 @@
       assistant: {
         summary: payload.summary || "",
         rows: Array.isArray(payload.rows) ? payload.rows : [],
+        meta: payload.meta || null,
         refused: !!payload.refused,
         refused_reason: payload.refused_reason || null
       },

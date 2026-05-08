@@ -99,6 +99,28 @@ def app_client(tmp_path_factory):
                 verifier_score=0.95,
             )
         )
+        s.add(
+            PredictorModel(
+                id="r_test1_duplicate_run",
+                cohort_id="Gai 2022 Total Cohort",
+                predictors="Lactate",
+                outcome="28-day mortality",
+                outcome_type="mortality",
+                outcome_window_days=28,
+                effect_size_str="OR 2.873 (95% CI 1.616-5.108), p<0.001",
+                effect_type="OR",
+                effect_value=2.873,
+                ci_lo=1.616,
+                ci_hi=5.108,
+                p_value=0.001,
+                predictor_canonical="lactate",
+                anchor_page=4,
+                anchor_bbox={"x0": 100.0, "y0": 200.0, "x1": 400.0, "y1": 260.0},
+                anchor_text="Lactate was associated with 28-day mortality...",
+                verifier_verdict="ok",
+                verifier_score=0.92,
+            )
+        )
         s.commit()
 
     # Import app AFTER env var is set so engine builds against test DB.
@@ -118,7 +140,7 @@ def test_query_lactate(app_client):
     r = app_client.post("/query", json={"nl_text": "What is the OR for lactate vs 28-day mortality?"})
     assert r.status_code == 200
     body = r.json()
-    assert body["n_rows"] >= 1
+    assert body["n_rows"] == 1
     assert any("lactate" in (row.get("predictors") or "").lower() for row in body["rows"])
     assert "Lactate" in body["table_md"] or "lactate" in body["table_md"].lower()
     assert body["intent"]["outcome_type"] == "mortality"
@@ -157,7 +179,7 @@ def test_viewer_serves_html(app_client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "Gai_2022" in r.text
-    assert "pdf-canvas" in r.text
+    assert "init();" in r.text
     # CSP allows any framing parent (OpenWebUI artifact pane).
     assert "frame-ancestors *" in r.headers.get("content-security-policy", "")
     assert "X-Frame-Options" not in r.headers

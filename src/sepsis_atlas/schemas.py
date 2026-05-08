@@ -140,4 +140,6 @@ class IntentParse(BaseModel):
     population: dict = Field(default_factory=dict)
     predictor: Optional[str] = None
     paper_ref: Optional[str] = None
+    metric_type: Optional[str] = None
+    query_mode: Optional[str] = None
     intent: Literal["ranking", "lookup", "comparison", "summary"] = "lookup"

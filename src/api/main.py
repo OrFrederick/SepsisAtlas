@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 
@@ -38,12 +39,20 @@ from sepsis_atlas.db import (
 from sqlalchemy.orm import sessionmaker
 
 from api.query import (
+    detect_outcome_window_days,
     parse_intent,
     run_query,
     to_markdown_table,
 )
+from api.evidence_projection import (
+    apply_evidence_projection,
+    detect_metric_type,
+    detect_query_mode,
+    metric_no_result_message,
+)
 from api.rank import rerank
 from api.rank_predictors import (
+    METRIC_AUC,
     rank_predictors_with_meta,
     rank_row_to_dict,
 )
@@ -140,17 +149,141 @@ def _assess_answerable(intent) -> tuple[bool, str | None]:
 def _summary(rows: list[dict], intent_dict: dict, fallback_note: str | None) -> str:
     n = len(rows)
     if n == 0:
-        return "No matching evidence rows in DB. Consider /ingest_pubmed to expand the corpus."
+        return "No matching evidence rows in the current indexed papers."
     bits: list[str] = [f"{n} extracted row(s) match."]
     if intent_dict.get("outcome_type"):
         bits.append(f"Outcome: {intent_dict['outcome_type']}")
-    if intent_dict.get("outcome_window_days"):
-        bits.append(f"Window: {intent_dict['outcome_window_days']} days")
+    if intent_dict.get("outcome_window_days") is not None:
+        window = intent_dict["outcome_window_days"]
+        bits.append("Window: in-hospital" if window == 0 else f"Window: {window} days")
     if intent_dict.get("predictor"):
         bits.append(f"Predictor: {intent_dict['predictor']}")
     if fallback_note:
         bits.append(fallback_note)
     return " | ".join(bits)
+
+
+def _rank_value(rr: dict) -> str:
+    value = rr.get("best_value")
+    if value is None:
+        return ""
+    try:
+        value_s = f"{float(value):.3g}"
+    except (TypeError, ValueError):
+        value_s = str(value)
+    lo = rr.get("best_ci_lo")
+    hi = rr.get("best_ci_hi")
+    if lo is not None and hi is not None:
+        try:
+            return f"{value_s} ({float(lo):.3g}-{float(hi):.3g})"
+        except (TypeError, ValueError):
+            return value_s
+    return value_s
+
+
+def _ranking_query_response(
+    *,
+    engine,
+    query_id: str,
+    req: QueryRequest,
+    intent,
+    intent_dict: dict,
+    metric_type: str | None,
+    fallback_note: str | None,
+    t0: float,
+) -> QueryResponse:
+    metric_priority = (METRIC_AUC,) if metric_type == "auc" else None
+    ranked, note, matched_window = rank_predictors_with_meta(
+        engine,
+        outcome_type=intent.outcome_type or "mortality",
+        outcome_window_days=intent.outcome_window_days,
+        paper_ref=intent.paper_ref,
+        population_contains=(intent.population or {}).get("condition"),
+        top_k=50,
+        **({"metric_priority": metric_priority} if metric_priority else {}),
+    )
+    rank_rows = [rank_row_to_dict(rr) for rr in ranked]
+    columns = ["Predictor", "Best Metric", "Value", "Study", "N Studies", "Median", "Source"]
+    table_rows = []
+    drilldown_rows: list[dict] = []
+    for rr in rank_rows:
+        support = rr.get("supporting_rows") or []
+        best_source = support[0] if support else {}
+        page = best_source.get("anchor_page")
+        table_rows.append({
+            "Predictor": rr.get("predictor_canonical") or "not reported",
+            "Best Metric": rr.get("best_metric") or "not reported",
+            "Value": _rank_value(rr),
+            "Study": rr.get("best_paper_ref") or "not reported",
+            "N Studies": rr.get("n_studies") or "not reported",
+            "Median": "" if rr.get("median_value") is None else f"{rr['median_value']:.3g}",
+            "Source": f"p.{page}" if page else "source",
+        })
+        if best_source:
+            drilldown_rows.append(best_source)
+
+    table = {
+        "title": "Ranked Predictors",
+        "columns": columns,
+        "rows": table_rows,
+        "total_rows": len(table_rows),
+        "displayed_rows": len(table_rows),
+        "truncated": False,
+    }
+    summary_note = note or fallback_note
+    summary = _summary(rank_rows, intent_dict, summary_note).replace("extracted row(s)", "ranked predictor(s)")
+    latency_ms = int((time.time() - t0) * 1000)
+    _persist_query(engine, query_id, req.nl_text, intent_dict, "rank_predictors", len(rank_rows), latency_ms)
+    return QueryResponse(
+        query_id=query_id,
+        rows=drilldown_rows,
+        table_md=to_markdown_table(drilldown_rows),
+        summary=summary,
+        intent=intent_dict,
+        canonical_predictor=None,
+        fallback_note=summary_note,
+        n_rows=len(rank_rows),
+        meta={
+            "metric_type": None,
+            "requested_metric_type": metric_type,
+            "query_mode": "ranking",
+            "table": table,
+            "matched_window": matched_window,
+        },
+    )
+
+
+def _should_use_grouped_ranking(nl_text: str, query_mode: str, metric_type: str | None, predictor: str | None) -> bool:
+    if query_mode != "ranking" or predictor:
+        return False
+    text_l = nl_text.lower()
+    if "model" in text_l:
+        return False
+    if metric_type and metric_type != "auc":
+        return False
+    return bool(re.search(r"\b(predictor|biomarker|score|scores)\b", text_l))
+
+
+def _projected_summary(
+    rows: list[dict],
+    intent_dict: dict,
+    fallback_note: str | None,
+    metric_type: str | None,
+    no_result_note: str | None = None,
+) -> str:
+    if no_result_note:
+        return no_result_note
+    bits = [_summary(rows, intent_dict, fallback_note)]
+    if metric_type:
+        labels = {
+            "auc": "AUC/AUROC evidence",
+            "cutoff": "cut-off evidence",
+            "or": "odds-ratio evidence",
+            "hr": "hazard-ratio evidence",
+            "rr": "risk-ratio evidence",
+        }
+        bits.append(f"Filtered to {labels.get(metric_type, metric_type)}.")
+    return " | ".join(b for b in bits if b)
 
 
 def _persist_query(engine, query_id: str, nl_text: str, intent_dict: dict, sql: str, n: int, latency_ms: int):
@@ -203,10 +336,58 @@ def post_query(req: QueryRequest) -> QueryResponse:
             refused_reason=refuse_reason,
         )
 
-    rows, fr = run_query(engine, intent)
-    ranked = rerank(req.nl_text, rows)
+    # Deterministic hints override/complete LLM intent. The LLM can miss terms
+    # like "AUC" or "cut-off"; these must become filters, not rerank hints.
+    metric_type = intent.metric_type or detect_metric_type(req.nl_text)
+    query_mode = intent.query_mode or detect_query_mode(req.nl_text)
+    if intent.outcome_window_days is None:
+        intent.outcome_window_days = detect_outcome_window_days(req.nl_text)
+    intent.metric_type = metric_type
+    intent.query_mode = query_mode
+    intent_dict = intent.model_dump()
 
-    summary = _summary(ranked, intent_dict, fr.fallback_note)
+    if _should_use_grouped_ranking(req.nl_text, query_mode, metric_type, intent.predictor):
+        return _ranking_query_response(
+            engine=engine,
+            query_id=query_id,
+            req=req,
+            intent=intent,
+            intent_dict=intent_dict,
+            metric_type=metric_type,
+            fallback_note=None,
+            t0=t0,
+        )
+
+    rows, fr = run_query(engine, intent)
+    projected, projection_meta = apply_evidence_projection(
+        rows,
+        nl_text=req.nl_text,
+        predictor=fr.canonical_predictor or intent.predictor,
+    )
+    no_result_note = None
+    if rows and not projected:
+        no_result_note = metric_no_result_message(
+            projection_meta.get("metric_type"),
+            fr.canonical_predictor or intent.predictor,
+        )
+    elif not rows and projection_meta.get("metric_type"):
+        no_result_note = metric_no_result_message(
+            projection_meta.get("metric_type"),
+            fr.canonical_predictor or intent.predictor,
+        )
+
+    if projection_meta.get("metric_type") or projection_meta.get("query_mode") == "ranking":
+        ranked = projected
+    else:
+        ranked = rerank(req.nl_text, projected)
+
+    summary = _projected_summary(
+        ranked,
+        intent_dict,
+        fr.fallback_note,
+        projection_meta.get("metric_type"),
+        no_result_note,
+    )
 
     latency_ms = int((time.time() - t0) * 1000)
     _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(ranked), latency_ms)
@@ -220,6 +401,7 @@ def post_query(req: QueryRequest) -> QueryResponse:
         canonical_predictor=fr.canonical_predictor,
         fallback_note=fr.fallback_note,
         n_rows=len(ranked),
+        meta=projection_meta,
     )
 
 
@@ -571,13 +753,16 @@ def viewer(file_stem: str):
     viewer_path = STATIC_DIR / "viewer.html"
     if not viewer_path.exists():
         raise HTTPException(500, "viewer.html missing")
-    html = viewer_path.read_text()
+    html = viewer_path.read_text(encoding="utf-8")
     # Inject the file_stem so client knows which PDF to fetch.
     html = html.replace("__FILE_STEM__", safe)
     return Response(
         content=html,
         media_type="text/html",
-        headers={"Content-Security-Policy": "frame-ancestors *;"},
+        headers={
+            "Content-Security-Policy": "frame-ancestors *;",
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -899,4 +1084,9 @@ def app_root():
     p = STATIC_DIR / "app.html"
     if not p.exists():
         raise HTTPException(500, "app.html missing")
-    return Response(content=p.read_text(), media_type="text/html")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="text/html")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return Response(status_code=204)

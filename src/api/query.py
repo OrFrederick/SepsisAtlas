@@ -22,6 +22,8 @@ from sqlalchemy.engine import Engine
 from sepsis_atlas.config import MODEL_INTENT
 from sepsis_atlas.llm import logged_llm_call, get_client
 from sepsis_atlas.schemas import IntentParse
+from api.dedupe import dedupe_evidence_rows
+from api.evidence_projection import detect_metric_type, detect_query_mode
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +54,7 @@ PREDICTOR_SYNONYMS: dict[str, list[str]] = {
     "respiratory_rate": ["respiratory rate", "resp rate", "rr"],
     "ALP": ["alp", "alkaline phosphatase"],
     "LDH": ["ldh", "lactate dehydrogenase"],
+    "IL_6": ["il-6", "il 6", "interleukin-6", "interleukin 6"],
     "CK": ["ck", "creatine kinase"],
     "RBC": ["rbc", "red blood cell"],
     "albumin": ["albumin"],
@@ -64,6 +67,12 @@ PREDICTOR_SYNONYMS: dict[str, list[str]] = {
     "PSV": ["psv", "peak systolic velocity"],
     "RI": ["resistive index"],
 }
+
+_PREDICTOR_SYNONYM_ITEMS: list[tuple[str, str]] = sorted(
+    ((canon, syn) for canon, syns in PREDICTOR_SYNONYMS.items() for syn in syns),
+    key=lambda item: len(item[1]),
+    reverse=True,
+)
 
 # Outcome types matching PredictorModel.outcome_type literal.
 OUTCOME_TYPES = {"mortality", "readmission", "los", "organ_failure", "other"}
@@ -87,6 +96,17 @@ OUTCOME_WINDOW_SYNONYMS: dict[str, int] = {
 }
 
 
+def detect_outcome_window_days(nl_text: str) -> int | None:
+    text_l = nl_text.lower()
+    m = re.search(r"(\d{1,3})\s*[- ]?\s*(day|d\b)", text_l)
+    if m:
+        return int(m.group(1))
+    for k, v in OUTCOME_WINDOW_SYNONYMS.items():
+        if k in text_l:
+            return v
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Intent parsing
 # ---------------------------------------------------------------------------
@@ -100,6 +120,8 @@ Allowed JSON keys:
 - predictor: short canonical predictor name (lactate, SOFA, APACHE_II, qSOFA, ...) or null
 - population: object with optional keys {condition, age_band, setting}
 - paper_ref: study citation in "Author YYYY" form when the user names a specific paper (e.g. "Zhang 2021", "Seymour 2016") or null
+- metric_type: one of [auc, cutoff, or, hr, rr] when the user asks for a specific metric/evidence type, otherwise null
+- query_mode: one of [ranking, paper_evidence, lookup] when clear, otherwise null
 - intent: one of [ranking, lookup, comparison, summary]
 
 Return ONLY the JSON object. No prose. No code fences.
@@ -144,23 +166,15 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
         out_type = "los"
 
     window: int | None = None
-    m = re.search(r"(\d{1,3})\s*[- ]?\s*(day|d\b)", text_l)
-    if m:
-        window = int(m.group(1))
-    else:
-        for k, v in OUTCOME_WINDOW_SYNONYMS.items():
-            if k in text_l and v:
-                window = v
-                break
+    window = detect_outcome_window_days(nl_text)
 
     predictor: str | None = None
     # Word-boundary match so "shock" doesn't trigger "ck", "ck" doesn't match inside "track", etc.
-    for canon, syns in PREDICTOR_SYNONYMS.items():
-        for s in syns:
-            pat = r"\b" + re.escape(s) + r"\b"
-            if re.search(pat, text_l):
-                predictor = canon
-                break
+    for canon, s in _PREDICTOR_SYNONYM_ITEMS:
+        pat = r"\b" + re.escape(s) + r"\b"
+        if re.search(pat, text_l):
+            predictor = canon
+            break
         if predictor:
             break
 
@@ -173,6 +187,8 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
         population["setting"] = "icu"
 
     intent = "ranking" if any(w in text_l for w in ["best", "rank", "top", "compare"]) else "lookup"
+    metric_type = detect_metric_type(nl_text)
+    query_mode = detect_query_mode(nl_text)
 
     paper_ref: str | None = None
     m = re.search(r"\b([A-Z][a-zA-Z'\-]+)\s+((?:19|20)\d{2})\b", nl_text)
@@ -185,6 +201,8 @@ def _heuristic_intent(nl_text: str) -> IntentParse:
         predictor=predictor,
         population=population,
         paper_ref=paper_ref,
+        metric_type=metric_type,
+        query_mode=query_mode,
         intent=intent,
     )
 
@@ -208,10 +226,14 @@ def _canonicalize_predictor(p: str | None) -> str | None:
     if not p:
         return None
     p_l = p.lower().strip()
-    if p_l in PREDICTOR_SYNONYMS:
-        return p_l
+    for canon in PREDICTOR_SYNONYMS:
+        if canon.lower() == p_l:
+            return canon
     for canon, syns in PREDICTOR_SYNONYMS.items():
-        if canon.lower() == p_l or any(s == p_l for s in syns) or any(s in p_l for s in syns):
+        if any(s == p_l for s in syns):
+            return canon
+    for canon, syns in _PREDICTOR_SYNONYM_ITEMS:
+        if len(syns) >= 4 and re.search(r"\b" + re.escape(syns) + r"\b", p_l):
             return canon
     return p_l
 
@@ -234,6 +256,14 @@ SELECT
     pm.ci_hi              AS ci_hi,
     pm.p_value            AS p_value,
     pm.auc                AS auc,
+    pm.auc_ci_lo          AS auc_ci_lo,
+    pm.auc_ci_hi          AS auc_ci_hi,
+    pm.sens               AS sens,
+    pm.spec               AS spec,
+    pm.ppv                AS ppv,
+    pm.npv                AS npv,
+    pm.c_index            AS c_index,
+    pm.cutoff             AS cutoff,
     pm.anchor_page        AS anchor_page,
     pm.anchor_bbox        AS anchor_bbox,
     pm.anchor_text        AS anchor_text,
@@ -311,7 +341,7 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
             return [dict(r._mapping) for r in res]
 
     sql, params, canon = build_sql(intent)
-    rows = _run(sql, params)
+    rows = dedupe_evidence_rows(_run(sql, params))
     fr = FilterResult(sql=sql, params=params, intent=intent, canonical_predictor=canon)
     if rows or intent.outcome_window_days is None:
         fr.proximity_window = intent.outcome_window_days
@@ -321,7 +351,7 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
     for cand in sorted({28, 30, 60, 90, 180, 365}, key=lambda c: abs(c - target)):
         if abs(cand - target) <= 5:
             sql2, params2, _ = build_sql(intent, window_override=cand)
-            rows = _run(sql2, params2)
+            rows = dedupe_evidence_rows(_run(sql2, params2))
             if rows:
                 fr.sql, fr.params = sql2, params2
                 fr.proximity_window = cand
@@ -334,9 +364,12 @@ def run_query(engine: Engine, intent: IntentParse) -> tuple[list[dict], FilterRe
         predictor=intent.predictor,
         population=intent.population,
         intent=intent.intent,
+        paper_ref=intent.paper_ref,
+        metric_type=intent.metric_type,
+        query_mode=intent.query_mode,
     )
     sql3, params3, _ = build_sql(no_win)
-    rows = _run(sql3, params3)
+    rows = dedupe_evidence_rows(_run(sql3, params3))
     fr.sql, fr.params = sql3, params3
     fr.proximity_window = None
     fr.fallback_note = f"No exact match for {target}-day; showing all windows for this outcome."

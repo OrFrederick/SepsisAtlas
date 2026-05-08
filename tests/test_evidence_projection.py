@@ -143,6 +143,11 @@ def test_classify_performance_auc_explicit():
     assert classify_evidence_row(r) == "performance_auc"
 
 
+def test_classify_performance_auc_even_when_effect_type_other():
+    r = _row(effect_type="other", auc=0.81)
+    assert classify_evidence_row(r) == "performance_auc"
+
+
 def test_classify_performance_auc_null_effect_type():
     r = _row(auc=0.808)  # no effect_type, no cutoff
     assert classify_evidence_row(r) == "performance_auc"
@@ -300,6 +305,32 @@ def test_filter_direct_predictor_excludes_anchor_only_match():
     assert canons == ["lactate"]
 
 
+def test_filter_direct_auc_predictor_excludes_model_spec_only_match():
+    rows = [
+        _classified(
+            predictor_canonical="multivariable_model",
+            model_specification="Model 1 (lactate, age, SOFA)",
+            auc=0.76,
+        ),
+        _classified(predictor_canonical="lactate", auc=0.71),
+    ]
+    out = filter_evidence_rows(
+        rows, metric_type="auc", predictor="lactate", direct_predictor_only=True,
+    )
+    assert [r["predictor_canonical"] for r in out] == ["lactate"]
+
+
+def test_filter_qsofa_does_not_match_sofa_substring():
+    rows = [
+        _classified(predictor_canonical="SOFA", effect_type="AUC", auc=0.74),
+        _classified(predictor_canonical="qSOFA", effect_type="AUC", auc=0.81),
+    ]
+    out = filter_evidence_rows(
+        rows, metric_type=None, predictor="qSOFA", direct_predictor_only=True,
+    )
+    assert [r["predictor_canonical"] for r in out] == ["qSOFA"]
+
+
 def test_filter_composite_outcome_dropped():
     rows = [
         _classified(effect_type="AUC", auc=0.8, outcome="mortality or ICU LOS >=3 days"),
@@ -359,6 +390,19 @@ def test_apply_evidence_projection_classifies_rows():
         rows, nl_text="best AUC", predictor=None,
     )
     assert filtered[0]["_evidence_type"] == "performance_auc"
+
+
+def test_apply_evidence_projection_sorts_auc_descending():
+    rows = [
+        _row(effect_type="AUC", auc=0.578, predictor_canonical="SOFA"),
+        _row(effect_type="AUC", auc=0.773, predictor_canonical="multivariable_model"),
+        _row(effect_type="AUC", auc=0.750, predictor_canonical="multivariable_model"),
+    ]
+    filtered, meta = apply_evidence_projection(
+        rows, nl_text="Which model has the best AUC in Wang 2023?", predictor=None,
+    )
+    assert [r["auc"] for r in filtered] == [0.773, 0.75, 0.578]
+    assert [r["AUC"] for r in meta["table"]["rows"]] == ["0.773", "0.750", "0.578"]
 
 
 # ---------------------------------------------------------------------------

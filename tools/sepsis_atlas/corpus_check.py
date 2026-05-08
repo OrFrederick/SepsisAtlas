@@ -146,7 +146,7 @@ def check_corpus(
     for json_path in sorted(parsed_dir.glob("*.json")):
         stem = json_path.stem  # e.g. "Zhang_2021"
         try:
-            parsed = json.loads(json_path.read_text())
+            parsed = json.loads(json_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
 

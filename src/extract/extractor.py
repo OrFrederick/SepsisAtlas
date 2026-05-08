@@ -62,7 +62,7 @@ _PROMPT_DIR = Path(__file__).parent / "prompts"
 def _load_prompt(name: str) -> tuple[str, str]:
     """Return (text, prompt_id) where prompt_id = '<name>@<sha8>'."""
     p = _PROMPT_DIR / name
-    text = p.read_text()
+    text = p.read_text(encoding="utf-8")
     sha = hashlib.sha256(text.encode()).hexdigest()[:8]
     pid = f"{p.stem}@{sha}"
     return text, pid
@@ -361,7 +361,7 @@ def _load_paper(file_stem: str) -> dict:
         raise FileNotFoundError(
             f"Parsed paper not found: {path}. Run `python -m parse.run_parse` first."
         )
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def extract_paper(file_stem: str, *, run_id: str | None = None,

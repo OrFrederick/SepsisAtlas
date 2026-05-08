@@ -33,7 +33,7 @@ def load_done(stage: str) -> set[str]:
     p = _path(stage)
     if not p.exists():
         return set()
-    return {ln.strip() for ln in p.read_text().splitlines() if ln.strip()}
+    return {ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()}
 
 
 def mark_done(stage: str, stem: str) -> None:

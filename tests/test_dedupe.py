@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from api.dedupe import (  # noqa: E402
+    collapse_exact_facts,
     collapse_descriptive_pairs,
     collapse_repeated_facts,
     dedupe_rows,
@@ -225,6 +226,31 @@ def test_collapse_repeated_facts_different_predictors_not_merged():
 # ---------------------------------------------------------------------------
 # dedupe_rows
 # ---------------------------------------------------------------------------
+
+
+def test_collapse_exact_facts_drops_duplicate_or_row():
+    rows = [
+        {
+            "paper_ref": "Gai 2022",
+            "cohort_id": "Gai 2022 Total",
+            "predictor_canonical": "PSV",
+            "outcome": "In-hospital mortality",
+            "effect_type": "OR",
+            "effect_size_str": "OR 0.295 (95% CI 0.094-0.925), p=0.036",
+            "model_specification": "multivariate logistic regression",
+        },
+        {
+            "paper_ref": "Gai 2022",
+            "cohort_id": "Gai 2022 Total",
+            "predictor_canonical": "PSV",
+            "outcome": "In-hospital mortality",
+            "effect_type": "OR",
+            "effect_size_str": "OR 0.295 (95% CI 0.094-0.925), p=0.036",
+            "model_specification": "multivariate logistic regression",
+        },
+    ]
+    out = collapse_exact_facts(rows)
+    assert len(out) == 1
 
 
 def test_dedupe_rows_empty_input():

@@ -661,7 +661,7 @@ def viewer(file_stem: str):
     viewer_path = STATIC_DIR / "viewer.html"
     if not viewer_path.exists():
         raise HTTPException(500, "viewer.html missing")
-    html = viewer_path.read_text()
+    html = viewer_path.read_text(encoding="utf-8")
     # Inject the file_stem so client knows which PDF to fetch.
     html = html.replace("__FILE_STEM__", safe)
     return Response(

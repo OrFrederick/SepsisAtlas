@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from api.main import _assess_answerable
-from api.query import _heuristic_intent, build_sql, run_query
+from api.query import _canonicalize_predictor, _heuristic_intent, build_sql, run_query
 from sepsis_atlas.schemas import IntentParse
 
 
@@ -51,6 +51,16 @@ def test_paper_ref_lands_in_sql():
     sql, params, _ = build_sql(intent)
     assert "LOWER(sc.paper_ref) LIKE :paper_ref" in sql
     assert params["paper_ref"] == "%schlapbach 2018%"
+
+
+def test_qsofa_heuristic_does_not_canonicalize_to_sofa():
+    intent = _heuristic_intent("Show qSOFA mortality evidence from Seymour 2016")
+    assert intent.predictor == "qSOFA"
+
+
+def test_qsofa_canonicalizer_does_not_canonicalize_to_sofa():
+    assert _canonicalize_predictor("qSOFA") == "qSOFA"
+    assert _canonicalize_predictor("quick sofa") == "qSOFA"
 
 
 # ---------------------------------------------------------------------------

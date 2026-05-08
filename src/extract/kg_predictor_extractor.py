@@ -186,7 +186,7 @@ def _load_parsed_json(file_stem: str) -> dict:
         raise FileNotFoundError(
             f"Parsed paper not found: {path}. Run `python -m parse.run_parse` first."
         )
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def extract_paper_predictors(

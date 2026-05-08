@@ -229,6 +229,7 @@ export default function EvidenceTable({
     : indexedRows;
 
   const columns: [SortKey, string, string][] = [
+    ["verdict", "✓", "verdict"],
     ["paper", "Paper · Cohort", ""],
     ["predictor", "Predictor", ""],
     ["outcome", "Outcome", ""],
@@ -236,7 +237,6 @@ export default function EvidenceTable({
   if (showRankedColumn) columns.push(["ranked", "Ranked by", "num"]);
   columns.push(["n", "N", "num"]);
   columns.push(["page", "Page", "num"]);
-  columns.push(["verdict", "✓", "verdict"]);
   columns.push(["effect", "Effect", ""]);
 
   return (
@@ -291,14 +291,6 @@ export default function EvidenceTable({
               onClick={() => onActivate(ri, row)}
               onKeyDown={(e) => handleKey(e, ri, row)}
             >
-              <td className="paper" title={paper}>{paper}</td>
-              <td className="predictor" title={predictor}>{predictor}</td>
-              <td className="outcome" title={outcome}>{outcome}</td>
-              {showRankedColumn ? (
-                <td className="num" title={rankedByOf(row)}>{rankedByOf(row)}</td>
-              ) : null}
-              <td className="num">{nOf(row)}</td>
-              <td className="num">{pageOf(row)}</td>
               <td className="verdict">
                 <span
                   className={`badge ${verdict.cls}`}
@@ -307,6 +299,14 @@ export default function EvidenceTable({
                   {verdict.glyph}
                 </span>
               </td>
+              <td className="paper" title={paper}>{paper}</td>
+              <td className="predictor" title={predictor}>{predictor}</td>
+              <td className="outcome" title={outcome}>{outcome}</td>
+              {showRankedColumn ? (
+                <td className="num" title={rankedByOf(row)}>{rankedByOf(row)}</td>
+              ) : null}
+              <td className="num">{nOf(row)}</td>
+              <td className="num">{pageOf(row)}</td>
               <td className="effect">{effect}</td>
             </tr>
           );

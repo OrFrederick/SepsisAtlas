@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     JSON,
     create_engine,
+    event,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -238,7 +239,29 @@ class Query(Base):
 
 
 def get_engine(url: str | None = None):
-    return create_engine(url or f"sqlite:///{DB_PATH}", future=True)
+    """Create a SQLAlchemy engine with SQLite tuned for concurrent extraction.
+
+    WAL journal mode lets readers stay live while a writer holds the lock,
+    busy_timeout makes the driver retry for 30s instead of immediately
+    raising "database is locked" when another worker is mid-commit, and
+    check_same_thread=False permits the ThreadPoolExecutor in
+    extract.run_extract to share the engine across worker threads.
+    """
+    eng_url = url or f"sqlite:///{DB_PATH}"
+    is_sqlite = eng_url.startswith("sqlite")
+    connect_args: dict = {}
+    if is_sqlite:
+        connect_args = {"timeout": 30.0, "check_same_thread": False}
+    engine = create_engine(eng_url, future=True, connect_args=connect_args)
+    if is_sqlite:
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragmas(dbapi_conn, _):  # noqa: ARG001
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=30000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.close()
+    return engine
 
 
 def init_db(url: str | None = None):

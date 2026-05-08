@@ -63,6 +63,12 @@ PREDICTOR_SYNONYMS: dict[str, list[str]] = {
     "EDV": ["edv", "end-diastolic velocity", "end diastolic velocity"],
     "PSV": ["psv", "peak systolic velocity"],
     "RI": ["resistive index"],
+    "IL-6": ["il-6", "il 6", "il_6", "interleukin-6", "interleukin 6", "interleukin6"],
+    "IL-8": ["il-8", "il 8", "il_8", "interleukin-8", "interleukin 8"],
+    "IL-10": ["il-10", "il 10", "il_10", "interleukin-10", "interleukin 10"],
+    "PCT": ["pct", "procalcitonin"],
+    "CRP": ["crp", "c-reactive protein", "c reactive protein"],
+    "WBC": ["wbc", "white blood cell", "white blood cell count", "leukocyte"],
 }
 
 # Outcome types matching PredictorModel.outcome_type literal.
@@ -239,6 +245,11 @@ SELECT
     pm.anchor_text        AS anchor_text,
     pm.verifier_verdict   AS verifier_verdict,
     pm.verifier_score     AS verifier_score,
+    pm.cutoff             AS cutoff,
+    pm.anchor_section     AS anchor_section,
+    pm.c_index            AS c_index,
+    pm.sens               AS sens,
+    pm.spec               AS spec,
     sc.paper_ref          AS paper_ref,
     sc.file_name          AS file_name,
     sc.doi                AS doi,

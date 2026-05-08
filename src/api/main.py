@@ -46,6 +46,8 @@ from api.rank_predictors import (
     rank_predictors_with_meta,
     rank_row_to_dict,
 )
+from api.dedupe import dedupe_rows
+from api.evidence_projection import apply_evidence_projection
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ def _assess_answerable(intent) -> tuple[bool, str | None]:
 def _summary(rows: list[dict], intent_dict: dict, fallback_note: str | None) -> str:
     n = len(rows)
     if n == 0:
-        return "No matching evidence rows in DB. Consider /ingest_pubmed to expand the corpus."
+        return "No matching evidence was found in the current indexed papers."
     bits: list[str] = [f"{n} extracted row(s) match."]
     if intent_dict.get("outcome_type"):
         bits.append(f"Outcome: {intent_dict['outcome_type']}")
@@ -203,22 +205,138 @@ def post_query(req: QueryRequest) -> QueryResponse:
         )
 
     rows, fr = run_query(engine, intent)
+    raw_count = len(rows)
     ranked = rerank(req.nl_text, rows)
 
-    summary = _summary(ranked, intent_dict, fr.fallback_note)
+    # Dedupe duplicate facts (abstract/body/figure/table) and survivor pairs.
+    deduped = dedupe_rows(ranked)
+
+    # Metric-aware filter + organiser-style table projection.
+    filtered, proj_meta = apply_evidence_projection(
+        deduped,
+        nl_text=req.nl_text,
+        predictor=fr.canonical_predictor,
+    )
+
+    # Route grouped ranking questions ("best predictor for mortality") to
+    # the dedicated rank_predictors aggregator unless the user pinned a
+    # specific predictor or asked about MODELS within a paper (handled by
+    # detect_query_mode override that returns "lookup" for that case).
+    if (
+        proj_meta["query_mode"] == "ranking"
+        and fr.canonical_predictor is None
+        and intent.paper_ref is None
+    ):
+        ranked_preds, rank_note, _matched = rank_predictors_with_meta(
+            engine,
+            outcome_type=intent.outcome_type,
+            outcome_window_days=intent.outcome_window_days,
+        )
+        rank_dicts = [rank_row_to_dict(rr) for rr in ranked_preds]
+        if not rank_dicts:
+            summary = (
+                f"No predictors with sufficient evidence to rank for "
+                f"outcome={intent.outcome_type or 'mortality'}."
+            )
+            latency_ms = int((time.time() - t0) * 1000)
+            _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, 0, latency_ms)
+            return QueryResponse(
+                query_id=query_id,
+                rows=[],
+                table_md="_No rankable evidence._",
+                summary=summary,
+                intent=intent_dict,
+                canonical_predictor=fr.canonical_predictor,
+                fallback_note=rank_note,
+                n_rows=0,
+                meta={**proj_meta, "table": None},
+            )
+        rank_meta = {
+            **proj_meta,
+            "table": {
+                "title": "Ranked Predictors",
+                "columns": ["Predictor", "Best Metric", "Value", "Studies", "Source"],
+                "rows": [
+                    {
+                        "Predictor": d["predictor_canonical"],
+                        "Best Metric": d["best_metric"],
+                        "Value": f"{d['best_value']:.3f}" if d["best_value"] is not None else "",
+                        "Studies": d["n_studies"],
+                        "Source": d["best_paper_ref"] or "",
+                    }
+                    for d in rank_dicts[:20]
+                ],
+                "total_rows": len(rank_dicts),
+                "displayed_rows": min(len(rank_dicts), 20),
+                "truncated": len(rank_dicts) > 20,
+            },
+        }
+        summary = (
+            f"{len(rank_dicts)} predictor(s) ranked." + (f" {rank_note}" if rank_note else "")
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(rank_dicts), latency_ms)
+        return QueryResponse(
+            query_id=query_id,
+            rows=rank_dicts,
+            table_md=to_markdown_table(rank_dicts),
+            summary=summary,
+            intent=intent_dict,
+            canonical_predictor=fr.canonical_predictor,
+            fallback_note=rank_note,
+            n_rows=len(rank_dicts),
+            meta=rank_meta,
+        )
+
+    # Empty filtered list = metric-specific query found nothing. Distinguish
+    # "no rows in DB at all" from "rows existed but metric mismatch" so the
+    # user knows whether to broaden the corpus or pick a different metric.
+    if not filtered:
+        mt = proj_meta["metric_type"]
+        pred = fr.canonical_predictor or intent.predictor or ""
+        scope = f" for {pred}" if pred else ""
+        if mt and raw_count > 0:
+            label = {"auc": "AUC", "cutoff": "cut-off", "or": "odds ratio",
+                     "hr": "hazard ratio", "rr": "risk ratio"}[mt]
+            summary_msg = (
+                f"Found {raw_count} evidence row(s){scope} but none reported "
+                f"{label}. Try a different metric or broaden the question."
+            )
+        elif mt:
+            label = {"auc": "AUC", "cutoff": "cut-off", "or": "odds ratio",
+                     "hr": "hazard ratio", "rr": "risk ratio"}[mt]
+            summary_msg = f"No {label}{scope} evidence found in the current corpus."
+        else:
+            summary_msg = "No matching evidence was found in the current indexed papers."
+        latency_ms = int((time.time() - t0) * 1000)
+        _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, 0, latency_ms)
+        return QueryResponse(
+            query_id=query_id,
+            rows=[],
+            table_md="_No matching evidence._",
+            summary=summary_msg,
+            intent=intent_dict,
+            canonical_predictor=fr.canonical_predictor,
+            fallback_note=fr.fallback_note,
+            n_rows=0,
+            meta=proj_meta,
+        )
+
+    summary = _summary(filtered, intent_dict, fr.fallback_note)
 
     latency_ms = int((time.time() - t0) * 1000)
-    _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(ranked), latency_ms)
+    _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(filtered), latency_ms)
 
     return QueryResponse(
         query_id=query_id,
-        rows=ranked,
-        table_md=to_markdown_table(ranked),
+        rows=filtered,
+        table_md=to_markdown_table(filtered),
         summary=summary,
         intent=intent_dict,
         canonical_predictor=fr.canonical_predictor,
         fallback_note=fr.fallback_note,
-        n_rows=len(ranked),
+        n_rows=len(filtered),
+        meta=proj_meta,
     )
 
 

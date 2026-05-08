@@ -11,6 +11,8 @@ node_modules/
 # db.sqlite is tracked so collaborators + the GH Pages build can build the
 # static site without re-running the extraction pipeline. Journal stays out.
 db.sqlite-journal
+db.sqlite-wal
+db.sqlite-shm
 logs/
 runs/
 data/papers/parsed/

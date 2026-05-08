@@ -376,11 +376,19 @@ def _strip_fences(s: str) -> str:
 def _parse_judge_response(raw: str) -> dict:
     """Parse the JSON envelope returned by the LLM.
 
-    Raises ``ValueError`` if it is unparseable or missing required keys.
+    Tolerates fenced JSON, prose after the closing fence, and prose
+    before the opening brace by extracting the first balanced JSON
+    object via JSONDecoder.raw_decode. Raises ``ValueError`` if no
+    parseable object is found or required keys are missing.
     """
     body = _strip_fences(raw)
+    start = body.find("{")
+    if start < 0:
+        raise ValueError(
+            f"verifier_llm: no JSON object found in response: {raw[:200]!r}"
+        )
     try:
-        obj = json.loads(body)
+        obj, _end = json.JSONDecoder().raw_decode(body[start:])
     except json.JSONDecodeError as e:
         raise ValueError(f"verifier_llm: non-JSON response ({e}): {raw[:200]!r}") from e
     if not isinstance(obj, dict):

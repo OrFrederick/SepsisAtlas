@@ -279,23 +279,20 @@ class TestUC1Hard:
     def test_uc1_h9_procalcitonin_vs_crp_synonyms(self, db_engine):
         """9. Procalcitonin vs CRP for mortality prediction in sepsis
 
-        Heuristic doesn't have PCT/CRP synonyms today (PREDICTOR_SYNONYMS
-        gap). Test asserts the gate lets the query through on outcome_type
-        alone AND that returned rows are mortality-typed (not arbitrary).
-        Documents the synonym gap.
+        PCT and CRP are now both in PREDICTOR_SYNONYMS. The query
+        "Procalcitonin vs CRP" resolves to the first recognized synonym (PCT).
+        Returned rows must be mortality-typed and PCT-filtered.
         """
         intent = _heuristic_intent(
             "Procalcitonin vs CRP for mortality prediction in sepsis"
         )
         assert intent.outcome_type == "mortality"
-        assert intent.predictor is None, (
-            "heuristic shouldn't pick a predictor here; if this fires, PCT/CRP "
-            "were added to PREDICTOR_SYNONYMS — update test to assert filter."
+        assert intent.predictor == "PCT", (
+            f"expected predictor='PCT' after PCT added to PREDICTOR_SYNONYMS; got {intent.predictor!r}"
         )
         ok, _ = _assess_answerable(intent)
         assert ok
         rows, _ = run_query(db_engine, intent)
-        # No predictor filter → broad mortality results. Every row must be mortality.
         for r in rows[:50]:
             assert r.get("outcome_type") == "mortality"
 

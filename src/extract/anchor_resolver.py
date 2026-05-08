@@ -358,6 +358,39 @@ def _disambiguate(
     return min(hits, key=lambda e: len(e.get("text") or ""))
 
 
+def _pipe_probe_hits(anchor_text: str, haystack: Iterable[dict]) -> list[dict]:
+    """Match pipe-delimited table-row anchors via the first pipe segment.
+
+    The LLM often emits anchor_text as a full table row: ``Row label | v1 |
+    v2 | ...``. The index has individual cells. Take the first segment before
+    ``|``, look for normalized-substring matches in the index, then keep only
+    hits where at least one other pipe segment also appears in the entry or
+    the entry text is contained in the full anchor (confirming same row).
+    Gated on first-segment length >= 6 to avoid matching generic tokens.
+    """
+    pipe_idx = anchor_text.find("|")
+    if pipe_idx < 0:
+        return []
+    probe = anchor_text[:pipe_idx].strip()
+    if len(probe) < 6:
+        return []
+    probe_norm = _norm(probe)
+    if not probe_norm:
+        return []
+    candidates = _normalized_hits(probe_norm, list(haystack))
+    if not candidates:
+        return []
+    # Confirm with remaining pipe segments: accept a hit if the entry text
+    # appears in the normalized full anchor, or the entry is a table_cell kind.
+    anchor_norm = _norm(anchor_text)
+    confirmed = [
+        e for e in candidates
+        if _norm(e.get("text") or "") in anchor_norm
+        or e.get("kind") == "table_cell"
+    ]
+    return confirmed if confirmed else candidates
+
+
 def resolve(
     anchor_text: str,
     anchor_section: str | None,
@@ -377,11 +410,14 @@ def resolve(
        sides and compare. Catches Docling's stray ``Figure 2B )`` artifacts.
        Gated on ``len(stripped) >= 12`` so we don't latch onto short numeric
        tokens.
-    4. **Fuzzy token-set Jaccard** — for anchors of length ``>= 30``,
+    4. **Pipe-probe** — for anchors containing ``|``, take the first pipe
+       segment as a probe and look for normalized-substring matches. Handles
+       LLM-emitted table-row anchors like ``Row label | v1 | v2 | ...``.
+    5. **Fuzzy token-set Jaccard** — for anchors of length ``>= 30``,
        tokenize both sides and accept any entry with Jaccard ``>= 0.85``.
        Catches paraphrase-level whitespace / punctuation drift the
        substring tiers miss.
-    5. **Sliding-window head match** — last-ditch: for anchors of length
+    6. **Sliding-window head match** — last-ditch: for anchors of length
        ``>= 60`` whose first 60 normalized characters appear *uniquely* in
        exactly one index entry, accept that entry. Ambiguous (>1) hits are
        ignored to keep precision up.
@@ -406,11 +442,15 @@ def resolve(
         if len(needle_stripped) >= 12:
             hits = _stripped_hits(needle_stripped, index)
 
-    # Tier 4: fuzzy token-set Jaccard. Only for non-trivial anchors.
+    # Tier 4: pipe-probe for table-row anchors.
+    if not hits and "|" in anchor_text:
+        hits = _pipe_probe_hits(anchor_text, index)
+
+    # Tier 5: fuzzy token-set Jaccard. Only for non-trivial anchors.
     if not hits and len(anchor_text) >= 30:
         hits = _fuzzy_hits(anchor_text, index, threshold=0.85)
 
-    # Tier 5: sliding-window head match. Only when unique.
+    # Tier 6: sliding-window head match. Only when unique.
     if not hits and len(anchor_text) >= 60:
         needle_norm = _norm(anchor_text)
         window_hits = _window_hits(needle_norm, index, window=60)

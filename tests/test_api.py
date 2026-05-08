@@ -157,7 +157,7 @@ def test_viewer_serves_html(app_client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "Gai_2022" in r.text
-    assert "pdf-canvas" in r.text
+    assert "pdfCanvas" in r.text
     # CSP allows any framing parent (OpenWebUI artifact pane).
     assert "frame-ancestors *" in r.headers.get("content-security-policy", "")
     assert "X-Frame-Options" not in r.headers

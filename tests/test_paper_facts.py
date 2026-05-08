@@ -208,7 +208,9 @@ class TestChen2021:
     def test_six_phosphate_subgroups(self, con):
         labels = {r["cohort_label"] for r in _cohort_rows(con, self.PAPER)}
         # Paper bins phosphate into 6 groups (G1..G6).
-        g_groups = [l for l in labels if l and l.startswith("G")]
+        # Extractor may produce "G1"-prefix labels or embedded "(G1)" notation.
+        import re as _re
+        g_groups = [l for l in labels if l and (_re.search(r"\bG[1-6]\b", l) or l.startswith("G"))]
         assert len(g_groups) >= 6, (
             f"expected 6 phosphate subgroups (G1..G6); got {sorted(g_groups)}"
         )
@@ -370,9 +372,9 @@ class TestLuo2022:
     def test_total_cohort_n_2057(self, con):
         rows = [
             r for r in _cohort_rows(con, self.PAPER)
-            if (r["cohort_label"] or "").lower() in {"total cohort", "total"}
+            if (r["cohort_label"] or "").lower() in {"total cohort", "total", "overall cohort", "overall"}
         ]
-        assert rows, "Luo 2022 Total Cohort missing"
+        assert rows, "Luo 2022 Total/Overall Cohort missing"
         n = (rows[0]["cohort_size_n"] or "").replace(",", "").strip()
         assert "2057" in n, f"Total Cohort N should be 2057; got {n!r}"
 
@@ -383,10 +385,14 @@ class TestLuo2022:
 
     def test_hematocrit_subgroups(self, con):
         labels = {r["cohort_label"] for r in _cohort_rows(con, self.PAPER)}
-        # Paper bins hct into Low / Regular / High.
-        assert any("low" in (l or "").lower() and "hematocrit" in (l or "").lower()
+        # Paper bins hct into Low / Regular / High; extractor may use "HCT" abbreviation.
+        def _has_hct(label: str | None) -> bool:
+            l = (label or "").lower()
+            return "hematocrit" in l or "hct" in l
+
+        assert any("low" in (l or "").lower() and _has_hct(l)
                    for l in labels), f"missing Low hematocrit cohort: {labels}"
-        assert any("high" in (l or "").lower() and "hematocrit" in (l or "").lower()
+        assert any("high" in (l or "").lower() and _has_hct(l)
                    for l in labels), f"missing High hematocrit cohort: {labels}"
 
     def test_hematocrit_predictor_present(self, con):

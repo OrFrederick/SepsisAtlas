@@ -36,7 +36,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   transition: color 120ms ease, background 120ms ease;
 }
 .mode-btn + .mode-btn { border-left: 1px solid var(--border); }
-.view-toggle { margin-top: 8px; align-self: flex-start; }
+.view-toggle { margin-top: 8px; align-self: flex-end; }
 .mode-btn:hover { color: var(--fg); }
 .mode-btn.active {
   color: #1a1a1a;
@@ -270,15 +270,20 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
    Visual language matches .card: same panel/border tokens, same
    active-row accent, same badge palette already defined above. */
 
-.evidence-table {
+.evidence-table-scroll {
   width: 100%;
-  border-collapse: collapse;
-  background: var(--panel);
+  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  background: var(--panel);
+}
+
+.evidence-table {
+  border-collapse: collapse;
+  background: var(--panel);
   font-size: 13px;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
 }
 
 .evidence-table thead th {
@@ -307,8 +312,6 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   border-top: 1px solid var(--border);
   color: var(--fg);
   vertical-align: middle;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

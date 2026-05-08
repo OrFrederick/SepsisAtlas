@@ -199,6 +199,7 @@ export default function EvidenceTable({
     : indexedRows;
 
   return (
+    <div className="evidence-table-scroll">
     <table className="evidence-table">
       <thead>
         <tr>
@@ -206,7 +207,7 @@ export default function EvidenceTable({
             ["paper", "Paper · Cohort", ""],
             ["predictor", "Predictor", ""],
             ["outcome", "Outcome", ""],
-            ["effect", "Effect", "num"],
+            ["effect", "Effect", ""],
             ["n", "N", "num"],
             ["page", "Page", "num"],
             ["verdict", "✓", "verdict"],
@@ -260,7 +261,7 @@ export default function EvidenceTable({
               <td className="paper" title={paper}>{paper}</td>
               <td className="predictor" title={predictor}>{predictor}</td>
               <td className="outcome" title={outcome}>{outcome}</td>
-              <td className="effect num">{effect}</td>
+              <td className="effect">{effect}</td>
               <td className="num">{nOf(row)}</td>
               <td className="num">{pageOf(row)}</td>
               <td className="verdict">
@@ -276,5 +277,6 @@ export default function EvidenceTable({
         })}
       </tbody>
     </table>
+    </div>
   );
 }

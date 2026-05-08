@@ -1,0 +1,10 @@
+predictor,studies_count,best_auc
+lactate,26,0.99
+creatinine,16,0.903
+bilirubin,14,0.903
+albumin,13,0.99
+procalcitonin,9,0.903
+platelets,7,0.99
+WBC,7,0.903
+CRP,4,0.903
+leukocyte,3,0.89

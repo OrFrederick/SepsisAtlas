@@ -1,0 +1,31 @@
+study_id,source,sample_size,icu_patients,setting,sepsis_def,mortality_30d,mortality_90d,mortality_inhosp,survival_30d,sofa_mean,apache_mean,lactate_mean,auc_best,biomarkers,phenotypes,qa_pairs_available
+Baloch_2022,Baloch_2022.pdf,286,,ED,Sepsis-3,57.0,,,,8.0,,,0.89,,,8
+Besen_2016,Besen_2016.pdf,957,,ED,Sepsis-3,,,,,1.5,,3.0,,bilirubin; lactate,,7
+Bidart_2024,Bidart_2024.pdf,356,,ED,Sepsis-3,49.77,,,,2.0,,,0.58,bilirubin; platelets; creatinine; lactate,,8
+Cao_2021,Cao_2021.pdf,1604,,ED,Sepsis-3,,,48.7,,,16.1,,,procalcitonin; bilirubin; albumin; lactate; creatinine,Cluster m,7
+Chen_2021,Chen_2021.pdf,131,,ED,,,95.0,,,,,3.37,,albumin; creatinine,,8
+Cilloniz_2019,Cilloniz_2019.pdf,4219,,ED,Sepsis-3,95.0,,,,,,,,,,8
+Gai_2022,Gai_2022.pdf,,,,,,,,,,10.7,1.32,0.99,platelets; albumin; lactate,,8
+Holanda_2020,Holanda_2020.pdf,122,,ED,Sepsis-3,,,,,,,3.49,,lactate,,8
+Kochkin_2021,Kochkin_2021.pdf,978,,ED,Sepsis-3,,,,,2.0,,,,procalcitonin; lactate,,6
+Koozi_2023,Koozi_2023.pdf,,7556,ICU,Sepsis-3,25.3,,,,12.0,2.7,2.0,0.85,WBC; CRP; leukocyte; procalcitonin; bilirubin; lactate; creatinine,,8
+Kozlov_2022,Kozlov_2022.pdf,134,,ED,Sepsis-3,,,,,1.0,8.7,,0.813,lactate,,8
+Li_2020,Li_2020.pdf,146,,ED,Sepsis-3,17.1,95.0,,,,,,0.89,leukocyte; procalcitonin; bilirubin; albumin; lactate; creatinine,,8
+Li_2024,Li_2024.pdf,209,,ED,Sepsis-3,,,,,,6.7,2.0,0.749,WBC; CRP; procalcitonin; albumin; lactate; creatinine,,8
+Liu_2019,Liu_2019.pdf,1865,,ED,Sepsis-3,33.88,43.57,34.99,,5.5,,2.66,,WBC; platelets; bilirubin; albumin; lactate; creatinine,,8
+Luo_2022,Luo_2022.pdf,9111,,ED,Sepsis-3,62.6,,,,3.5,,,,platelets; bilirubin; albumin; lactate; creatinine,,8
+Park_2022,Park_2022.pdf,2126,,ED,Sepsis-3,,,,,,,,,CRP; procalcitonin; bilirubin; lactate; creatinine,,8
+Ren_2022,Ren_2022.pdf,1676,,ED,Sepsis-3,,,20.0,,3.3,10.5,,,WBC; leukocyte; bilirubin; albumin; lactate; creatinine,,7
+Roh_2019,Roh_2019.pdf,1145,,ED,Sepsis-3,,,,,,6.6,,0.716,lactate,,8
+Schlapbach_2018,Schlapbach_2018.pdf,715,,ED,Sepsis-3,1.0,,5.0,,2.0,23.0,,,lactate,,8
+Seymour_2016,Seymour_2016.pdf,706399,,ED,Sepsis-3,,,95.0,,,,5.7,,bilirubin; creatinine; lactate,,8
+Suttapanit_2022,Suttapanit_2022.pdf,550,,ED,Sepsis-3,,,,,1.0,,,,lactate,,8
+Tang_2025,Tang_2025.pdf,415,0,ED,,,,,,,12.1,,,procalcitonin; platelets; albumin; lactate,,8
+Tartaglia_2021,Tartaglia_2021.pdf,113,,ED,Sepsis-3,,,,,,9.8,,,,,8
+Todi_2024,Todi_2024.pdf,1172,,ED,Sepsis-3,,,,,4.0,17.4,,0.768,platelets; albumin; creatinine; lactate,,8
+Varga_2024,Varga_2024.pdf,138,,ED,Sepsis-3,31.6,,,,,,8.69,0.903,WBC; CRP; procalcitonin; bilirubin; albumin; lactate; creatinine,,7
+Wang_2020,Wang_2020.pdf,910,,ED,Sepsis-3,,,50.9,,,9.2,2.0,,creatinine; lactate,,5
+Wang_2023,Wang_2023.pdf,0,,,Sepsis-3,,,,,,,11.1,0.773,WBC; bilirubin; albumin; lactate; creatinine,,8
+Wen_2019,Wen_2019.pdf,138,,ED,Sepsis-3,,,49.15,,,2.4,,0.817,procalcitonin; platelets; bilirubin; lactate; creatinine,,8
+Zhang_2019,Zhang_2019.pdf,1243,,ED,Sepsis-3,,,,,1.2,6.8,10.0,,lactate,,7
+Zhang_2021,Zhang_2021.pdf,443,620,ICU,Sepsis-3,16.7,,,,3.5,6.4,,0.8,WBC; bilirubin; albumin; lactate,,8

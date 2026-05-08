@@ -1,0 +1,31 @@
+study_id,sample_size,icu_patients,setting,sepsis_def,predictor,outcome,mortality_30d,mortality_90d,mortality_180d,mortality_inhosp,sofa,apache,lactate,auc_best,effect_or,effect_hr
+Baloch_2022,286,,ED,Sepsis-3,,28-day mortality,57.0,,,,8.0,,,0.89,,
+Besen_2016,957,,ED,Sepsis-3,bilirubin; lactate,in-hospital mortality,,,,,1.5,,3.0,,,
+Bidart_2024,356,,ED,Sepsis-3,bilirubin; platelets; creatinine; lactate,28-day mortality,49.77,,,,2.0,,,0.58,,
+Cao_2021,1604,,ED,Sepsis-3,procalcitonin; bilirubin; albumin; lactate; creatinine,in-hospital mortality,,,,48.7,,16.1,,,OR=2.56; OR=1.2,
+Chen_2021,131,,ED,,albumin; creatinine,90-day mortality,,95.0,,,,,3.37,,OR=0.86; OR=1.5,HR=0.64; HR=0.72
+Cilloniz_2019,4219,,ED,Sepsis-3,,28-day mortality,95.0,,,,,,,,OR=95.0; OR=95.0,
+Gai_2022,,,,,platelets; albumin; lactate,in-hospital mortality,,,,,,10.7,1.32,0.99,OR=0.295,
+Holanda_2020,122,,ED,Sepsis-3,lactate,in-hospital mortality,,,,,,,3.49,,,
+Kochkin_2021,978,,ED,Sepsis-3,procalcitonin; lactate,in-hospital mortality,,,,,2.0,,,,OR=1.0; OR=1.0,
+Koozi_2023,,7556,ICU,Sepsis-3,WBC; CRP; leukocyte; procalcitonin; bilirubin,28-day mortality,25.3,,,,12.0,2.7,2.0,0.85,,
+Kozlov_2022,134,,ED,Sepsis-3,lactate,in-hospital mortality,,,,,1.0,8.7,,0.813,OR=1.5712; OR=3.5293,
+Li_2020,146,,ED,Sepsis-3,leukocyte; procalcitonin; bilirubin; albumin; lactate,28-day mortality,17.1,95.0,,,,,,0.89,,HR=5.19; HR=4.54
+Li_2024,209,,ED,Sepsis-3,WBC; CRP; procalcitonin; albumin; lactate,in-hospital mortality,,,,,,6.7,2.0,0.749,,HR=95.0; HR=95.0
+Liu_2019,1865,,ED,Sepsis-3,WBC; platelets; bilirubin; albumin; lactate,28-day mortality,33.88,43.57,,34.99,5.5,,2.66,,,HR=93.0
+Luo_2022,9111,,ED,Sepsis-3,platelets; bilirubin; albumin; lactate; creatinine,28-day mortality,62.6,,,,3.5,,,,,HR=1.589; HR=95.0
+Park_2022,2126,,ED,Sepsis-3,CRP; procalcitonin; bilirubin; lactate; creatinine,in-hospital mortality,,,,,,,,,OR=2.99; OR=2.38,
+Ren_2022,1676,,ED,Sepsis-3,WBC; leukocyte; bilirubin; albumin; lactate,in-hospital mortality,,,,20.0,3.3,10.5,,,OR=95.0,
+Roh_2019,1145,,ED,Sepsis-3,lactate,in-hospital mortality,,,83.8,,,6.6,,0.716,,
+Schlapbach_2018,715,,ED,Sepsis-3,lactate,28-day mortality,1.0,,,5.0,2.0,23.0,,,OR=1.94; OR=1.46,
+Seymour_2016,706399,,ED,Sepsis-3,bilirubin; creatinine; lactate,in-hospital mortality,,,,95.0,,,5.7,,,
+Suttapanit_2022,550,,ED,Sepsis-3,lactate,in-hospital mortality,,,,,1.0,,,,,
+Tang_2025,415,0,ED,,procalcitonin; platelets; albumin; lactate,in-hospital mortality,,,,,,12.1,,,OR=1.1; OR=1.5,
+Tartaglia_2021,113,,ED,Sepsis-3,,in-hospital mortality,,,,,,9.8,,,OR=1.18; OR=4.66,
+Todi_2024,1172,,ED,Sepsis-3,platelets; albumin; creatinine; lactate,in-hospital mortality,,,,,4.0,17.4,,0.768,,
+Varga_2024,138,,ED,Sepsis-3,WBC; CRP; procalcitonin; bilirubin; albumin,28-day mortality,31.6,,,,,,8.69,0.903,,
+Wang_2020,910,,ED,Sepsis-3,creatinine; lactate,in-hospital mortality,,,,50.9,,9.2,2.0,,OR=0.65; OR=0.43,
+Wang_2023,0,,,Sepsis-3,WBC; bilirubin; albumin; lactate; creatinine,in-hospital mortality,,,,,,,11.1,0.773,OR=1.28; OR=95.0,
+Wen_2019,138,,ED,Sepsis-3,procalcitonin; platelets; bilirubin; lactate; creatinine,in-hospital mortality,,,,49.15,,2.4,,0.817,OR=1.221; OR=1.296,
+Zhang_2019,1243,,ED,Sepsis-3,lactate,in-hospital mortality,,,,,1.2,6.8,10.0,,,
+Zhang_2021,443,620,ICU,Sepsis-3,WBC; bilirubin; albumin; lactate,28-day mortality,16.7,,,,3.5,6.4,,0.8,,

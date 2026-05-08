@@ -27,6 +27,11 @@ export type EvidenceRow = {
   verifier?: string;
   study?: string;
   n?: string | number;
+  // Present on rows produced by the ranked-predictor projection
+  // (UC3 "best AUC for mortality" etc.). Used to show the actual ranking
+  // criterion in its own column so the user can see why a row ranks here.
+  best_metric?: string;
+  best_value?: number | null;
 };
 
 type VerdictKind = "ok" | "warn" | "fail" | "unk";
@@ -36,6 +41,7 @@ type SortKey =
   | "predictor"
   | "outcome"
   | "effect"
+  | "ranked"
   | "n"
   | "page"
   | "verdict";
@@ -74,6 +80,18 @@ function outcomeOf(row: EvidenceRow): string {
 
 function effectOf(row: EvidenceRow): string {
   return row.effect_size_str || row.effect_size || "—";
+}
+
+function rankedByOf(row: EvidenceRow): string {
+  if (row.best_value === undefined || row.best_value === null) return "—";
+  const metric = row.best_metric || "value";
+  return `${metric} ${Number(row.best_value).toFixed(3)}`;
+}
+
+function rankedNumeric(row: EvidenceRow): number {
+  if (row.best_value === undefined || row.best_value === null) return Number.POSITIVE_INFINITY;
+  const v = Number(row.best_value);
+  return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
 }
 
 function nOf(row: EvidenceRow): string {
@@ -142,6 +160,12 @@ function compareRows(
       av = effectNumeric(a);
       bv = effectNumeric(b);
       break;
+    case "ranked":
+      // Ranked-predictor rows want the highest best_value at the top by
+      // default, so flip the sign — sortDir still toggles the direction.
+      av = -rankedNumeric(a);
+      bv = -rankedNumeric(b);
+      break;
     case "n":
       av = nNumeric(a);
       bv = nNumeric(b);
@@ -194,24 +218,33 @@ export default function EvidenceTable({
   };
 
   const indexedRows = rows.map((row, ri) => ({ row, ri }));
+  // Show the "Ranked by" column only when this turn carries ranked-predictor
+  // rows (UC3 best-AUC etc.) — for plain evidence tables the column would be
+  // all em-dashes.
+  const showRankedColumn = rows.some(
+    (r) => r.best_value !== undefined && r.best_value !== null,
+  );
   const displayRows = sortKey
     ? [...indexedRows].sort((a, b) => compareRows(a.row, b.row, sortKey, sortDir))
     : indexedRows;
+
+  const columns: [SortKey, string, string][] = [
+    ["paper", "Paper · Cohort", ""],
+    ["predictor", "Predictor", ""],
+    ["outcome", "Outcome", ""],
+    ["effect", "Effect", ""],
+  ];
+  if (showRankedColumn) columns.push(["ranked", "Ranked by", "num"]);
+  columns.push(["n", "N", "num"]);
+  columns.push(["page", "Page", "num"]);
+  columns.push(["verdict", "✓", "verdict"]);
 
   return (
     <div className="evidence-table-scroll">
     <table className="evidence-table">
       <thead>
         <tr>
-          {([
-            ["paper", "Paper · Cohort", ""],
-            ["predictor", "Predictor", ""],
-            ["outcome", "Outcome", ""],
-            ["effect", "Effect", ""],
-            ["n", "N", "num"],
-            ["page", "Page", "num"],
-            ["verdict", "✓", "verdict"],
-          ] as const).map(([key, label, klass]) => {
+          {columns.map(([key, label, klass]) => {
             const isActive = sortKey === key;
             const dirCls = isActive ? (sortDir === 1 ? "sort-asc" : "sort-desc") : "";
             const ariaSort = isActive
@@ -262,6 +295,9 @@ export default function EvidenceTable({
               <td className="predictor" title={predictor}>{predictor}</td>
               <td className="outcome" title={outcome}>{outcome}</td>
               <td className="effect">{effect}</td>
+              {showRankedColumn ? (
+                <td className="num" title={rankedByOf(row)}>{rankedByOf(row)}</td>
+              ) : null}
               <td className="num">{nOf(row)}</td>
               <td className="num">{pageOf(row)}</td>
               <td className="verdict">

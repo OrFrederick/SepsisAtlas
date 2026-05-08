@@ -64,6 +64,32 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   border-color: var(--border-strong);
   background: var(--panel-2);
 }
+.table-actions {
+  margin-top: 10px;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.table-actions .view-toggle { margin-top: 0; align-self: auto; }
+.csv-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+.csv-download-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+.csv-download-btn svg { display: block; }
 
 .split {
   display: grid;

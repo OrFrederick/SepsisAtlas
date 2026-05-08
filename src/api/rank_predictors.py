@@ -55,6 +55,7 @@ SELECT
     pm.outcome             AS outcome,
     pm.outcome_type        AS outcome_type,
     pm.outcome_window_days AS outcome_window_days,
+    pm.model_specification AS model_specification,
     pm.effect_type         AS effect_type,
     pm.effect_value        AS effect_value,
     pm.effect_size_str     AS effect_size_str,
@@ -67,6 +68,7 @@ SELECT
     pm.c_index             AS c_index,
     pm.sens                AS sens,
     pm.spec                AS spec,
+    pm.verifier_verdict    AS verifier_verdict,
     pm.anchor_page         AS anchor_page,
     pm.anchor_bbox         AS anchor_bbox,
     pm.anchor_text         AS anchor_text,
@@ -75,7 +77,10 @@ SELECT
     sc.cohort_label        AS cohort_label,
     sc.cohort_size_n       AS cohort_size_n,
     sc.population_location AS population_location,
-    sc.population_description AS population_description
+    sc.population_description AS population_description,
+    sc.study_design        AS study_design,
+    sc.mortality_rate_pct  AS mortality_rate_pct,
+    sc.mortality_timepoint AS mortality_timepoint
 FROM predictor_model pm
 LEFT JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id
 """
@@ -223,11 +228,17 @@ def _supporting_row_dict(row: dict) -> dict:
         "cohort_id": row.get("cohort_id"),
         "cohort_label": row.get("cohort_label"),
         "cohort_size_n": row.get("cohort_size_n"),
+        "population_location": row.get("population_location"),
+        "study_design": row.get("study_design"),
+        "mortality_rate_pct": row.get("mortality_rate_pct"),
+        "mortality_timepoint": row.get("mortality_timepoint"),
         "predictor": row.get("predictors") or row.get("predictor_canonical"),
+        "predictors": row.get("predictors"),
         "predictor_canonical": row.get("predictor_canonical"),
         "outcome": row.get("outcome"),
         "outcome_type": row.get("outcome_type"),
         "outcome_window_days": row.get("outcome_window_days"),
+        "model_specification": row.get("model_specification"),
         "effect_type": row.get("effect_type"),
         "effect_value": row.get("effect_value"),
         "ci_lo": row.get("ci_lo"),
@@ -236,6 +247,7 @@ def _supporting_row_dict(row: dict) -> dict:
         "auc": row.get("auc"),
         "c_index": row.get("c_index"),
         "effect_size_str": row.get("effect_size_str"),
+        "verifier_verdict": row.get("verifier_verdict"),
         "anchor_page": row.get("anchor_page"),
         "anchor_bbox": bbox,
         "anchor_text": row.get("anchor_text"),
@@ -284,7 +296,10 @@ def _rank_one_predictor(
     ci_lo, ci_hi = _ci_for_metric(best_row, chosen_metric)
     median_val = statistics.median(metric_values) if len(metric_values) >= 2 else None
 
-    supporting = [_supporting_row_dict(r) for r in rankable[:20]]
+    # Winning row goes first so rank_row_to_dict can lift its display fields
+    # onto the top-level dict for the frontend EvidenceTable.
+    rest = [r for r in rankable if r is not best_row]
+    supporting = [_supporting_row_dict(best_row)] + [_supporting_row_dict(r) for r in rest[:19]]
 
     return RankRow(
         predictor_canonical=predictor,
@@ -402,5 +417,42 @@ def rank_predictors_with_meta(
     return ranked[:top_k], note, matched
 
 
+_DISPLAY_FIELDS_FROM_BEST = (
+    "paper_ref",
+    "file_name",
+    "cohort_id",
+    "cohort_label",
+    "cohort_size_n",
+    "population_location",
+    "study_design",
+    "mortality_rate_pct",
+    "mortality_timepoint",
+    "predictors",
+    "predictor",
+    "outcome",
+    "model_specification",
+    "effect_type",
+    "effect_value",
+    "effect_size_str",
+    "ci_lo",
+    "ci_hi",
+    "p_value",
+    "auc",
+    "c_index",
+    "verifier_verdict",
+    "anchor_page",
+    "anchor_bbox",
+    "anchor_text",
+)
+
+
 def rank_row_to_dict(rr: RankRow) -> dict:
-    return asdict(rr)
+    d = asdict(rr)
+    # Frontend EvidenceTable indexes per-row fields (paper_ref, cohort_label,
+    # effect_size_str, anchor_*, …). Without them the table renders blank
+    # cells for every ranked predictor. Lift them from the winning row.
+    if rr.supporting_rows:
+        best = rr.supporting_rows[0]
+        for k in _DISPLAY_FIELDS_FROM_BEST:
+            d.setdefault(k, best.get(k))
+    return d

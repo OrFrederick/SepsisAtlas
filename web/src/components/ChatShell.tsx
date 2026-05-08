@@ -21,6 +21,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
+import { rowsToCsv, downloadCsv } from "../lib/csv";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -92,6 +93,7 @@ type EvidenceRow = {
 };
 
 type AssistantPayload = {
+  query_id?: string;
   summary?: string;
   rows?: EvidenceRow[];
   refused?: boolean;
@@ -457,6 +459,7 @@ export default function ChatShell() {
         user_text: text,
         mode,
         assistant: {
+          query_id: payload.query_id || undefined,
           summary: payload.summary || "",
           rows: Array.isArray(payload.rows) ? payload.rows : [],
           refused: !!payload.refused,
@@ -624,6 +627,7 @@ export default function ChatShell() {
                               })}
                             </motion.div>
                           )}
+                          <div className="table-actions">
                           <div
                             className="backend-toggle view-toggle"
                             role="tablist"
@@ -643,6 +647,36 @@ export default function ChatShell() {
                             >
                               Table
                             </button>
+                          </div>
+                          <button
+                            type="button"
+                            className="csv-download-btn"
+                            onClick={() => {
+                              const rows = (turn.assistant.rows || []) as Record<string, unknown>[];
+                              if (rows.length === 0) return;
+                              const csv = rowsToCsv(rows);
+                              const qid = turn.assistant.query_id || `q${ti}`;
+                              downloadCsv(`sepsis-atlas-${qid}.csv`, csv);
+                            }}
+                            title="Download these rows as CSV"
+                            aria-label="Download CSV"
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="7 10 12 15 17 10" />
+                              <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                          </button>
                           </div>
                         </>
                       ) : null}

@@ -129,7 +129,7 @@ def _pm_props(
         "auc_ci_hi": auc_ci_hi,
         "is_significant": _is_significant(p_value, effect_type, ci_lo, ci_hi),
         "anchor_page": r.anchor.page,
-        "anchor_bbox": json.dumps(r.anchor.bbox),
+        "anchor_bbox": json.dumps(r.anchor.bbox) if r.anchor.bbox is not None else None,
         "anchor_text": r.anchor.text,
         "anchor_section": r.anchor.section,
         "verifier_verdict": verifier_verdict,

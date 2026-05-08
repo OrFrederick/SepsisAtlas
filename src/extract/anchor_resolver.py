@@ -29,6 +29,12 @@ _DEFAULT_PAGE_HEIGHT = 792.0
 
 _WS_RE = re.compile(r"\s+")
 
+# Splits a KG-extractor multi-cell anchor at the point where text transitions
+# into numeric data: "Male sex 1.97 1.54 to 2.53" → label "Male sex".
+_TABLE_ROW_SPLIT_RE = re.compile(
+    r"\s+(?=\d+\.\d+|\d{2,}[\s(]|[<>]=?\s*\d|\|\s*\d)"
+)
+
 # Dash-like characters we fold to ASCII hyphen-minus for matching purposes:
 # en-dash, em-dash, figure-dash, horizontal-bar, minus-sign, hyphen, non-break
 # hyphen.
@@ -228,26 +234,74 @@ def build_index(parsed: dict, file_stem: str | None = None) -> list[dict]:
         except (TypeError, ValueError):
             tpage = None
         caption = t.get("caption")
+
+        # Two-pass table indexing.
+        #
+        # Pass 1: collect all cells per row and compute each row's union bbox.
+        # Pass 2: emit every cell AND a synthetic full-row entry, both using the
+        # row union bbox so any match — whether on a single cell or a
+        # space-joined row quote — highlights the full row in the viewer.
+        rows_cells: dict[int, list[dict]] = {}
+
         for cell in t.get("cells", []) or []:
             cell_text = cell.get("text")
             if not cell_text:
                 continue
-            # Cell bbox sometimes lacks page_no; fall back to table page.
             cell_bbox = cell.get("bbox")
             cell_page = None
             if isinstance(cell_bbox, dict):
                 cell_page = cell_bbox.get("page_no") or tpage
             cell_page = cell_page or tpage
             flat = to_flat_bbox(cell_bbox, _ph_for(cell_bbox, cell_page))
-            index.append(
-                {
-                    "text": cell_text,
-                    "page": cell_page,
-                    "bbox": flat,
-                    "kind": "table_cell",
-                    "section": caption,
-                }
+            row_idx = cell.get("row")
+            if row_idx is not None:
+                if row_idx not in rows_cells:
+                    rows_cells[row_idx] = []
+                rows_cells[row_idx].append(
+                    {"text": cell_text, "flat": flat, "page": cell_page}
+                )
+
+        def _row_union(parts: list[dict]) -> tuple[list[float] | None, int | None]:
+            flats = [p["flat"] for p in parts if p["flat"] is not None]
+            bbox = (
+                [
+                    min(f[0] for f in flats),
+                    min(f[1] for f in flats),
+                    max(f[2] for f in flats),
+                    max(f[3] for f in flats),
+                ]
+                if flats
+                else None
             )
+            page = next((p["page"] for p in parts if p["page"] is not None), tpage)
+            return bbox, page
+
+        for row_idx in sorted(rows_cells):
+            row_parts = rows_cells[row_idx]
+            row_bbox, row_page = _row_union(row_parts)
+
+            for part in row_parts:
+                index.append(
+                    {
+                        "text": part["text"],
+                        "page": row_page,
+                        "bbox": row_bbox,
+                        "kind": "table_cell",
+                        "section": caption,
+                    }
+                )
+
+            row_text = " ".join(p["text"] for p in row_parts)
+            if row_text.strip():
+                index.append(
+                    {
+                        "text": row_text,
+                        "page": row_page,
+                        "bbox": row_bbox,
+                        "kind": "table_row",
+                        "section": caption,
+                    }
+                )
 
     return index
 
@@ -335,6 +389,31 @@ def _window_hits(needle_norm: str, haystack: Iterable[dict], window: int = 60) -
     if not head:
         return []
     return [e for e in haystack if head in _norm(e.get("text") or "")]
+
+
+def _table_row_label_hits(anchor_text: str, haystack: Iterable[dict]) -> list[dict]:
+    """Match KG-extractor multi-cell anchors via the leading text label.
+
+    Splits "Male sex 1.97 1.54 to 2.53 < 0.001" → label "Male sex", then
+    finds table_cell entries whose normalized text equals that label.
+    Only returns hits when the label appears on exactly one distinct page —
+    multiple-page occurrences mean the label is in different tables and the
+    correct one cannot be determined without the numeric values.
+    """
+    m = _TABLE_ROW_SPLIT_RE.search(anchor_text)
+    if m is None:
+        return []
+    label = anchor_text[: m.start()].strip()
+    if len(label) < 4:
+        return []
+    label_norm = _norm(label)
+    hits = [
+        e for e in haystack
+        if e.get("kind") == "table_cell" and _norm(e.get("text") or "") == label_norm
+    ]
+    if len({e.get("page") for e in hits}) > 1:
+        return []
+    return hits
 
 
 def _disambiguate(
@@ -456,6 +535,10 @@ def resolve(
         window_hits = _window_hits(needle_norm, index, window=60)
         if len(window_hits) == 1:
             hits = window_hits
+
+    # Tier 7: table-row label match — only when label is unique across pages.
+    if not hits:
+        hits = _table_row_label_hits(anchor_text, index)
 
     if not hits:
         return None

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 import uuid
 from datetime import datetime
@@ -247,11 +246,25 @@ def run_predictor_extract(
 
 
 def _strip_fences(s: str) -> str:
-    """Strip ``` / ```json fences if a model wraps JSON in markdown."""
+    """Extract a JSON object from a model response.
+
+    Handles three shapes seen in practice:
+      1. Pure JSON: ``{ ... }``
+      2. Markdown-fenced JSON: ````json\n{ ... }\n````
+      3. Preamble + JSON: ``"I'll extract...\n```json\n{ ... }\n```"``
+         (Sonnet routinely prepends a sentence before the JSON, which
+         strict ``model_validate_json`` rejects.)
+
+    Strategy: slice from the first ``{`` to the last ``}``; that is the
+    JSON object regardless of surrounding prose or fences. Falls back to
+    the stripped input if no braces are found, so the downstream JSON
+    error stays informative.
+    """
     s = s.strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```(?:json)?\s*", "", s)
-        s = re.sub(r"\s*```$", "", s)
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return s[start : end + 1]
     return s
 
 

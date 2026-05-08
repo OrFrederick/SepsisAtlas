@@ -59,7 +59,12 @@ _SYSTEM_PROMPT = (
     "and must not be lost. Only use `ranked_predictors` or `study_summary` "
     "if the user explicitly asks for a per-predictor or per-paper roll-up; "
     "if you do, name the underlying papers in your narrative so the user "
-    "still sees citations."
+    "still sees citations.\n"
+    "Your final narrative is rendered as markdown ABOVE the structured "
+    "table from `project_table`. Do NOT include a markdown table (no `|` "
+    "pipe tables, no row-by-row tabular layouts) in the narrative — that "
+    "would duplicate what the UI already renders. Use prose, short bullet "
+    "points, or headings instead."
 )
 
 

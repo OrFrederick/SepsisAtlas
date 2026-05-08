@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from sepsis_atlas import config as _saconfig
-from sepsis_atlas.config import DB_PATH, PAPERS_PARSED
+from sepsis_atlas.config import KG_DB_PATH, PAPERS_PARSED
 from sepsis_atlas.llm import get_client, logged_llm_call
 from sepsis_atlas.schemas import VerifierResponse
 
@@ -155,7 +155,9 @@ def _ensure_cache_table(con: sqlite3.Connection) -> None:
 
 
 def _open_cache(db_path: str | Path | None = None) -> sqlite3.Connection:
-    path = str(db_path) if db_path else str(DB_PATH)
+    # Hardcoded to KG_DB_PATH so the verifier cache never opens db.sqlite,
+    # regardless of env vars. Callers can still pass an explicit db_path.
+    path = str(db_path) if db_path else str(KG_DB_PATH)
     con = sqlite3.connect(path, timeout=30.0)
     # WAL + a generous busy timeout: when reverify holds the main DB
     # connection mid-batch, the cache writer needs to coexist instead of

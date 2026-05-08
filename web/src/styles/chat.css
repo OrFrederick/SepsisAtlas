@@ -15,8 +15,8 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 }
 
 .controls {
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 22px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
+  padding: 8px 22px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }

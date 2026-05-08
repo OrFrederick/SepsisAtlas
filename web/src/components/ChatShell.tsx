@@ -1,19 +1,15 @@
 /*
   Chat shell — React port of the original `static/app.html` vanilla-JS chat,
-  living inside an Astro island. Two changes from the original:
+  living inside an Astro island.
 
-    1. Backend toggle (SQL ↔ KG agent loop) — picks `/query` or `/query_kg`
-       per submit. Selection persists in localStorage so the user lands in
-       the same mode after reload.
-    2. Backend URL configurable via PUBLIC_BACKEND_URL env so the static
-       site can hit a remote backend; defaults to "" (relative URL) so the
-       SPA still works when served at the same origin as FastAPI.
+  Backend URL configurable via PUBLIC_BACKEND_URL env so the static site can
+  hit a remote backend; defaults to "" (relative URL) so the SPA still works
+  when served at the same origin as FastAPI.
 
   Why a hand-rolled fetch + useState rather than a query lib: this is a
   one-endpoint surface with localStorage as the source of truth for chat
   history. SWR/TanStack-Query would be additional dependencies for no
-  gain. 21st.dev components can be dropped in around this shell without
-  touching it.
+  gain.
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,7 +45,6 @@ const STAGGER_CHILD = {
 
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
-const MODE_KEY = "sepsis_atlas.backend_mode.v1";
 const VIEW_KEY = "sepsis_atlas.row_view.v1";
 const HISTORY_MAX = 50;
 
@@ -57,11 +52,6 @@ const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) 
   /\/$/,
   "",
 );
-
-const MODE_HINT: Record<Mode, string> = {
-  sql: "Structured DB · single-shot ranked rows",
-  kg: "Neo4j + ReAct agent · multi-step retrieval",
-};
 
 const SAMPLE_QUERIES = [
   "lactate and 28-day mortality",
@@ -150,24 +140,6 @@ function saveViewerUrl(u: string): void {
   }
 }
 
-function loadMode(): Mode {
-  if (typeof window === "undefined") return "sql";
-  try {
-    const m = localStorage.getItem(MODE_KEY);
-    return m === "kg" ? "kg" : "sql";
-  } catch {
-    return "sql";
-  }
-}
-
-function saveMode(m: Mode): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(MODE_KEY, m);
-  } catch {
-    /* ignore */
-  }
-}
 
 function loadView(): View {
   if (typeof window === "undefined") return "cards";
@@ -334,8 +306,7 @@ function Welcome({ onChip }: { onChip: (q: string) => void }) {
       <h2>Evidence, anchored.</h2>
       <p>
         Ask about sepsis predictors, biomarkers, or outcomes. Answers are pinned to verbatim quotes
-        from peer-reviewed papers; click any evidence row to inspect the cited PDF passage. Toggle
-        KG mode for cross-paper, agent-driven retrieval.
+        from peer-reviewed papers; click any evidence row to inspect the cited PDF passage.
       </p>
       <div className="chips">
         {SAMPLE_QUERIES.map((q, i) => (
@@ -373,7 +344,6 @@ export default function ChatShell() {
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
     setHistory(loadHistory());
-    setMode(loadMode());
     setView(loadView());
     const last = loadViewerUrl();
     if (last) {
@@ -395,12 +365,6 @@ export default function ChatShell() {
     const el = scrollbackRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [history.length, pending]);
-
-  // ---- mode toggle -------------------------------------------------------
-  const setModeAndPersist = useCallback((m: Mode) => {
-    setMode(m);
-    saveMode(m);
-  }, []);
 
   const setViewAndPersist = useCallback((v: View) => {
     setView(v);
@@ -519,23 +483,6 @@ export default function ChatShell() {
     <MotionConfig reducedMotion="user">
     <div className="chat-shell">
       <div className="controls">
-        <div className="backend-toggle" role="tablist" aria-label="Query backend">
-          <button
-            type="button"
-            className={`mode-btn${mode === "sql" ? " active" : ""}`}
-            onClick={() => setModeAndPersist("sql")}
-          >
-            SQL
-          </button>
-          <button
-            type="button"
-            className={`mode-btn${mode === "kg" ? " active" : ""}`}
-            onClick={() => setModeAndPersist("kg")}
-          >
-            KG (agent)
-          </button>
-        </div>
-        <span className="mode-hint">{MODE_HINT[mode]}</span>
         <button
           type="button"
           className="clear-btn"
@@ -694,7 +641,7 @@ export default function ChatShell() {
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.3 }}
                   >
-                    {mode === "kg" ? "thinking (agent loop)..." : "thinking..."}
+                    thinking...
                   </motion.div>
                 </div>
               </div>

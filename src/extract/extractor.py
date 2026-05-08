@@ -416,32 +416,85 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             anchor.section = sec
         summary["anchor_resolved"] += 1
 
-    with session_factory() as session:
-        # Stage 1
+    # IMPORTANT: do NOT hold a session open across LLM calls. SQLite is a
+    # single-writer DB; even with WAL+busy_timeout, an open transaction held
+    # for a 5-30s LLM call serializes every other extraction worker and
+    # produces "database is locked" errors under concurrency. Pattern:
+    # do all LLM work first, then open a short-lived session to bulk-insert.
+
+    # Stage 1: enumerate cohorts (LLM call, no session)
+    try:
+        cohorts, ce_meta = run_cohort_enum(
+            paper_json, paper_id=file_stem, run_id=run_id
+        )
+    except Exception as e:
+        summary["errors"].append(f"cohort_enum: {e!r}")
+        return summary
+    summary["cost_usd_total"] += ce_meta["cost_usd"]
+    summary["latency_ms_total"] += ce_meta["latency_ms"]
+    summary["n_cohorts"] = len(cohorts)
+
+    # Verify each cohort (may include LLM call inside verify_llm cache miss)
+    cohort_verdicts: list[tuple] = []
+    for c in cohorts:
+        _bind_anchor(c.anchor)
         try:
-            cohorts, ce_meta = run_cohort_enum(
-                paper_json, paper_id=file_stem, run_id=run_id
+            verdict, vmeta = run_verifier(
+                c.model_dump(mode="json"),
+                c.anchor.text or "",
+                paper_id=file_stem,
+                run_id=run_id,
+                row_id=c.cohort_id,
             )
         except Exception as e:
-            summary["errors"].append(f"cohort_enum: {e!r}")
-            return summary
-        summary["cost_usd_total"] += ce_meta["cost_usd"]
-        summary["latency_ms_total"] += ce_meta["latency_ms"]
-        summary["n_cohorts"] = len(cohorts)
+            summary["errors"].append(f"verify_cohort {c.cohort_id}: {e!r}")
+            verdict = VerifierResponse(
+                verdict="partial", score=0.5,
+                rationale=f"verifier_error: {e!r}",
+            )
+            vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+        summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
+        summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
+        summary["verdict_counts"][verdict.verdict] += 1
+        cohort_verdicts.append((c, verdict))
 
-        # Verify each cohort (local NLI+regex; no LLM call)
-        for c in cohorts:
-            _bind_anchor(c.anchor)
+    # Short-lived session: insert all cohorts then close.
+    with session_factory() as session:
+        for c, verdict in cohort_verdicts:
+            _insert_cohort(
+                session, c, paper_id=file_stem, run_id=run_id,
+                meta=ce_meta, verdict=verdict,
+            )
+        session.commit()
+
+    # Stage 2 per cohort: LLM extract + verify, then short session for insert
+    for c in cohorts:
+        try:
+            rows, pm_meta = run_predictor_extract(
+                paper_json, c, paper_id=file_stem, run_id=run_id
+            )
+        except Exception as e:
+            summary["errors"].append(
+                f"predictor_extract {c.cohort_id}: {e!r}"
+            )
+            continue
+        summary["cost_usd_total"] += pm_meta["cost_usd"]
+        summary["latency_ms_total"] += pm_meta["latency_ms"]
+        row_verdicts: list[tuple] = []
+        for r in rows:
+            _bind_anchor(r.anchor)
             try:
                 verdict, vmeta = run_verifier(
-                    c.model_dump(mode="json"),
-                    c.anchor.text or "",
+                    r.model_dump(mode="json"),
+                    r.anchor.text or "",
                     paper_id=file_stem,
                     run_id=run_id,
-                    row_id=c.cohort_id,
+                    row_id=f"{r.cohort_id}::{r.predictors[:40]}",
                 )
             except Exception as e:
-                summary["errors"].append(f"verify_cohort {c.cohort_id}: {e!r}")
+                summary["errors"].append(
+                    f"verify_row {r.cohort_id}: {e!r}"
+                )
                 verdict = VerifierResponse(
                     verdict="partial", score=0.5,
                     rationale=f"verifier_error: {e!r}",
@@ -450,51 +503,16 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
             summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
             summary["verdict_counts"][verdict.verdict] += 1
-            _insert_cohort(
-                session, c, paper_id=file_stem, run_id=run_id,
-                meta=ce_meta, verdict=verdict,
-            )
-        session.commit()
+            row_verdicts.append((r, verdict))
 
-        # Stage 2 per cohort
-        for c in cohorts:
-            try:
-                rows, pm_meta = run_predictor_extract(
-                    paper_json, c, paper_id=file_stem, run_id=run_id
-                )
-            except Exception as e:
-                summary["errors"].append(
-                    f"predictor_extract {c.cohort_id}: {e!r}"
-                )
-                continue
-            summary["cost_usd_total"] += pm_meta["cost_usd"]
-            summary["latency_ms_total"] += pm_meta["latency_ms"]
-            for r in rows:
-                _bind_anchor(r.anchor)
-                try:
-                    verdict, vmeta = run_verifier(
-                        r.model_dump(mode="json"),
-                        r.anchor.text or "",
-                        paper_id=file_stem,
-                        run_id=run_id,
-                        row_id=f"{r.cohort_id}::{r.predictors[:40]}",
+        # Short-lived session per cohort: insert all predictor rows then close.
+        if row_verdicts:
+            with session_factory() as session:
+                for r, verdict in row_verdicts:
+                    _insert_predictor(
+                        session, r, run_id=run_id, meta=pm_meta, verdict=verdict
                     )
-                except Exception as e:
-                    summary["errors"].append(
-                        f"verify_row {r.cohort_id}: {e!r}"
-                    )
-                    verdict = VerifierResponse(
-                        verdict="partial", score=0.5,
-                        rationale=f"verifier_error: {e!r}",
-                    )
-                    vmeta = {"cost_usd": 0.0, "latency_ms": 0}
-                summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
-                summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
-                summary["verdict_counts"][verdict.verdict] += 1
-                _insert_predictor(
-                    session, r, run_id=run_id, meta=pm_meta, verdict=verdict
-                )
-                summary["n_rows"] += 1
-            session.commit()
+                    summary["n_rows"] += 1
+                session.commit()
 
     return summary

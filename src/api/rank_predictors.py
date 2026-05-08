@@ -18,6 +18,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from api.dedupe import dedupe_evidence_rows
+
 
 # Canonical metric labels used in the ranking output.
 METRIC_AUC = "AUC"
@@ -142,17 +144,27 @@ def _fetch_rows(
             res = cx.execute(text(sql), params)
             return [dict(r._mapping) for r in res]
 
-    if outcome_window_days is None:
-        return _run(None), None, None
+    # Strip rejected rows and collapse duplicates before ranking sees them —
+    # otherwise repeat-extraction artifacts and verifier-rejected rows can
+    # float to the top of the predictor list.
+    def _clean(rows: list[dict]) -> list[dict]:
+        return [
+            r
+            for r in dedupe_evidence_rows(rows)
+            if (r.get("verifier_verdict") or "").lower() != "reject"
+        ]
 
-    rows = _run(outcome_window_days)
+    if outcome_window_days is None:
+        return _clean(_run(None)), None, None
+
+    rows = _clean(_run(outcome_window_days))
     if rows:
         return rows, f"Exact {outcome_window_days}-day window matched.", outcome_window_days
 
     target = outcome_window_days
     for cand in sorted(set(COMMON_WINDOWS), key=lambda c: abs(c - target)):
         if abs(cand - target) <= 5 and cand != target:
-            r2 = _run(cand)
+            r2 = _clean(_run(cand))
             if r2:
                 return (
                     r2,
@@ -160,7 +172,7 @@ def _fetch_rows(
                     cand,
                 )
 
-    r3 = _run(None)
+    r3 = _clean(_run(None))
     note = f"No exact match for {target}-day; showing all windows for this outcome."
     return r3, note, None
 

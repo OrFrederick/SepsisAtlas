@@ -1,0 +1,1298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sepsis Atlas — Frontend Direction Playground</title>
+<style>
+/* ==========================================================
+   PLAYGROUND CHROME
+   ========================================================== */
+:root {
+  --pg-bg: #0d0e10;
+  --pg-fg: #e7e7e7;
+  --pg-fg-dim: #9aa0a6;
+  --pg-border: #23252a;
+  --pg-panel: #15171b;
+  --pg-accent: #ffd23f;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--pg-bg);
+  color: var(--pg-fg);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+
+.pg-shell {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-areas:
+    "header header"
+    "tabs   tabs"
+    "stage  controls"
+    "prompt prompt";
+  min-height: 100vh;
+  gap: 0;
+}
+.pg-header {
+  grid-area: header;
+  padding: 18px 28px 10px;
+  border-bottom: 1px solid var(--pg-border);
+  display: flex; align-items: baseline; gap: 18px;
+}
+.pg-header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.4px; }
+.pg-header .pg-sub { color: var(--pg-fg-dim); font-size: 12px; }
+
+.pg-tabs {
+  grid-area: tabs;
+  display: flex; gap: 4px;
+  padding: 10px 28px;
+  background: var(--pg-panel);
+  border-bottom: 1px solid var(--pg-border);
+}
+.pg-tab {
+  background: transparent; border: 1px solid var(--pg-border);
+  color: var(--pg-fg-dim);
+  padding: 6px 14px; border-radius: 6px;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pg-tab:hover { color: var(--pg-fg); border-color: #3a3d44; }
+.pg-tab.active {
+  background: var(--pg-fg); color: #0d0e10;
+  border-color: var(--pg-fg);
+}
+
+.pg-stage {
+  grid-area: stage;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(80,90,110,0.10), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(60,80,100,0.08), transparent 50%),
+    var(--pg-bg);
+  padding: 24px;
+  display: flex; align-items: stretch; justify-content: center;
+}
+.pg-frame {
+  width: 100%;
+  max-width: 1280px;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 24px 60px rgba(0,0,0,0.45),
+    0 4px 16px rgba(0,0,0,0.30);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 720px;
+  position: relative;
+  animation: pg-stage-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes pg-stage-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.992); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+.pg-controls {
+  grid-area: controls;
+  background: var(--pg-panel);
+  border-left: 1px solid var(--pg-border);
+  padding: 18px 18px 24px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
+}
+.pg-controls h3 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: var(--pg-fg-dim);
+}
+.pg-control { display: flex; flex-direction: column; gap: 6px; }
+.pg-control label { font-size: 12px; color: var(--pg-fg-dim); display: flex; justify-content: space-between; }
+.pg-control input[type=range] { width: 100%; accent-color: var(--pg-accent); }
+.pg-control select, .pg-control input[type=text] {
+  background: #0d0e10; border: 1px solid var(--pg-border); color: var(--pg-fg);
+  border-radius: 6px; padding: 6px 10px; font-size: 12px;
+}
+.pg-control input[type=color] {
+  width: 100%; height: 30px; padding: 0; border: 1px solid var(--pg-border); border-radius: 6px;
+  background: transparent;
+}
+.pg-toggle {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--pg-fg);
+  cursor: pointer;
+}
+.pg-toggle input { accent-color: var(--pg-accent); }
+.pg-divider { height: 1px; background: var(--pg-border); border: 0; margin: 4px 0; }
+.pg-blurb {
+  font-size: 12px; color: var(--pg-fg-dim); line-height: 1.55;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--pg-border);
+  border-radius: 6px;
+}
+.pg-blurb strong { color: var(--pg-fg); display: block; margin-bottom: 4px; }
+.pg-pick-btn {
+  background: var(--pg-accent); color: #0d0e10;
+  border: 0; border-radius: 6px;
+  padding: 10px 14px;
+  font-weight: 600; font-size: 13px; letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.pg-pick-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(255,210,63,0.30); }
+
+.pg-prompt {
+  grid-area: prompt;
+  background: var(--pg-panel);
+  border-top: 1px solid var(--pg-border);
+  padding: 14px 28px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+}
+.pg-prompt-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--pg-fg-dim);
+  margin: 0 0 6px;
+}
+#prompt-text {
+  margin: 0;
+  background: #0d0e10;
+  border: 1px solid var(--pg-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; line-height: 1.55;
+  color: #cfd2da;
+  white-space: pre-wrap;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.pg-copy-btn {
+  align-self: end;
+  background: transparent;
+  border: 1px solid var(--pg-border); color: var(--pg-fg);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer; font-size: 12px;
+  transition: all 0.15s ease;
+}
+.pg-copy-btn:hover { background: #1a1c20; border-color: #3a3d44; }
+.pg-copy-btn.copied { background: #1a3a23; border-color: #2d5a3a; color: #7ee195; }
+
+/* ==========================================================
+   MOCK CHAT SHELL — shared structure across all three themes
+   ========================================================== */
+.cs-topbar {
+  display: flex; align-items: center; gap: 24px;
+  padding: 0 22px; height: 52px;
+  flex-shrink: 0;
+}
+.cs-brand { font-weight: 600; letter-spacing: 0.4px; display: flex; align-items: center; gap: 8px; }
+.cs-nav { display: flex; gap: 4px; margin-left: auto; }
+.cs-nav a { padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+
+.cs-controls {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 22px;
+  flex-shrink: 0;
+}
+.cs-modegroup { display: flex; gap: 0; }
+.cs-modegroup button {
+  border: 0; cursor: pointer;
+  padding: 6px 14px;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+.cs-modegroup button.first  { border-top-left-radius: 999px;  border-bottom-left-radius: 999px; }
+.cs-modegroup button.last   { border-top-right-radius: 999px; border-bottom-right-radius: 999px; }
+.cs-mode-hint { font-size: 12px; }
+
+.cs-clear { margin-left: auto; cursor: pointer; padding: 6px 12px; font-size: 12px; }
+
+.cs-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.cs-split-divider { width: 1px; }
+
+.cs-pane {
+  display: flex; flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+.cs-scrollback {
+  flex: 1;
+  padding: 24px 28px;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 20px;
+}
+
+.cs-welcome { animation: cs-fadein 600ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.cs-welcome h2 { margin: 0 0 10px; }
+.cs-welcome p { margin: 0 0 18px; }
+.cs-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.cs-chip { cursor: pointer; transition: all 0.15s ease; }
+@keyframes cs-fadein {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.cs-bubble-user {
+  align-self: flex-end;
+  max-width: 78%;
+  padding: 10px 14px;
+  animation: cs-bubble-in 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes cs-bubble-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.cs-summary {
+  animation: cs-fadein 500ms 100ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.cs-summary p { margin: 0; }
+
+.cs-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.cs-card {
+  cursor: pointer;
+  padding: 14px 16px;
+  animation: cs-card-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.cs-card:nth-child(1) { animation-delay: 200ms; }
+.cs-card:nth-child(2) { animation-delay: 280ms; }
+.cs-card:nth-child(3) { animation-delay: 360ms; }
+@keyframes cs-card-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.cs-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.cs-card-title { font-weight: 600; }
+.cs-card-meta-right { display: flex; gap: 10px; align-items: center; font-size: 11.5px; }
+.cs-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700;
+}
+.cs-kv { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 14px; }
+.cs-kv .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; }
+.cs-kv .v { font-size: 13px; }
+.cs-quote {
+  margin-top: 10px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+.cs-thinking-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.cs-thinking-dots {
+  display: inline-flex; gap: 3px;
+}
+.cs-thinking-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  animation: cs-dot 1.2s ease-in-out infinite;
+}
+.cs-thinking-dots span:nth-child(2) { animation-delay: 0.18s; }
+.cs-thinking-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes cs-dot {
+  0%, 100% { transform: scale(0.8); opacity: 0.4; }
+  50%      { transform: scale(1.1); opacity: 1; }
+}
+
+.cs-composer {
+  flex-shrink: 0;
+  margin: 14px 22px 22px;
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 10px 12px;
+  transition: all 0.18s ease;
+}
+.cs-composer textarea {
+  flex: 1;
+  resize: none;
+  border: 0;
+  background: transparent;
+  outline: none;
+  min-height: 24px;
+  max-height: 120px;
+  padding: 4px 0;
+  font: inherit;
+}
+.cs-send {
+  border: 0; cursor: pointer;
+  padding: 8px 16px;
+  font-weight: 600; font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.cs-viewer {
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.cs-viewer-mock {
+  width: 80%; height: 86%;
+  border-radius: 6px;
+  position: relative;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 28px;
+  overflow: hidden;
+}
+.cs-viewer-mock::before {
+  content: "Mock PDF · p.5"; position: absolute; top: 12px; left: 16px;
+  font-size: 11px; opacity: 0.55;
+}
+.cs-paper-text {
+  font-size: 10px; line-height: 1.4;
+  color: rgba(0,0,0,0.55);
+  font-family: "Times New Roman", Georgia, serif;
+  text-align: justify;
+  max-width: 320px;
+}
+.cs-paper-text .hl {
+  background: rgba(255,212,63,0.4);
+  outline: 2px solid rgba(255,212,63,0.8);
+  outline-offset: 1px;
+  animation: cs-hl-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cs-hl-pulse {
+  0%, 100% { background: rgba(255,212,63,0.35); }
+  50%      { background: rgba(255,212,63,0.6); }
+}
+
+/* ==========================================================
+   THEME 1 — EDITORIAL CLINICAL
+   ========================================================== */
+.theme-editorial {
+  --acc: #0F4C5C;
+  --acc-soft: #DDEAEC;
+  --bg: #FAFAF7;
+  --bg-2: #F4F1EA;
+  --bg-3: #EFEAE0;
+  --border: #DDD7C7;
+  --border-strong: #BCB39C;
+  --fg: #1A1614;
+  --fg-2: #403A33;
+  --fg-3: #6B6258;
+  --fg-4: #8E8576;
+  --serif: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.theme-editorial .cs-topbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.theme-editorial .cs-brand {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--fg);
+}
+.theme-editorial .cs-brand-mark { color: var(--acc); }
+.theme-editorial .cs-nav a {
+  font-size: 13px; color: var(--fg-3);
+  border-bottom: 1px solid transparent;
+  border-radius: 0; padding: 4px 2px; margin: 0 8px;
+}
+.theme-editorial .cs-nav a:hover { color: var(--fg); }
+.theme-editorial .cs-nav a.active {
+  color: var(--fg);
+  border-bottom-color: var(--acc);
+  background: transparent;
+}
+.theme-editorial .cs-controls { border-bottom: 1px solid var(--border); }
+.theme-editorial .cs-modegroup button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  font-family: var(--sans);
+}
+.theme-editorial .cs-modegroup button.first { border-right: 0; }
+.theme-editorial .cs-modegroup button.active {
+  background: var(--acc); color: white; border-color: var(--acc);
+}
+.theme-editorial .cs-mode-hint { color: var(--fg-3); font-style: italic; }
+.theme-editorial .cs-clear {
+  background: transparent; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--fg-3);
+}
+.theme-editorial .cs-split-divider { background: var(--border); }
+.theme-editorial .cs-welcome h2 {
+  font-family: var(--serif); font-size: 30px; font-weight: 500;
+  letter-spacing: -0.4px; color: var(--fg);
+}
+.theme-editorial .cs-welcome p { color: var(--fg-2); font-size: 15px; max-width: 560px; }
+.theme-editorial .cs-chip {
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--fg-2); font-size: 13px;
+}
+.theme-editorial .cs-chip:hover {
+  border-color: var(--acc); color: var(--acc); background: var(--acc-soft);
+}
+.theme-editorial .cs-bubble-user {
+  background: var(--acc); color: white;
+  border-radius: 12px 12px 4px 12px;
+  font-size: 14.5px;
+}
+.theme-editorial .cs-summary {
+  font-family: var(--serif); font-size: 16px; line-height: 1.65;
+  color: var(--fg-2);
+  border-left: 2px solid var(--acc);
+  padding-left: 16px;
+}
+.theme-editorial .cs-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.theme-editorial .cs-card:hover, .theme-editorial .cs-card.active {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(0,0,0,0.04);
+}
+.theme-editorial .cs-card.active { border-color: var(--acc); }
+.theme-editorial .cs-card-title {
+  font-family: var(--serif); font-size: 16px; font-weight: 500; color: var(--fg);
+}
+.theme-editorial .cs-card-meta-right { color: var(--fg-3); }
+.theme-editorial .page { font-feature-settings: "tnum"; }
+.theme-editorial .cs-badge {
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.theme-editorial .cs-badge.ok   { color: #2D6E48; border-color: #B6D4C2; background: #EDF7F1; }
+.theme-editorial .cs-badge.warn { color: #8B6800; border-color: #E5D29A; background: #FAF3DC; }
+.theme-editorial .cs-badge.fail { color: #963A3A; border-color: #DCB7B7; background: #FAEAEA; }
+.theme-editorial .cs-kv .k { color: var(--fg-4); font-weight: 500; }
+.theme-editorial .cs-kv .v { color: var(--fg-2); font-family: var(--serif); font-size: 14.5px; }
+.theme-editorial .cs-quote {
+  font-family: var(--serif); font-style: italic;
+  color: var(--fg-3);
+  border-left: 2px solid var(--border);
+  background: transparent;
+}
+.theme-editorial .cs-thinking-row { color: var(--fg-3); font-style: italic; font-family: var(--serif); }
+.theme-editorial .cs-thinking-dots span { background: var(--acc); }
+.theme-editorial .cs-composer {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.theme-editorial .cs-composer:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(15,76,92,0.10);
+}
+.theme-editorial .cs-composer textarea::placeholder { color: var(--fg-4); font-style: italic; }
+.theme-editorial .cs-send {
+  background: var(--acc); color: white;
+  border-radius: 3px;
+}
+.theme-editorial .cs-send:disabled { background: var(--border); color: var(--fg-4); cursor: default; }
+.theme-editorial .cs-viewer { background: var(--bg-3); border-left: 1px solid var(--border); }
+.theme-editorial .cs-viewer-mock { background: white; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
+
+/* ==========================================================
+   THEME 2 — BENTO AURORA
+   ========================================================== */
+.theme-bento {
+  --acc: #4F46E5;
+  --acc-2: #F97066;
+  --bg: #FBFAF8;
+  --bg-2: #FFFFFF;
+  --bg-3: #F4F2EE;
+  --border: #EAE7E0;
+  --fg: #14111B;
+  --fg-2: #3B3744;
+  --fg-3: #6B6677;
+  --fg-4: #9B96A8;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --shadow-soft: 0 1px 2px rgba(20,17,27,0.04), 0 4px 12px rgba(20,17,27,0.04);
+  --shadow-lift: 0 1px 2px rgba(20,17,27,0.04), 0 8px 24px rgba(79,70,229,0.10);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  position: relative;
+}
+.theme-bento::before {
+  content: ""; position: absolute; inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 80% at 8% 0%, rgba(79,70,229,0.08), transparent 60%),
+    radial-gradient(50% 70% at 100% 5%, rgba(249,112,102,0.06), transparent 60%),
+    radial-gradient(40% 60% at 80% 100%, rgba(79,70,229,0.05), transparent 60%);
+  animation: bento-aurora 14s ease-in-out infinite alternate;
+}
+@keyframes bento-aurora {
+  0%   { transform: translate3d(0,0,0); opacity: 1; }
+  100% { transform: translate3d(-2%, 1%, 0); opacity: 0.8; }
+}
+.theme-bento > * { position: relative; z-index: 1; }
+.theme-bento .cs-topbar { background: transparent; }
+.theme-bento .cs-brand {
+  font-size: 16px; font-weight: 700;
+  background: linear-gradient(135deg, var(--acc) 0%, var(--acc-2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.2px;
+}
+.theme-bento .cs-brand-mark { color: var(--acc); -webkit-text-fill-color: var(--acc); }
+.theme-bento .cs-nav { background: rgba(255,255,255,0.6); padding: 4px; border-radius: 999px; backdrop-filter: blur(8px); border: 1px solid var(--border); }
+.theme-bento .cs-nav a {
+  font-size: 12.5px; color: var(--fg-3);
+  border-radius: 999px;
+  font-weight: 500;
+  padding: 5px 14px;
+}
+.theme-bento .cs-nav a:hover { color: var(--fg); }
+.theme-bento .cs-nav a.active {
+  background: var(--fg); color: white;
+}
+.theme-bento .cs-modegroup button {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  font-weight: 500;
+}
+.theme-bento .cs-modegroup button.first { border-right: 0; }
+.theme-bento .cs-modegroup button.active {
+  background: linear-gradient(135deg, var(--acc) 0%, var(--acc-2) 100%);
+  color: white; border-color: transparent;
+}
+.theme-bento .cs-mode-hint { color: var(--fg-3); }
+.theme-bento .cs-clear {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--fg-3);
+}
+.theme-bento .cs-split-divider { background: var(--border); }
+.theme-bento .cs-welcome h2 {
+  font-size: 38px; font-weight: 700; letter-spacing: -1.2px;
+  background: linear-gradient(135deg, var(--fg) 0%, var(--acc) 80%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.theme-bento .cs-welcome p { color: var(--fg-2); font-size: 15px; max-width: 540px; }
+.theme-bento .cs-chip {
+  padding: 8px 16px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--fg-2); font-size: 13px; font-weight: 500;
+  box-shadow: var(--shadow-soft);
+}
+.theme-bento .cs-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--acc);
+  color: var(--acc);
+}
+.theme-bento .cs-bubble-user {
+  background: linear-gradient(135deg, var(--acc) 0%, #6D67ED 100%);
+  color: white;
+  border-radius: 18px 18px 4px 18px;
+  font-size: 14px;
+  box-shadow: 0 4px 14px rgba(79,70,229,0.25);
+}
+.theme-bento .cs-summary {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+  font-size: 14.5px; line-height: 1.6;
+  color: var(--fg-2);
+  box-shadow: var(--shadow-soft);
+}
+.theme-bento .cs-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.22s ease, border-color 0.22s;
+}
+.theme-bento .cs-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+.theme-bento .cs-card.active {
+  border-color: var(--acc);
+  box-shadow: 0 1px 2px rgba(20,17,27,0.04), 0 8px 28px rgba(79,70,229,0.18);
+}
+.theme-bento .cs-card-title { font-size: 14.5px; font-weight: 600; color: var(--fg); }
+.theme-bento .cs-card-meta-right { color: var(--fg-3); }
+.theme-bento .page {
+  font-feature-settings: "tnum";
+  background: var(--bg-3); padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 500;
+}
+.theme-bento .cs-badge.ok   { background: #ECFDF5; color: #059669; }
+.theme-bento .cs-badge.warn { background: #FFFBEB; color: #D97706; }
+.theme-bento .cs-badge.fail { background: #FEF2F2; color: #DC2626; }
+.theme-bento .cs-kv .k { color: var(--fg-4); font-weight: 600; }
+.theme-bento .cs-kv .v { color: var(--fg); font-weight: 500; }
+.theme-bento .cs-kv .v.num { font-feature-settings: "tnum"; }
+.theme-bento .cs-quote {
+  background: var(--bg-3);
+  border-radius: 10px;
+  color: var(--fg-2);
+  font-style: normal;
+  border-left: 3px solid var(--acc);
+}
+.theme-bento .cs-thinking-row {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 18px; padding: 10px 16px;
+  align-self: flex-start;
+  color: var(--fg-3);
+  box-shadow: var(--shadow-soft);
+}
+.theme-bento .cs-thinking-dots span {
+  background: linear-gradient(135deg, var(--acc) 0%, var(--acc-2) 100%);
+}
+.theme-bento .cs-composer {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  margin: 14px 22px 24px;
+}
+.theme-bento .cs-composer:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 4px rgba(79,70,229,0.10), var(--shadow-soft);
+}
+.theme-bento .cs-composer textarea::placeholder { color: var(--fg-4); }
+.theme-bento .cs-send {
+  background: linear-gradient(135deg, var(--acc) 0%, #6D67ED 100%);
+  color: white; border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(79,70,229,0.30);
+}
+.theme-bento .cs-send:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(79,70,229,0.40); }
+.theme-bento .cs-send:disabled { background: var(--bg-3); color: var(--fg-4); box-shadow: none; cursor: default; }
+.theme-bento .cs-viewer {
+  background: var(--bg-3);
+  border-left: 1px solid var(--border);
+}
+.theme-bento .cs-viewer-mock {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+
+/* ==========================================================
+   THEME 3 — PRECISION MONO
+   ========================================================== */
+.theme-precision {
+  --acc: #8B1A1A;
+  --acc-soft: #FCE8E8;
+  --bg: #FFFFFF;
+  --bg-2: #FAFAFA;
+  --bg-3: #F4F4F4;
+  --border: #E5E5E5;
+  --border-strong: #C8C8C8;
+  --fg: #0A0A0A;
+  --fg-2: #2E2E2E;
+  --fg-3: #6B6B6B;
+  --fg-4: #9A9A9A;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.theme-precision .cs-topbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  height: 44px;
+}
+.theme-precision .cs-brand {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  color: var(--fg); letter-spacing: 0;
+}
+.theme-precision .cs-brand-mark { color: var(--acc); }
+.theme-precision .cs-nav a {
+  font-family: var(--mono); font-size: 12px; color: var(--fg-3);
+  border-radius: 0; padding: 4px 8px;
+  border: 1px solid transparent;
+}
+.theme-precision .cs-nav a:hover { color: var(--fg); }
+.theme-precision .cs-nav a.active {
+  color: var(--acc);
+  border-color: var(--border);
+  background: var(--bg-2);
+}
+.theme-precision .cs-controls {
+  border-bottom: 1px solid var(--border);
+  height: 36px; padding: 0 22px;
+}
+.theme-precision .cs-modegroup button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  font-family: var(--mono); font-size: 11.5px; padding: 4px 12px;
+  border-radius: 0;
+}
+.theme-precision .cs-modegroup button.first { border-radius: 0; border-right: 0; }
+.theme-precision .cs-modegroup button.last { border-radius: 0; }
+.theme-precision .cs-modegroup button.active {
+  background: var(--fg); color: var(--bg); border-color: var(--fg);
+}
+.theme-precision .cs-mode-hint { font-family: var(--mono); color: var(--fg-3); font-size: 11.5px; }
+.theme-precision .cs-clear {
+  background: transparent; border: 1px solid var(--border); border-radius: 0;
+  color: var(--fg-3); font-family: var(--mono); font-size: 11.5px;
+  padding: 4px 10px;
+}
+.theme-precision .cs-split-divider { background: var(--border); }
+.theme-precision .cs-welcome h2 {
+  font-family: var(--mono); font-size: 22px; font-weight: 500; letter-spacing: -0.4px; color: var(--fg);
+}
+.theme-precision .cs-welcome h2::before { content: "$ "; color: var(--acc); }
+.theme-precision .cs-welcome p { color: var(--fg-2); font-size: 13.5px; max-width: 560px; }
+.theme-precision .cs-chip {
+  padding: 4px 10px; border-radius: 0;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--fg-2); font-family: var(--mono); font-size: 11.5px;
+}
+.theme-precision .cs-chip:hover {
+  border-color: var(--acc); color: var(--acc); background: var(--acc-soft);
+}
+.theme-precision .cs-bubble-user {
+  background: var(--bg-2); color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 13px;
+  font-family: var(--mono);
+}
+.theme-precision .cs-bubble-user::before { content: "> "; color: var(--acc); }
+.theme-precision .cs-summary {
+  font-size: 13.5px;
+  color: var(--fg-2);
+  padding: 0;
+}
+.theme-precision .cs-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 12px 14px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.theme-precision .cs-card:hover { border-color: var(--border-strong); background: var(--bg-2); }
+.theme-precision .cs-card.active { border-color: var(--acc); border-left-width: 3px; padding-left: 12px; }
+.theme-precision .cs-card-title {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 500; color: var(--fg);
+}
+.theme-precision .cs-card-meta-right { color: var(--fg-3); font-family: var(--mono); }
+.theme-precision .page { font-family: var(--mono); }
+.theme-precision .cs-badge { font-family: var(--mono); border-radius: 0; width: auto; padding: 0 5px; height: 16px; font-size: 10.5px; }
+.theme-precision .cs-badge.ok   { background: var(--bg); color: #1F7A40; border: 1px solid #B5DCC2; }
+.theme-precision .cs-badge.warn { background: var(--bg); color: #8B6800; border: 1px solid #E2D29A; }
+.theme-precision .cs-badge.fail { background: var(--bg); color: var(--acc); border: 1px solid #DCB7B7; }
+.theme-precision .cs-kv {
+  grid-template-columns: 80px 1fr;
+  gap: 4px 12px;
+}
+.theme-precision .cs-kv .row { display: contents; }
+.theme-precision .cs-kv .k {
+  font-family: var(--mono); color: var(--fg-3); font-size: 11px;
+  text-transform: lowercase; letter-spacing: 0;
+}
+.theme-precision .cs-kv .v { font-family: var(--mono); color: var(--fg); font-size: 12.5px; }
+.theme-precision .cs-quote {
+  background: var(--bg-2); border-left: 2px solid var(--acc);
+  font-family: var(--mono); font-style: normal; font-size: 11.5px;
+  color: var(--fg-2);
+  border-radius: 0;
+}
+.theme-precision .cs-thinking-row { color: var(--fg-3); font-family: var(--mono); }
+.theme-precision .cs-thinking-row::before { content: "..."; color: var(--acc); margin-right: 6px; }
+.theme-precision .cs-thinking-dots span { background: var(--acc); }
+.theme-precision .cs-composer {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  margin: 12px 22px 22px;
+  padding: 8px 12px;
+}
+.theme-precision .cs-composer:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 1px var(--acc) inset;
+}
+.theme-precision .cs-composer textarea {
+  font-family: var(--mono); font-size: 12.5px;
+}
+.theme-precision .cs-composer textarea::placeholder { color: var(--fg-4); font-family: var(--mono); }
+.theme-precision .cs-composer-prefix { color: var(--acc); font-family: var(--mono); padding: 4px 0; user-select: none; }
+.theme-precision .cs-send {
+  background: var(--fg); color: white; border-radius: 0;
+  font-family: var(--mono); font-size: 12px;
+}
+.theme-precision .cs-send:disabled { background: var(--bg-3); color: var(--fg-4); cursor: default; }
+.theme-precision .cs-viewer { background: var(--bg-2); border-left: 1px solid var(--border); }
+.theme-precision .cs-viewer-mock {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 0;
+}
+.theme-precision .cs-viewer-mock::before { font-family: var(--mono); }
+
+/* density classes */
+.density-compact { font-size: 12px; }
+.density-compact .cs-scrollback { gap: 14px; padding: 18px 22px; }
+.density-compact .cs-card { padding: 10px 12px; }
+.density-compact .cs-rows { gap: 8px; }
+.density-airy { font-size: 14.5px; }
+.density-airy .cs-scrollback { gap: 28px; padding: 32px 36px; }
+.density-airy .cs-card { padding: 18px 22px; }
+.density-airy .cs-rows { gap: 14px; }
+
+/* motion off */
+.motion-off *, .motion-off *::before, .motion-off *::after {
+  animation: none !important;
+  transition: none !important;
+}
+</style>
+</head>
+<body>
+
+<div class="pg-shell">
+
+  <header class="pg-header">
+    <h1>Sepsis Atlas — Frontend Direction Playground</h1>
+    <span class="pg-sub">Pick a direction. Each one shows the chat page redesigned. Adjust accent, density, motion, and content state to compare.</span>
+  </header>
+
+  <div class="pg-tabs" role="tablist">
+    <button class="pg-tab active" data-theme="editorial" role="tab">1 · Editorial Clinical</button>
+    <button class="pg-tab" data-theme="bento" role="tab">2 · Bento Aurora</button>
+    <button class="pg-tab" data-theme="precision" role="tab">3 · Precision Mono</button>
+  </div>
+
+  <div class="pg-stage">
+    <div id="frame" class="pg-frame theme-editorial density-default">
+      <!-- mock chat shell rendered here by JS -->
+    </div>
+  </div>
+
+  <aside class="pg-controls">
+    <div class="pg-control">
+      <h3>Direction</h3>
+      <div id="direction-blurb" class="pg-blurb"></div>
+    </div>
+
+    <div class="pg-control">
+      <label>Accent <span id="accent-val">#0F4C5C</span></label>
+      <input type="color" id="accent" value="#0F4C5C">
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap" id="accent-presets"></div>
+    </div>
+
+    <div class="pg-control">
+      <label>Density</label>
+      <select id="density">
+        <option value="compact">Compact</option>
+        <option value="default" selected>Default</option>
+        <option value="airy">Airy</option>
+      </select>
+    </div>
+
+    <div class="pg-control">
+      <label>Content state</label>
+      <select id="state">
+        <option value="empty">Empty (welcome)</option>
+        <option value="loaded" selected>Loaded (with evidence)</option>
+        <option value="thinking">Thinking</option>
+      </select>
+    </div>
+
+    <label class="pg-toggle">
+      <input type="checkbox" id="motion" checked> Motion enabled
+    </label>
+
+    <hr class="pg-divider">
+
+    <button class="pg-pick-btn" id="pick">Pick this direction →</button>
+  </aside>
+
+  <footer class="pg-prompt">
+    <div>
+      <p class="pg-prompt-label">Implementation prompt — paste into Claude after picking</p>
+      <pre id="prompt-text"></pre>
+    </div>
+    <button class="pg-copy-btn" id="copy">Copy prompt</button>
+  </footer>
+
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+const DIRECTIONS = {
+  editorial: {
+    name: "Editorial Clinical",
+    accent: "#0F4C5C",
+    accentPresets: ["#0F4C5C", "#3E5641", "#5B3A29", "#264653"],
+    blurb: "Stripe-Press-meets-medical-journal. Off-white ground, serif display headlines, generous whitespace, deep teal accent. Soft text reveals, fade-up on cards, no shadows on hover (just a hairline border shift). The vibe: scholarly, calm, trustworthy.",
+    notes: "Use a serif (Iowan Old Style / Charter / Source Serif 4) for display + summary; sans-serif (Inter) for UI chrome. Borders over shadows. Restrained motion: 300–500ms fade-ups, no springs."
+  },
+  bento: {
+    name: "Bento Aurora",
+    accent: "#4F46E5",
+    accentPresets: ["#4F46E5", "#7C3AED", "#0EA5E9", "#10B981"],
+    blurb: "Modern dashboard energy. Warm white ground with a slow-drifting aurora gradient, layered cards with soft drop shadows, rounded-2xl corners, indigo→coral gradient accent. Spring-physics card entrances, magnetic hover lift, gradient ring on focus.",
+    notes: "Inter throughout. Cards: 16px radius, soft shadow + lift on hover. Background: animated radial-gradient mesh. Send button: gradient pill with shadow. Springy motion (cubic-bezier(0.2, 0.7, 0.2, 1))."
+  },
+  precision: {
+    name: "Precision Mono",
+    accent: "#8B1A1A",
+    accentPresets: ["#8B1A1A", "#4F46E5", "#0F766E", "#1E1E1E"],
+    blurb: "Clinician-as-power-user. Pure white, IBM Plex / JetBrains Mono everywhere except UI labels, hairline 1px borders, single oxblood accent. Snappy 120ms transitions, no rounded corners, monospaced numerics. The vibe: dense, technical, Bloomberg-but-light.",
+    notes: "JetBrains Mono / IBM Plex Mono for headings, numbers, anchors, badges. Inter only for body labels. Square corners (border-radius: 0). Tight spacing. Sharp focus rings (1px inset). Motion: snap-fast, no easing flourish."
+  }
+};
+
+const state = {
+  theme: "editorial",
+  accent: DIRECTIONS.editorial.accent,
+  density: "default",
+  contentState: "loaded",
+  motion: true
+};
+
+// ============================================================
+// DOM helpers (avoid innerHTML by using DocumentFragment)
+// ============================================================
+function el(tag, opts, ...children) {
+  const node = document.createElement(tag);
+  if (opts) {
+    if (opts.class) node.className = opts.class;
+    if (opts.text != null) node.textContent = opts.text;
+    if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
+    if (opts.style) for (const [k, v] of Object.entries(opts.style)) node.style[k] = v;
+    if (opts.on) for (const [k, v] of Object.entries(opts.on)) node.addEventListener(k, v);
+  }
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    if (typeof c === "string" || typeof c === "number") node.appendChild(document.createTextNode(String(c)));
+    else if (Array.isArray(c)) for (const cc of c) { if (cc != null && cc !== false) node.appendChild(cc); }
+    else node.appendChild(c);
+  }
+  return node;
+}
+
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+// ============================================================
+// Mock data
+// ============================================================
+const MOCK = {
+  query: "Predictors of 28-day mortality in adult sepsis",
+  summary: "Across 12 cohort studies, lactate ≥4 mmol/L (HR 2.4–3.1) and qSOFA ≥2 emerge as the most consistent independent predictors of 28-day mortality. Cohort sizes ranged 312–8,470. Two studies flagged elevated NEWS2 as superior to SIRS in ED triage but with weaker generalizability outside high-income settings.",
+  rows: [
+    { paper: "Seymour 2016", cohort: "ICU adults", predictor: "Lactate ≥4 mmol/L", outcome: "28-day mortality", effect: "HR 2.42 (1.95–3.01)", n: "49,331", page: "p.5", verdict: "ok",
+      quote: "Among ICU encounters, lactate ≥4 mmol/L was associated with a hazard ratio of 2.42 for 28-day mortality after adjustment for age and comorbidity index..." },
+    { paper: "Schlapbach 2018", cohort: "Pediatric ICU", predictor: "qSOFA ≥2", outcome: "In-hospital mortality", effect: "OR 1.78 (1.32–2.41)", n: "2,594", page: "p.4", verdict: "ok",
+      quote: "Two of three qSOFA criteria identified children at substantially elevated risk of in-hospital mortality across both PICU and general ward cohorts..." },
+    { paper: "Wang 2023", cohort: "ED adults (China)", predictor: "NEWS2", outcome: "28-day mortality", effect: "AUC 0.81 (0.78–0.84)", n: "1,205", page: "p.7", verdict: "warn",
+      quote: "NEWS2 outperformed SIRS for early mortality discrimination but the calibration intercept indicated overfitting to the training cohort..." }
+  ]
+};
+
+const WELCOME_HEADLINES = {
+  editorial: "Evidence, anchored.",
+  bento: "Ask anything about sepsis.",
+  precision: "Ask about sepsis evidence."
+};
+
+// ============================================================
+// Build chat shell as DOM nodes
+// ============================================================
+function buildCard(row, i) {
+  const head = el("div", { class: "cs-card-head" },
+    el("div", { class: "cs-card-title", text: row.paper + " · " + row.cohort }),
+    el("div", { class: "cs-card-meta-right" },
+      el("span", { class: "page", text: row.page }),
+      el("span", { class: "cs-badge " + row.verdict, text: row.verdict === "ok" ? "✓" : row.verdict === "warn" ? "~" : "✗" })
+    )
+  );
+  const kv = el("div", { class: "cs-kv" });
+  const kvRows = [
+    ["Predictor", row.predictor, false],
+    ["Outcome", row.outcome, false],
+    ["Effect", row.effect, true],
+    ["N", row.n, true]
+  ];
+  for (const [k, v, isNum] of kvRows) {
+    kv.appendChild(el("div", { class: "row" },
+      el("div", { class: "k", text: k }),
+      el("div", { class: "v" + (isNum ? " num" : ""), text: v })
+    ));
+  }
+  return el("div", { class: "cs-card" + (i === 0 ? " active" : "") },
+    head, kv, el("div", { class: "cs-quote", text: row.quote })
+  );
+}
+
+function buildScrollback() {
+  const frag = document.createDocumentFragment();
+  if (state.contentState === "empty") {
+    const welcome = el("div", { class: "cs-welcome" },
+      el("h2", { text: WELCOME_HEADLINES[state.theme] }),
+      el("p", { text: "Answers are pinned to verbatim quotes from peer-reviewed papers. Click any evidence row to inspect the cited passage." }),
+      el("div", { class: "cs-chips" },
+        ...["lactate and 28-day mortality", "qSOFA in septic shock", "predictors from Schlapbach 2018"]
+          .map(q => el("button", { class: "cs-chip", text: q }))
+      )
+    );
+    frag.appendChild(welcome);
+  } else {
+    frag.appendChild(el("div", { class: "cs-bubble-user", text: MOCK.query }));
+    if (state.contentState === "thinking") {
+      frag.appendChild(el("div", { class: "cs-thinking-row" },
+        el("span", { text: state.theme === "precision" ? "querying database" : "thinking" }),
+        el("span", { class: "cs-thinking-dots" }, el("span"), el("span"), el("span"))
+      ));
+    } else {
+      frag.appendChild(el("div", { class: "cs-summary" }, el("p", { text: MOCK.summary })));
+      const rows = el("div", { class: "cs-rows" });
+      MOCK.rows.forEach((r, i) => rows.appendChild(buildCard(r, i)));
+      frag.appendChild(rows);
+    }
+  }
+  return frag;
+}
+
+function buildShell() {
+  const frag = document.createDocumentFragment();
+
+  // topbar
+  frag.appendChild(el("div", { class: "cs-topbar" },
+    el("div", { class: "cs-brand" },
+      el("span", { class: "cs-brand-mark", text: "◆" }),
+      document.createTextNode(" Sepsis Atlas")
+    ),
+    el("nav", { class: "cs-nav" },
+      el("a", { class: "active", text: "Chat" }),
+      el("a", { text: "Graph" }),
+      el("a", { text: "Papers" }),
+      el("a", { text: "Rank" })
+    )
+  ));
+
+  // controls bar
+  frag.appendChild(el("div", { class: "cs-controls" },
+    el("div", { class: "cs-modegroup", attrs: { role: "tablist" } },
+      el("button", { class: "first active", text: "SQL" }),
+      el("button", { class: "last", text: "KG (agent)" })
+    ),
+    el("span", { class: "cs-mode-hint", text: "Structured DB · single-shot ranked rows" }),
+    el("button", { class: "cs-clear", text: "Clear chat" })
+  ));
+
+  // split
+  const composerKids = [];
+  if (state.theme === "precision") {
+    composerKids.push(el("span", { class: "cs-composer-prefix", text: "$" }));
+  }
+  composerKids.push(el("textarea", { attrs: { rows: "1", placeholder: "Ask about sepsis predictors, biomarkers, or outcomes..." }}));
+  composerKids.push(el("button", { class: "cs-send", attrs: { type: "submit" }, text: state.theme === "precision" ? "send" : "Send" }));
+
+  const composer = el("form", { class: "cs-composer", on: { submit: e => e.preventDefault() } }, ...composerKids);
+
+  const chatPane = el("section", { class: "cs-pane" },
+    (function(){ const sb = el("div", { class: "cs-scrollback" }); sb.appendChild(buildScrollback()); return sb; })(),
+    composer
+  );
+
+  // viewer pane
+  const paperText = el("div", { class: "cs-paper-text" });
+  const p1 = el("p");
+  p1.appendChild(el("strong", { text: "Methods. " }));
+  p1.appendChild(document.createTextNode("We performed a retrospective cohort study using electronic health records from two academic medical centers between January 2010 and December 2014. Adult patients (≥18 years) with suspected infection were screened."));
+  paperText.appendChild(p1);
+
+  const p2 = el("p");
+  p2.appendChild(el("strong", { text: "Results. " }));
+  p2.appendChild(document.createTextNode("Among ICU encounters, "));
+  p2.appendChild(el("span", { class: "hl", text: "lactate ≥4 mmol/L was associated with a hazard ratio of 2.42 for 28-day mortality" }));
+  p2.appendChild(document.createTextNode(" after adjustment for age, sex, and Elixhauser comorbidity index. Sensitivity analyses confirmed robustness across surgical and medical subcohorts."));
+  paperText.appendChild(p2);
+
+  const p3 = el("p");
+  p3.appendChild(el("strong", { text: "Discussion. " }));
+  p3.appendChild(document.createTextNode("The persistence of lactate as an independent predictor across diverse cohorts argues for its inclusion in early sepsis-bundled care pathways."));
+  paperText.appendChild(p3);
+
+  const viewerMock = el("div", { class: "cs-viewer-mock" }, paperText);
+  const viewerPane = el("section", { class: "cs-pane cs-viewer" }, viewerMock);
+
+  frag.appendChild(el("div", { class: "cs-split" },
+    chatPane,
+    el("div", { class: "cs-split-divider" }),
+    viewerPane
+  ));
+
+  return frag;
+}
+
+// ============================================================
+// Apply state to DOM
+// ============================================================
+const frame = document.getElementById("frame");
+
+function lighten(hex, amt) {
+  const c = hex.replace("#", "");
+  const r = parseInt(c.slice(0,2),16), g = parseInt(c.slice(2,4),16), b = parseInt(c.slice(4,6),16);
+  const mix = (v) => Math.round(v + (255 - v) * amt);
+  return "#" + [mix(r), mix(g), mix(b)].map(x => x.toString(16).padStart(2,"0")).join("");
+}
+
+function applyState() {
+  frame.className = "pg-frame theme-" + state.theme + " density-" + state.density + (state.motion ? "" : " motion-off");
+  frame.style.setProperty("--acc", state.accent);
+  frame.style.setProperty("--acc-soft", lighten(state.accent, 0.86));
+
+  clear(frame);
+  frame.appendChild(buildShell());
+
+  const dir = DIRECTIONS[state.theme];
+  const blurb = document.getElementById("direction-blurb");
+  clear(blurb);
+  blurb.appendChild(el("strong", { text: dir.name }));
+  blurb.appendChild(document.createTextNode(dir.blurb));
+
+  const presets = document.getElementById("accent-presets");
+  clear(presets);
+  for (const c of dir.accentPresets) {
+    presets.appendChild(el("button", {
+      class: "pg-swatch",
+      attrs: { title: c },
+      style: { width: "24px", height: "24px", borderRadius: "4px", border: "1px solid var(--pg-border)", background: c, cursor: "pointer" },
+      on: { click: () => {
+        state.accent = c;
+        document.getElementById("accent").value = c;
+        document.getElementById("accent-val").textContent = c;
+        applyState();
+        updatePrompt();
+      }}
+    }));
+  }
+
+  document.getElementById("accent-val").textContent = state.accent;
+}
+
+// ============================================================
+// Prompt builder
+// ============================================================
+function updatePrompt() {
+  const dir = DIRECTIONS[state.theme];
+  const lines = [];
+  lines.push("Redesign the Sepsis Atlas chat page (web/src/components/ChatShell.tsx + web/src/styles/chat.css + web/src/styles/global.css) using the \"" + dir.name + "\" direction.");
+  lines.push("");
+  lines.push(dir.blurb);
+  lines.push("");
+  lines.push("Implementation notes: " + dir.notes);
+  lines.push("");
+  lines.push("Accent color: " + state.accent + ".");
+  if (state.density !== "default") {
+    lines.push("Density: " + state.density + " (" + (state.density === "compact" ? "tighter spacing, smaller type" : "more whitespace, larger type") + ").");
+  }
+  if (!state.motion) {
+    lines.push("Motion: keep transitions minimal (transitions on hover/focus only, no entrance animations).");
+  } else {
+    lines.push("Motion: use Framer Motion for entrance animations (fade-up on messages, stagger on evidence cards 80–120ms apart, hover lift on cards). Respect prefers-reduced-motion.");
+  }
+  lines.push("");
+  lines.push("Scope: chat page only (the / route). Apply the same design tokens to the topbar in Base.astro so navigation stays consistent. Other routes (Graph/Papers/Rank) get a follow-up pass.");
+  lines.push("Add Framer Motion to web/package.json. Keep React 19 + Astro islands intact. Light mode only.");
+
+  document.getElementById("prompt-text").textContent = lines.join("\n");
+}
+
+// ============================================================
+// Wire up controls
+// ============================================================
+document.querySelectorAll(".pg-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".pg-tab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    state.theme = tab.dataset.theme;
+    state.accent = DIRECTIONS[state.theme].accent;
+    document.getElementById("accent").value = state.accent;
+    applyState();
+    updatePrompt();
+  });
+});
+
+document.getElementById("accent").addEventListener("input", e => {
+  state.accent = e.target.value;
+  applyState();
+  updatePrompt();
+});
+
+document.getElementById("density").addEventListener("change", e => {
+  state.density = e.target.value;
+  applyState();
+  updatePrompt();
+});
+
+document.getElementById("state").addEventListener("change", e => {
+  state.contentState = e.target.value;
+  applyState();
+});
+
+document.getElementById("motion").addEventListener("change", e => {
+  state.motion = e.target.checked;
+  applyState();
+  updatePrompt();
+});
+
+document.getElementById("pick").addEventListener("click", () => {
+  const promptEl = document.getElementById("prompt-text");
+  promptEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  promptEl.style.transition = "background 200ms";
+  promptEl.style.background = "#1a3a23";
+  setTimeout(() => { promptEl.style.background = "#0d0e10"; }, 600);
+});
+
+document.getElementById("copy").addEventListener("click", async () => {
+  const btn = document.getElementById("copy");
+  try {
+    await navigator.clipboard.writeText(document.getElementById("prompt-text").textContent);
+    btn.textContent = "Copied!";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = "Copy prompt"; btn.classList.remove("copied"); }, 1400);
+  } catch (e) {
+    btn.textContent = "Copy failed";
+    setTimeout(() => { btn.textContent = "Copy prompt"; }, 1400);
+  }
+});
+
+// initial render
+applyState();
+updatePrompt();
+</script>
+
+</body>
+</html>

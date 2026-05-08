@@ -32,20 +32,8 @@ const SLIDE_IN_RIGHT = {
   animate: { opacity: 1, x: 0 },
   transition: { duration: 0.32, ease: [0.2, 0.7, 0.2, 1] as const },
 };
-const STAGGER_PARENT = {
-  initial: {},
-  animate: {
-    transition: { staggerChildren: 0.1, delayChildren: 0.05 },
-  },
-};
-const STAGGER_CHILD = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.42, ease: [0.2, 0.7, 0.2, 1] as const } },
-};
-
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
-const VIEW_KEY = "sepsis_atlas.row_view.v1";
 const HISTORY_MAX = 50;
 
 const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) || "").replace(
@@ -54,13 +42,12 @@ const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) 
 );
 
 const SAMPLE_QUERIES = [
-  "lactate and 28-day mortality",
-  "qSOFA in septic shock",
   "predictors from Schlapbach 2018",
+  "phenotype clusters in Seymour 2016",
+  "best AUC for 28-day mortality",
 ];
 
 type Mode = "sql" | "kg";
-type View = "cards" | "table";
 
 type EvidenceRow = {
   paper_ref?: string;
@@ -141,31 +128,6 @@ function saveViewerUrl(u: string): void {
 }
 
 
-function loadView(): View {
-  if (typeof window === "undefined") return "cards";
-  try {
-    const v = localStorage.getItem(VIEW_KEY);
-    return v === "table" ? "table" : "cards";
-  } catch {
-    return "cards";
-  }
-}
-
-function saveView(v: View): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(VIEW_KEY, v);
-  } catch {
-    /* ignore */
-  }
-}
-
-function isGenericCohort(label: unknown): boolean {
-  if (!label) return true;
-  const s = String(label).trim().toLowerCase();
-  return s === "" || s === "total cohort" || s === "total";
-}
-
 function parseBbox(bbox: unknown): number[] | null {
   if (bbox == null) return null;
   let arr: unknown = bbox;
@@ -212,87 +174,6 @@ function endpointPath(mode: Mode): string {
   return mode === "kg" ? "/query_kg" : "/query";
 }
 
-// ---------- card ----------------------------------------------------------
-
-function EvidenceCard({
-  row,
-  active,
-  onActivate,
-}: {
-  row: EvidenceRow;
-  active: boolean;
-  onActivate: () => void;
-}) {
-  const paperRef = row.paper_ref || row.file_name || row.study || "(unknown paper)";
-  const titleText = isGenericCohort(row.cohort_label)
-    ? paperRef
-    : `${paperRef} · ${row.cohort_label}`;
-  const pageNum = parseInt(String(row.anchor_page ?? ""), 10);
-  const verdict = verdictKind(row.verifier_verdict ?? row.verifier);
-  const predictor = row.predictor_canonical || row.predictors || row.predictor || "—";
-  const outcome = row.outcome || "—";
-  const effect = row.effect_size_str || row.effect_size || "—";
-  const nVal =
-    row.cohort_size_n == null || row.cohort_size_n === ""
-      ? row.n == null
-        ? "—"
-        : String(row.n)
-      : String(row.cohort_size_n);
-
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onActivate();
-    }
-  };
-
-  return (
-    <motion.div
-      variants={STAGGER_CHILD}
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.18 }}
-      className={`card${active ? " active" : ""}`}
-      role="button"
-      tabIndex={0}
-      onClick={onActivate}
-      onKeyDown={handleKey}
-    >
-      <div className="card-head">
-        <div className="card-title">{titleText}</div>
-        <div className="card-meta-right">
-          {Number.isFinite(pageNum) && pageNum >= 1 ? (
-            <span className="page">p.{pageNum}</span>
-          ) : null}
-          <span
-            className={`badge ${verdict.cls}`}
-            title={`verdict: ${row.verifier_verdict || row.verifier || "unverified"}`}
-          >
-            {verdict.glyph}
-          </span>
-        </div>
-      </div>
-      <div className="kv">
-        {[
-          ["Predictor", predictor],
-          ["Outcome", outcome],
-          ["Effect", effect],
-          ["N", nVal],
-        ].map(([k, v]) => (
-          <div className="row" key={k}>
-            <div className="k">{k}</div>
-            <div className="v" title={v}>
-              {v}
-            </div>
-          </div>
-        ))}
-      </div>
-      {row.anchor_text && String(row.anchor_text).trim() ? (
-        <div className="quote">{String(row.anchor_text)}</div>
-      ) : null}
-    </motion.div>
-  );
-}
-
 // ---------- welcome -------------------------------------------------------
 
 function Welcome({ onChip }: { onChip: (q: string) => void }) {
@@ -332,7 +213,6 @@ function Welcome({ onChip }: { onChip: (q: string) => void }) {
 export default function ChatShell() {
   const [history, setHistory] = useState<Turn[]>([]);
   const [mode, setMode] = useState<Mode>("sql");
-  const [view, setView] = useState<View>("cards");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
@@ -344,7 +224,6 @@ export default function ChatShell() {
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
     setHistory(loadHistory());
-    setView(loadView());
     const last = loadViewerUrl();
     if (last) {
       try {
@@ -366,12 +245,7 @@ export default function ChatShell() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [history.length, pending]);
 
-  const setViewAndPersist = useCallback((v: View) => {
-    setView(v);
-    saveView(v);
-  }, []);
-
-  // ---- card click → update viewer ---------------------------------------
+  // ---- row click → update viewer ----------------------------------------
   const activateRow = useCallback((turnIdx: number, rowIdx: number, row: EvidenceRow) => {
     const url = buildViewerUrl(row);
     if (!url) return;
@@ -541,60 +415,19 @@ export default function ChatShell() {
                       ) : null}
                       {turn.assistant.rows && turn.assistant.rows.length > 0 ? (
                         <>
-                          {view === "table" ? (
-                            <motion.div
-                              initial={FADE_UP.initial}
-                              animate={FADE_UP.animate}
-                              transition={{ ...FADE_UP.transition, delay: 0.18 }}
-                            >
-                              <EvidenceTable
-                                rows={turn.assistant.rows}
-                                turnIdx={ti}
-                                activeRowKey={activeRowKey}
-                                onActivate={(ri, row) => activateRow(ti, ri, row)}
-                              />
-                            </motion.div>
-                          ) : (
-                            <motion.div
-                              className="rows"
-                              variants={STAGGER_PARENT}
-                              initial="initial"
-                              animate="animate"
-                            >
-                              {turn.assistant.rows.map((row, ri) => {
-                                const k = `${ti}:${ri}`;
-                                return (
-                                  <EvidenceCard
-                                    key={k}
-                                    row={row}
-                                    active={activeRowKey === k}
-                                    onActivate={() => activateRow(ti, ri, row)}
-                                  />
-                                );
-                              })}
-                            </motion.div>
-                          )}
-                          <div className="table-actions">
-                          <div
-                            className="backend-toggle view-toggle"
-                            role="tablist"
-                            aria-label="Row layout"
+                          <motion.div
+                            initial={FADE_UP.initial}
+                            animate={FADE_UP.animate}
+                            transition={{ ...FADE_UP.transition, delay: 0.18 }}
                           >
-                            <button
-                              type="button"
-                              className={`mode-btn${view === "cards" ? " active" : ""}`}
-                              onClick={() => setViewAndPersist("cards")}
-                            >
-                              Cards
-                            </button>
-                            <button
-                              type="button"
-                              className={`mode-btn${view === "table" ? " active" : ""}`}
-                              onClick={() => setViewAndPersist("table")}
-                            >
-                              Table
-                            </button>
-                          </div>
+                            <EvidenceTable
+                              rows={turn.assistant.rows}
+                              turnIdx={ti}
+                              activeRowKey={activeRowKey}
+                              onActivate={(ri, row) => activateRow(ti, ri, row)}
+                            />
+                          </motion.div>
+                          <div className="table-actions">
                           <button
                             type="button"
                             className="csv-download-btn"

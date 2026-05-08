@@ -290,8 +290,6 @@ python scripts/validate.py   # per-paper precision/recall, per-field accuracy
 | Verifier pass (ok) | 78.4% |
 | Verifier partial | 16.5% |
 | Verifier reject | 5.1% |
-| Total LLM cost | $33.46 |
-| Avg cost/paper | $1.08 |
 
 ## Design Rules
 

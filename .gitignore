@@ -8,8 +8,8 @@ node_modules/
 .env.*
 !.env.example
 *.log
-# db.sqlite is tracked so collaborators + the GH Pages build can build the
-# static site without re-running the extraction pipeline. Journal stays out.
+# db.sqlite is tracked so collaborators can spin up the demo without
+# re-running the extraction pipeline. Journal files stay out.
 db.sqlite-journal
 db.sqlite-wal
 db.sqlite-shm
@@ -33,5 +33,4 @@ viewer-*.png
 pipelines/*/valves.json
 
 # Local debug scratch
-scripts/render_bbox.py
 static/bbox_proof/

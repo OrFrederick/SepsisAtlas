@@ -14,8 +14,6 @@ Given 30+ sepsis research PDFs, the pipeline:
 6. **Queries** via a FastAPI backend — intent parsing → answerability gate → parametrized SQL → semantic reranking → random-effects meta-analysis → narrative
 7. **Renders** in an Astro/React frontend with a split-pane chat + PDF viewer showing exact bbox highlights
 
-A second pipeline exports to Neo4j and runs a LangGraph agent loop for graph-traversal queries.
-
 ## Ingest Pipeline
 
 ```mermaid
@@ -99,7 +97,6 @@ graph TD
 
     subgraph BE ["Backend · api/main.py (FastAPI :8000)"]
         API1["POST /query\nSQL pipeline"]
-        API2["POST /query_kg\nKG / LangGraph"]
         API3["GET /viewer/{stem}\nPDF.js page"]
         API4["GET /rank_predictors\nUC3 ranked table"]
         API5["GET /phenotypes\nUC2 cluster studies"]
@@ -108,22 +105,12 @@ graph TD
 
     subgraph STORE ["Storage"]
         DB1[("SQLite\ndb.sqlite")]
-        DB2[("Neo4j\nbolt://:7687")]
-    end
-
-    subgraph KG ["KG Pipeline (optional)"]
-        KG1["LangGraph ReAct agent\n6 tools over Neo4j"]
-        KG2["kg_lateral_promote.py\nPredictor · Outcome · StatMethod nodes"]
     end
 
     UI1 -->|"POST /query"| API1
-    UI1 -->|"POST /query_kg"| API2
     UI2 -->|"click row"| UI3
     UI3 -->|"GET /viewer/{stem}"| API3
     API1 --> DB1
-    API2 --> KG1
-    KG1 --> DB2
-    KG2 --> DB2
     API3 -->|"stream PDF"| API3
     API4 --> DB1
     API5 --> DB1
@@ -201,7 +188,7 @@ src/
   parse/                Docling PDF → JSON pipeline
   extract/              LLM extraction, anchor resolver, NLI + LLM verifiers
   api/                  FastAPI backend (query, ranking, viewer, meta-analysis)
-  stats/                random-effects pooling, forest plot, population match
+  stats/                random-effects pooling, forest plot
 web/                    Astro 5 + React 19 frontend
 data/
   papers/raw/           input PDFs (gitignored)
@@ -236,8 +223,6 @@ MODEL_VERIFY_LLM=anthropic/claude-haiku-4.5
 MODEL_INTENT=anthropic/claude-haiku-4.5
 
 DATABASE_URL=sqlite:///db.sqlite
-NEO4J_URI=bolt://neo4j:7687      # optional, for KG pipeline
-NEO4J_PASSWORD=sepsisatlas
 ```
 
 ## Running the Pipeline
@@ -258,13 +243,6 @@ cd web && npm run dev
 ```
 
 Both parse and extract are resumable — already-processed papers are skipped unless `--force` is passed.
-
-### KG Pipeline (optional)
-
-```bash
-python -m extract.run_kg_extract --all   # extract to Neo4j
-python -m extract.run_kg_promote         # promote Predictor/Outcome nodes
-```
 
 ## Testing
 
@@ -308,8 +286,6 @@ python scripts/validate.py   # per-paper precision/recall, per-field accuracy
 | Verifier (Tier 1) | regex + DeBERTa-MNLI (local, no network) |
 | Verifier (Tier 2) | Claude Haiku (SQLite-cached) |
 | SQL database | SQLite (→ Postgres at scale) |
-| KG database | Neo4j 5 |
-| KG agent | LangGraph ReAct loop |
 | Statistics | statsmodels (random-effects), matplotlib |
 | Backend | FastAPI + Uvicorn |
 | Frontend | Astro 5, React 19, Tailwind 4, PDF.js |

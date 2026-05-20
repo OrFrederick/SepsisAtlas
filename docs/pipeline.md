@@ -309,12 +309,6 @@ flowchart LR
 **Validated**: 5-study fixture pool matches hand DerSimonian-Laird calc
 to 0.009% relative error. Test in `tests/test_meta.py`.
 
-**Population match** — `src/stats/population_match.py` scores each
-study cohort against a target registry (mock: age 67, SOFA 8, lactate
-3.5, in-hosp mortality 0.32). Bhattacharyya overlap on Gaussians for
-continuous fields; categorical match for sepsis-def / setting. Returns
-0–1 used as a row weight in UC1 ranking.
-
 🔗 **Excalidraw**: `docs/diagrams/meta.excalidraw`.
 
 ---

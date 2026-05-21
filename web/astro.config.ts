@@ -14,8 +14,6 @@ export default defineConfig({
     server: {
       proxy: {
         "/query": forward,
-        "/query_kg": forward,
-        "/kg": forward,
         "/rank_predictors": forward,
         "/viewer": forward,
         "/ingest_pubmed": forward,

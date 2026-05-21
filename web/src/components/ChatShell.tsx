@@ -47,8 +47,6 @@ const SAMPLE_QUERIES = [
   "best AUC for 28-day mortality",
 ];
 
-type Mode = "sql" | "kg";
-
 type EvidenceRow = {
   paper_ref?: string;
   file_name?: string;
@@ -80,7 +78,6 @@ type AssistantPayload = {
 
 type Turn = {
   user_text: string;
-  mode?: Mode;
   assistant: AssistantPayload;
   ts: number;
 };
@@ -170,10 +167,6 @@ function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
   return { cls: "unk", glyph: "?" };
 }
 
-function endpointPath(mode: Mode): string {
-  return mode === "kg" ? "/query_kg" : "/query";
-}
-
 // ---------- welcome -------------------------------------------------------
 
 function Welcome({ onChip }: { onChip: (q: string) => void }) {
@@ -212,7 +205,6 @@ function Welcome({ onChip }: { onChip: (q: string) => void }) {
 
 export default function ChatShell() {
   const [history, setHistory] = useState<Turn[]>([]);
-  const [mode, setMode] = useState<Mode>("sql");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
@@ -265,7 +257,7 @@ export default function ChatShell() {
 
       let payload: AssistantPayload;
       try {
-        const url = (BACKEND_URL || "") + endpointPath(mode);
+        const url = (BACKEND_URL || "") + "/query";
         const resp = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -295,7 +287,6 @@ export default function ChatShell() {
 
       const turn: Turn = {
         user_text: text,
-        mode,
         assistant: {
           query_id: payload.query_id || undefined,
           summary: payload.summary || "",
@@ -315,7 +306,7 @@ export default function ChatShell() {
       setPending(false);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
-    [mode, pending],
+    [pending],
   );
 
   // ---- composer handlers -------------------------------------------------

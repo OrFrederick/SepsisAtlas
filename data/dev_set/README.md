@@ -21,7 +21,7 @@ The `label_source` column on every row tells you how it was produced:
 If you see a mix of `B:` and `A:` rows, the `A:` rows are noisy ground truth at
 best; do not optimize against them.
 
-## Schema (UC1 lean — see `discord-exports/TASK.md` lines 121-186)
+## Schema (UC1 lean)
 
 This deliberately drops fields the GT CSVs include but UC1 doesn't need
 (encounters_period, mortality_timepoint, cohort_characteristics_timepoint, etc.).

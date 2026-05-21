@@ -1,4 +1,4 @@
-.PHONY: install initdb parse ingest extract validate serve up down test fmt kg-shell kg-inspect extract-phenotype eval-uc2 eval-uc3
+.PHONY: install initdb parse ingest extract validate serve up down test fmt extract-phenotype eval-uc2 eval-uc3
 
 install:
 	pip install -e ".[dev]"
@@ -32,12 +32,6 @@ test:
 fmt:
 	ruff format src/ scripts/ tests/
 	ruff check --fix src/ scripts/ tests/
-
-kg-shell:
-	docker exec -it sepsis_neo4j cypher-shell -u neo4j -p sepsisatlas
-
-kg-inspect:
-	uv run python -m scripts.kg_inspect
 
 extract-phenotype:
 	python -m src.extract.run_phenotype --all

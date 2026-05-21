@@ -11,13 +11,12 @@ import { buildPageIndex, computeMatchRects, findMatches } from "./search";
 type PdfjsLib = typeof import("pdfjs-dist");
 type PdfDoc = import("pdfjs-dist").PDFDocumentProxy;
 
-const DPR = Math.min(window.devicePixelRatio || 1, 2.5);
-
 export class PdfController {
   readonly stem: string;
   readonly pdfUrl: string;
   private stage: HTMLElement;
   private onEvent: (e: ControllerEvent) => void;
+  private readonly DPR: number;
 
   // Mutable state
   private pdfjsLib: PdfjsLib | null = null;
@@ -53,6 +52,7 @@ export class PdfController {
     this.bbox = opts.initialBbox;
     this.bboxPage = opts.initialBbox ? opts.initialPage : null;
     this.bboxOrigin = opts.initialBboxOrigin;
+    this.DPR = Math.min(window.devicePixelRatio || 1, 2.5);
   }
 
   // ---- lifecycle ----
@@ -270,8 +270,8 @@ export class PdfController {
 
       entry.wrap.style.width = `${cssW}px`;
       entry.wrap.style.height = `${cssH}px`;
-      entry.canvas.width = Math.floor(cssW * DPR);
-      entry.canvas.height = Math.floor(cssH * DPR);
+      entry.canvas.width = Math.floor(cssW * this.DPR);
+      entry.canvas.height = Math.floor(cssH * this.DPR);
       entry.canvas.style.width = `${cssW}px`;
       entry.canvas.style.height = `${cssH}px`;
       entry.textLayer.style.width = `${cssW}px`;
@@ -280,7 +280,7 @@ export class PdfController {
       entry.searchLayer.style.height = `${cssH}px`;
 
       const ctx = entry.canvas.getContext("2d", { alpha: false })!;
-      const transform = DPR !== 1 ? [DPR, 0, 0, DPR, 0, 0] : null;
+      const transform = this.DPR !== 1 ? [this.DPR, 0, 0, this.DPR, 0, 0] : null;
       await page.render({ canvasContext: ctx, viewport, transform: transform ?? undefined }).promise;
 
       entry.textLayer.replaceChildren();

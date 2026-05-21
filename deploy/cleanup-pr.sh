@@ -8,7 +8,7 @@ PR="${1:?pr number}"
 WORK_DIR="/opt/sepsisatlas/pr-$PR"
 WEB_OUT="/var/www/atlas-pr-$PR"
 PROJECT="atlas-pr-$PR"
-SNIPPET="/etc/caddy/Caddyfile.d/pr-$PR.caddy"
+SNIPPET="/etc/caddy/Caddyfile.d/pr-routes/pr-$PR.caddy"
 
 if [[ -d "$WORK_DIR" ]]; then
   cd "$WORK_DIR"

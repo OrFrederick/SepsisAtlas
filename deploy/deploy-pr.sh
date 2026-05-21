@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Deploy a PR preview at pr-<N>.atlas.efferon.com.
+# Deploy a PR preview under atlas.efferon.com/pr/<N>/.
 # Usage: deploy-pr.sh <pr_number> <git_sha>
 #
-# Picks loopback port 8100 + (PR % 800) so up to ~800 distinct PRs can have
-# concurrent previews without colliding.
+# Path-based (no wildcard DNS): the Astro build is rooted at /pr/<N>/, the
+# backend is reachable at /pr/<N>/api/* via Caddy reverse-proxy with prefix
+# stripping. Backend port is 8100 + (PR % 800) on loopback.
 
 set -euo pipefail
 
@@ -14,7 +15,8 @@ REPO_URL="https://github.com/OrFrederick/SepsisAtlas.git"
 WORK_DIR="/opt/sepsisatlas/pr-$PR"
 WEB_OUT="/var/www/atlas-pr-$PR"
 PROJECT="atlas-pr-$PR"
-HOST="pr-$PR.atlas.efferon.com"
+BASE_PATH="/pr/$PR/"
+API_BASE="/pr/$PR/api"
 PORT="$((8100 + PR % 800))"
 
 log() { echo "[deploy-pr#$PR $(date -u +%FT%TZ)] $*"; }
@@ -30,10 +32,10 @@ git reset --hard "$SHA"
 # Inherit OPENROUTER_API_KEY etc. from main env unless PR has its own.
 [[ -f "$WORK_DIR/.env" ]] || cp /opt/sepsisatlas/main/.env "$WORK_DIR/.env"
 
-log "building frontend"
+log "building frontend with base=$BASE_PATH PUBLIC_BACKEND_URL=$API_BASE"
 cd "$WORK_DIR/web"
 bun install --frozen-lockfile
-PUBLIC_BACKEND_URL="" bun run build
+ASTRO_BASE="$BASE_PATH" PUBLIC_BACKEND_URL="$API_BASE" bun run build
 sudo install -d -o caddy -g caddy "$WEB_OUT"
 sudo rsync -a --delete "$WORK_DIR/web/dist/" "$WEB_OUT/"
 sudo chown -R caddy:caddy "$WEB_OUT"
@@ -53,25 +55,21 @@ for i in $(seq 1 90); do
   sleep 1
 done
 
-SNIPPET="/etc/caddy/Caddyfile.d/pr-$PR.caddy"
+SNIPPET="/etc/caddy/Caddyfile.d/pr-routes/pr-$PR.caddy"
 SNIPPET_BODY=$(cat <<EOF
-$HOST {
-	encode zstd gzip
+# PR #$PR preview — path-prefixed routes inside the main atlas.efferon.com block.
+
+handle_path /pr/$PR/api/* {
+	reverse_proxy 127.0.0.1:$PORT
+}
+
+handle_path /pr/$PR/* {
 	root * $WEB_OUT
-	@api path /query* /viewer/* /papers/* /static/* /health* /phenotypes* /rank_predictors* /ingest_pubmed /query_kg* /kg*
-	handle @api {
-		reverse_proxy 127.0.0.1:$PORT
-	}
-	handle {
-		try_files {path} /index.html
-		file_server
-	}
-	log {
-		output file /var/log/caddy/$HOST.access.log
-	}
+	try_files {path} /index.html
+	file_server
 }
 EOF
 )
 echo "$SNIPPET_BODY" | sudo tee "$SNIPPET" >/dev/null
 sudo systemctl reload caddy
-log "deployed: https://$HOST (loopback port $PORT)"
+log "deployed: https://atlas.efferon.com/pr/$PR/ (loopback port $PORT)"

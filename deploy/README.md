@@ -1,7 +1,7 @@
 # SepsisAtlas — deploy ops
 
 Production target: `atlas.efferon.com` (DigitalOcean droplet, Ubuntu 24.04).
-PR previews: `pr-<N>.atlas.efferon.com` (requires wildcard DNS).
+PR previews: `atlas.efferon.com/pr/<N>/` (path-prefixed; no wildcard DNS, single TLS cert).
 
 ## What runs where
 
@@ -10,9 +10,9 @@ PR previews: `pr-<N>.atlas.efferon.com` (requires wildcard DNS).
 | Caddy              | host, systemd unit `caddy.service`     | 80, 443              |
 | Backend (main)     | docker compose project `atlas-main`    | 127.0.0.1:8000       |
 | Neo4j (main)       | docker compose project `atlas-main`    | internal only        |
-| Backend (PR #N)    | docker compose project `atlas-pr-N`    | 127.0.0.1:(8100 + N) |
+| Backend (PR #N)    | docker compose project `atlas-pr-N`    | 127.0.0.1:(8100 + N % 800) |
 | Astro build (main) | /var/www/atlas-main (served by Caddy)  | n/a                  |
-| Astro build (PR)   | /var/www/atlas-pr-N (served by Caddy)  | n/a                  |
+| Astro build (PR)   | /var/www/atlas-pr-N (served by Caddy at /pr/N/, base path baked into the Astro build) | n/a                  |
 
 ## Initial bootstrap (one-shot, fresh server)
 
@@ -50,11 +50,24 @@ PR previews inherit main's `.env` at deploy time.
 ssh deploy@<host> bash -c 'cd /opt/sepsisatlas/main && git fetch && git reset --hard <good-sha> && deploy/deploy-main.sh'
 ```
 
-## Wildcard DNS for PR previews
+## PR preview routing
 
-PR previews need `*.atlas.efferon.com` → server IP. Without it, Let's Encrypt's
-HTTP-01 challenge fails for `pr-<N>.atlas.efferon.com` and PR previews will
-serve without TLS (or fail to serve at all, depending on browser).
+Each PR is served at `https://atlas.efferon.com/pr/<N>/`. Caddy's `handle_path`
+directive strips `/pr/<N>/` before delegating to either the PR's backend
+(reverse-proxy to `127.0.0.1:8100+(N%800)`) or its static frontend
+(`/var/www/atlas-pr-<N>`). The Astro build for each PR is rooted at
+`/pr/<N>/` via `ASTRO_BASE`, and `PUBLIC_BACKEND_URL` is set to `/pr/<N>/api`
+so React components target the right backend.
+
+Per-PR snippets live in `/etc/caddy/Caddyfile.d/pr-routes/pr-<N>.caddy` and
+are imported inside the main `atlas.efferon.com` site block, so they all
+share the single TLS cert and no wildcard DNS is required.
+
+**Known limitation:** assets the FastAPI backend serves under `/static/...`
+(e.g. PDF.js vendor files) are shared with the main site, not per-PR. A PR
+that adds or modifies files under `/static` will not see those changes in
+the preview. Acceptable for previews; if you need full isolation, build a
+separate sibling host (e.g. `staging.efferon.com`) and add the A record.
 
 ## GitHub Actions deploy
 

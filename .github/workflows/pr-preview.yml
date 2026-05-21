@@ -33,8 +33,8 @@ jobs:
         with:
           header: pr-preview
           message: |
-            Preview deploying: https://pr-${{ github.event.pull_request.number }}.atlas.efferon.com
-            (May take up to a minute for HTTPS to issue on first deploy.)
+            Preview: https://atlas.efferon.com/pr/${{ github.event.pull_request.number }}/
+            (Path-prefixed under the main hostname so no wildcard DNS or per-PR cert is needed.)
 
   teardown:
     if: github.event.action == 'closed'

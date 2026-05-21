@@ -14,6 +14,11 @@ atlas.efferon.com {
 	encode zstd gzip
 	root * /var/www/atlas-main
 
+	# Server-side directives that shouldn't live in the public repo
+	# (basic-auth credential hash, IP allow-lists, etc.). Glob import is
+	# a no-op when the directory is empty.
+	import /etc/caddy/conf.d/*.caddy
+
 	# API surface — keep in sync with src/api/main.py.
 	@api path /query* /viewer/* /papers/* /static/* /health* /phenotypes* /rank_predictors* /ingest_pubmed /query_kg* /kg*
 	handle @api {

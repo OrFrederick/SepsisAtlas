@@ -117,6 +117,7 @@ prepare_dirs() {
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /opt/sepsisatlas
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /var/www
   install -d -o caddy -g caddy -m 755 /var/log/caddy
+  install -d -o caddy -g caddy -m 750 /etc/caddy/conf.d
 
   # Allow the deploy user to rsync into /var/www/atlas-main, install the
   # Caddyfile, and reload caddy — all without an interactive sudo password.

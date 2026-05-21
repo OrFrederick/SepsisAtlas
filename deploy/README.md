@@ -93,9 +93,9 @@ ssh deploy@<host> bash -c 'cd /opt/sepsisatlas/main && git fetch && git reset --
 After the first run of `build-backend.yml`, the `sepsis-atlas-backend` package
 appears under `https://github.com/users/orfrederick/packages`. By default it
 inherits the repo's visibility (public). If you ever flip the repo private,
-either set the package to public manually or `docker login ghcr.io` on the
-VPS with a PAT that has `read:packages` (Watchtower picks up creds from
-`/root/.docker/config.json`, which is bind-mounted into the container).
+either set the package to public manually or run `docker login ghcr.io` on
+the VPS as the `deploy` user with a PAT that has `read:packages` — Watchtower
+bind-mounts `/home/deploy/.docker/config.json` and will pick up those creds.
 
 ## GitHub Actions deploy
 

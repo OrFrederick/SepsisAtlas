@@ -74,9 +74,9 @@ PaperDetailPage
 └── PaperHeader
 
 ChatShell
-├── PdfViewerPane         (new, shared — replaces inline iframe)
-├── ResultCard[]          (new, shared — replaces cardTemplate.ts)
-└── ... (composer, evidence table, existing internals)
+├── PdfViewerPane         (new, shared — replaces inline iframe + dup parseViewerHref)
+├── EvidenceTable         (unchanged — chat results render as a table, not cards)
+└── ... (composer, existing internals)
 
 PapersPage
 └── PapersTable           (new)
@@ -126,11 +126,13 @@ parents call `setSrc(href)` themselves when a card is clicked.
 
 **Blocks:** D (PaperDetailPage).
 
-### B. Unified `ResultCard`
+### B. React `ResultCard`
 
-Replace `ResultCard.astro` and `web/src/lib/cardTemplate.ts` with one React
-component. ChatShell already renders cards via `cardTemplate.ts`; this lets
-the chat and paper-detail paths share one source of truth.
+Convert `ResultCard.astro` to a React component used by `PaperDetailPage`.
+Delete `web/src/lib/cardTemplate.ts` outright — it is dead code (a stale
+client-render mirror of `ResultCard.astro` from a previous design; grep
+confirms it has zero importers, and chat results render via
+`EvidenceTable.tsx`, not cards).
 
 **Surface area:**
 

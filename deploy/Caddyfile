@@ -1,16 +1,10 @@
-# Sepsis Atlas — main site + path-based per-PR previews
+# Sepsis Atlas — atlas.efferon.com
 #
-# Layout:
-#   atlas.efferon.com            → static Astro build at /var/www/atlas-main,
-#                                   API paths reverse-proxied to 127.0.0.1:8000
-#   atlas.efferon.com/pr/<N>/    → static Astro build at /var/www/atlas-pr-<N>
-#   atlas.efferon.com/pr/<N>/api → reverse-proxied to PR-N's backend on 127.0.0.1:(8100+N%800)
-#
-# PR previews are path-prefixed so a single TLS cert covers them — no wildcard
-# DNS required. Each PR drops a snippet into /etc/caddy/Caddyfile.d/pr-routes/
-# which is imported inside the main site block, declaring two handle_path
-# directives. handle_path strips the prefix before the inner handler runs, so
-# the backend and static files see root-relative paths.
+# Single site:
+#   /             → static Astro build at /var/www/atlas-main
+#   /query, /viewer/*, /papers/*, /static/*, /health*, /phenotypes,
+#   /rank_predictors, /ingest_pubmed, /query_kg*, /kg*
+#                 → reverse-proxied to FastAPI at 127.0.0.1:8000
 
 {
 	email ops@efferon.com
@@ -18,21 +12,16 @@
 
 atlas.efferon.com {
 	encode zstd gzip
+	root * /var/www/atlas-main
 
-	# PR previews land here as handle_path blocks. handle_path is more
-	# specific than the catch-all main handle below, so it wins for any
-	# request beginning with /pr/<N>/.
-	import /etc/caddy/Caddyfile.d/pr-routes/*.caddy
-
-	# Main API surface — keep paths in sync with src/api/main.py.
+	# API surface — keep in sync with src/api/main.py.
 	@api path /query* /viewer/* /papers/* /static/* /health* /phenotypes* /rank_predictors* /ingest_pubmed /query_kg* /kg*
 	handle @api {
 		reverse_proxy 127.0.0.1:8000
 	}
 
-	# Main static SPA fallback.
+	# Static SPA fallback for everything else.
 	handle {
-		root * /var/www/atlas-main
 		try_files {path} /index.html
 		file_server
 	}

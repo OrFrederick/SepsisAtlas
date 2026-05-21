@@ -1,18 +1,15 @@
 # Production override.
 #
 # Applied with:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-<env> up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d --build
 #
 # Differences from dev compose:
 #   - Backend bound to loopback only (Caddy on the host proxies in front)
-#   - Dev source-code volume mount is replaced with an empty list (no hot reload)
+#   - Dev source-code volume mount is replaced with the prod set (no hot reload)
 #   - Neo4j has no published ports (only reachable inside the compose network)
-#   - container_name dropped so multiple stacks (main + pr-N) can coexist
-#   - BACKEND_HOST_PORT picks the loopback port per stack (default 8000)
 
 services:
   backend:
-    container_name: !reset null
     volumes: !override
       - ./data:/app/data
       - ./db.sqlite:/app/db.sqlite
@@ -20,8 +17,7 @@ services:
       - ./runs:/app/runs
       - ./logs:/app/logs
     ports: !override
-      - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
+      - "127.0.0.1:8000:8000"
 
   neo4j:
-    container_name: !reset null
     ports: !override []

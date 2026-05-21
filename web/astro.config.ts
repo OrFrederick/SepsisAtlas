@@ -7,7 +7,6 @@ const forward = { target: API_TARGET, changeOrigin: true };
 
 export default defineConfig({
   output: "static",
-  base: process.env.ASTRO_BASE ?? "/",
   integrations: [react()],
   devToolbar: { enabled: false },
   vite: {

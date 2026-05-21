@@ -116,14 +116,12 @@ install_bun() {
 prepare_dirs() {
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /opt/sepsisatlas
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /var/www
-  install -d -o caddy -g caddy -m 755 /etc/caddy/Caddyfile.d
-  install -d -o caddy -g caddy -m 755 /etc/caddy/Caddyfile.d/pr-routes
   install -d -o caddy -g caddy -m 755 /var/log/caddy
 
-  # Allow the deploy user to install snippets, rsync into /var/www/atlas-*,
-  # and reload caddy — all without an interactive sudo password.
+  # Allow the deploy user to rsync into /var/www/atlas-main, install the
+  # Caddyfile, and reload caddy — all without an interactive sudo password.
   cat >/etc/sudoers.d/deploy-caddy <<'EOF'
-deploy ALL=(root) NOPASSWD: /bin/systemctl reload caddy, /usr/bin/systemctl reload caddy, /usr/bin/tee /etc/caddy/Caddyfile.d/pr-routes/*, /usr/bin/tee /etc/caddy/Caddyfile, /bin/rm /etc/caddy/Caddyfile.d/pr-routes/*, /usr/bin/install -d -o caddy -g caddy /var/www/*, /usr/bin/chown -R caddy\:caddy /var/www/*, /usr/bin/rsync -a --delete /opt/sepsisatlas/*, /bin/rm -rf /var/www/atlas-*, /usr/bin/cp /opt/sepsisatlas/*/deploy/Caddyfile /etc/caddy/Caddyfile
+deploy ALL=(root) NOPASSWD: /bin/systemctl reload caddy, /usr/bin/systemctl reload caddy, /usr/bin/install -d -o caddy -g caddy /var/www/*, /usr/bin/chown -R caddy\:caddy /var/www/*, /usr/bin/rsync -a --delete /opt/sepsisatlas/*, /usr/bin/cp /opt/sepsisatlas/*/deploy/Caddyfile /etc/caddy/Caddyfile
 EOF
   chmod 440 /etc/sudoers.d/deploy-caddy
   visudo -cf /etc/sudoers.d/deploy-caddy >/dev/null

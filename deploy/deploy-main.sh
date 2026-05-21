@@ -8,7 +8,6 @@ REPO_URL="https://github.com/OrFrederick/SepsisAtlas.git"
 WORK_DIR="/opt/sepsisatlas/main"
 WEB_OUT="/var/www/atlas-main"
 PROJECT="atlas-main"
-BACKEND_HOST_PORT="8000"
 
 log() { echo "[deploy-main $(date -u +%FT%TZ)] $*"; }
 
@@ -46,30 +45,27 @@ build_frontend() {
 build_backend() {
   cd "$WORK_DIR"
   log "building backend image"
-  BACKEND_HOST_PORT="$BACKEND_HOST_PORT" docker compose \
-    -f docker-compose.yml -f docker-compose.prod.yml \
-    -p "$PROJECT" build
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" build
 }
 
 restart_stack() {
   cd "$WORK_DIR"
-  log "starting compose stack ($PROJECT) on 127.0.0.1:$BACKEND_HOST_PORT"
-  BACKEND_HOST_PORT="$BACKEND_HOST_PORT" docker compose \
-    -f docker-compose.yml -f docker-compose.prod.yml \
-    -p "$PROJECT" up -d --remove-orphans
+  log "starting compose stack ($PROJECT) on 127.0.0.1:8000"
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" up -d --remove-orphans
 }
 
 smoke() {
-  log "waiting for backend health on 127.0.0.1:$BACKEND_HOST_PORT"
+  log "waiting for backend health on 127.0.0.1:8000"
   for i in $(seq 1 60); do
-    if curl -fsS "http://127.0.0.1:$BACKEND_HOST_PORT/health" >/dev/null; then
+    if curl -fsS "http://127.0.0.1:8000/health" >/dev/null; then
       log "backend healthy after ${i}s"
       return 0
     fi
     sleep 1
   done
   log "ERROR: backend did not become healthy"
-  docker compose -p "$PROJECT" logs --tail=200 backend || true
+  cd "$WORK_DIR"
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" logs --tail=200 backend || true
   exit 1
 }
 

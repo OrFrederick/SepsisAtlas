@@ -26,7 +26,9 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/sepsis-atlas-backend
+  # Hardcoded lowercase — docker tags reject mixed-case (`OrFrederick`).
+  # Keep in sync with `image:` in docker-compose.prod.yml.
+  IMAGE: ghcr.io/orfrederick/sepsis-atlas-backend
 
 jobs:
   changes:

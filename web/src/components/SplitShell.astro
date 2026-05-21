@@ -104,10 +104,55 @@
   const iframe = document.getElementById("atlas-viewer") as HTMLIFrameElement | null;
   const empty = document.getElementById("atlas-viewer-empty") as HTMLElement | null;
   if (iframe && empty) {
+    // Parses `/viewer/<stem>?page=N&bbox=...&origin=...` into its parts.
+    // Returns null if the href is malformed so callers fall back to a full
+    // iframe reload.
+    function parseViewerHref(href: string): {
+      stem: string;
+      page: number;
+      bbox: number[] | null;
+      origin: string;
+    } | null {
+      try {
+        const u = new URL(href, window.location.origin);
+        const m = u.pathname.match(/\/viewer\/([^/]+)\/?$/);
+        if (!m) return null;
+        const stem = decodeURIComponent(m[1]);
+        const page = Math.max(1, parseInt(u.searchParams.get("page") || "1", 10));
+        const bboxStr = u.searchParams.get("bbox");
+        const bboxParts = bboxStr ? bboxStr.split(",").map(Number) : null;
+        const bbox = bboxParts && bboxParts.length === 4 && bboxParts.every(Number.isFinite)
+          ? bboxParts
+          : null;
+        const origin = (u.searchParams.get("origin") || "tl").toLowerCase();
+        return { stem, page, bbox, origin };
+      } catch {
+        return null;
+      }
+    }
+
+    // Tracks the stem currently loaded in the iframe so we can decide between
+    // a full reload (different paper) and an in-iframe postMessage (same paper).
+    let currentStem: string | null = null;
+
     function show(href: string) {
+      const parsed = parseViewerHref(href);
+      if (parsed && currentStem === parsed.stem && iframe!.contentWindow) {
+        iframe!.contentWindow.postMessage(
+          {
+            type: "sepsis-atlas:jump",
+            page: parsed.page,
+            bbox: parsed.bbox,
+            origin: parsed.origin,
+          },
+          "*",
+        );
+        return;
+      }
       iframe!.src = href;
       iframe!.style.display = "block";
       empty!.style.display = "none";
+      currentStem = parsed?.stem ?? null;
     }
 
     // Per-page default (from window var) wins over cross-page localStorage.

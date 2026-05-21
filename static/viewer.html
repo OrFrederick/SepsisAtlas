@@ -165,9 +165,11 @@
     const initialPage = Math.max(1, parseInt(params.get("page") || "1", 10));
     const bboxStr = params.get("bbox");
     // origin: 'tl' (Docling tables, OCR-style top-left) or 'bl' (PDF-native bottom-left).
-    const bboxOrigin = (params.get("origin") || "tl").toLowerCase();
-    const bbox = bboxStr ? bboxStr.split(",").map(Number) : null;
-    const bboxPage = bbox ? initialPage : null;
+    // These three are mutated by the in-iframe jump handler so the parent can
+    // re-target the overlay without forcing a full viewer reload.
+    let bboxOrigin = (params.get("origin") || "tl").toLowerCase();
+    let bbox = bboxStr ? bboxStr.split(",").map(Number) : null;
+    let bboxPage = bbox ? initialPage : null;
 
     let scale = 1.5;
     let pdfDoc = null;
@@ -221,7 +223,7 @@
       wrap.appendChild(label);
 
       stage.appendChild(wrap);
-      return { num, wrap, canvas, textLayer, overlay, rendered: false, rendering: null };
+      return { num, wrap, canvas, textLayer, overlay, rendered: false, rendering: null, viewport: null };
     }
 
     async function renderPage(entry) {
@@ -256,6 +258,7 @@
         });
         await textLayer.render();
 
+        entry.viewport = viewport;
         drawBbox(entry, viewport);
         entry.rendered = true;
       })();
@@ -491,7 +494,58 @@
       }
     });
 
-    init();
+    // Parent (SplitShell) sends { type: "sepsis-atlas:jump", page, bbox, origin }
+    // when the user clicks another evidence row for the SAME paper, so we
+    // re-target the overlay + scroll without tearing down the PDF.
+    // If the click arrives before init() finishes loading the PDF, we buffer
+    // the latest request and flush it once `pdfDoc` is ready.
+    let pendingJump = null;
+    function applyJump(data) {
+      const total = pdfDoc.numPages;
+      const nextPage = Math.max(1, Math.min(total, parseInt(data.page, 10) || 1));
+      let nextBbox = null;
+      if (Array.isArray(data.bbox) && data.bbox.length === 4) {
+        nextBbox = data.bbox.map(Number);
+      } else if (typeof data.bbox === "string" && data.bbox.length > 0) {
+        const parts = data.bbox.split(",").map(Number);
+        if (parts.length === 4 && parts.every(Number.isFinite)) nextBbox = parts;
+      }
+      bbox = nextBbox;
+      bboxPage = nextBbox ? nextPage : null;
+      if (typeof data.origin === "string") bboxOrigin = data.origin.toLowerCase();
+
+      // Repaint every already-rendered page so the old overlay is cleared
+      // and the new one shows up on `bboxPage`.
+      for (const entry of pages) {
+        if (entry.rendered && entry.viewport) drawBbox(entry, entry.viewport);
+      }
+
+      jumpBtn.style.display = bbox ? "" : "none";
+
+      const target = pages[nextPage - 1];
+      if (!target) return;
+      const ensure = target.rendered ? Promise.resolve() : renderPage(target);
+      ensure.then(() => {
+        currentPage = nextPage;
+        updateNavUi();
+        if (bbox && bboxPage === nextPage) scrollToBbox({ behavior: "smooth" });
+        else scrollToPage(nextPage, { behavior: "smooth" });
+      });
+    }
+    window.addEventListener("message", (e) => {
+      const data = e.data;
+      if (!data || data.type !== "sepsis-atlas:jump") return;
+      if (!pdfDoc) { pendingJump = data; return; }
+      applyJump(data);
+    });
+
+    init().then(() => {
+      if (pendingJump) {
+        const p = pendingJump;
+        pendingJump = null;
+        applyJump(p);
+      }
+    });
   </script>
 </body>
 </html>

@@ -42,6 +42,16 @@ export default function PdfViewerPane({
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const currentStemRef = useRef<string | null>(null);
+  // Captured once when the iframe first mounts so React renders <iframe src=...>
+  // declaratively on the very first paint (no about:blank flash). All subsequent
+  // src changes go through the effect's imperative path — the effect either
+  // updates iframe.src (stem swap) or postMessages a jump (same stem). The
+  // initialSrc ref's value never re-renders the iframe after mount.
+  const initialSrcRef = useRef<string | null>(null);
+  if (src && initialSrcRef.current === null) {
+    initialSrcRef.current = src;
+    currentStemRef.current = parseHref(src)?.stem ?? null;
+  }
 
   useEffect(() => {
     if (!src) return;
@@ -70,11 +80,14 @@ export default function PdfViewerPane({
       return;
     }
     currentStemRef.current = parsed?.stem ?? null;
+    // Caller passes absolute URLs via buildViewerUrl. Browser canonicalization
+    // means iframe.src may not be byte-equal even when semantically identical,
+    // so this guard is best-effort — assigning the same URL is a no-op anyway.
     if (iframe.src !== src) iframe.src = src;
   }, [src, storageKey, targetOrigin]);
 
   if (!src) {
     return <div className="viewer-empty">{emptyHint}</div>;
   }
-  return <iframe ref={iframeRef} title="PDF viewer" />;
+  return <iframe ref={iframeRef} src={initialSrcRef.current ?? undefined} title="PDF viewer" />;
 }

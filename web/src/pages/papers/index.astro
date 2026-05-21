@@ -1,17 +1,16 @@
 ---
 import Base from "../../layouts/Base.astro";
-import PapersTable from "../../components/PapersTable.astro";
+import PapersPage from "../../components/PapersPage";
 import type { Paper } from "../../lib/types";
 import papersJson from "../../../public/data/papers.json";
 
-const papers = (papersJson as Paper[]).slice();
-papers.sort((a, b) => (b.last_update || "").localeCompare(a.last_update || ""));
+const papers = (papersJson as Paper[])
+  .slice()
+  .sort((a, b) => (b.last_update || "").localeCompare(a.last_update || ""));
+const base = import.meta.env.BASE_URL;
+const basePath = base.endsWith("/") ? base : base + "/";
 ---
 <Base title="Sepsis Atlas — Papers" route="papers">
   <h1 style="margin: 0 0 12px; font-size: 18px;">Corpus ({papers.length} papers)</h1>
-  {papers.length === 0 ? (
-    <p style="color: var(--fg-muted);">No papers exported yet.</p>
-  ) : (
-    <PapersTable papers={papers} />
-  )}
+  <PapersPage papers={papers} basePath={basePath} client:load />
 </Base>

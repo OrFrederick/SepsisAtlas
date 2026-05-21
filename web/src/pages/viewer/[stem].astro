@@ -17,8 +17,17 @@ export async function getStaticPaths() {
   let papers: Paper[] = [];
   try {
     papers = JSON.parse(readFileSync(dataPath, "utf-8")) as Paper[];
-  } catch {
-    papers = [];
+  } catch (err) {
+    // Build runs `seed-data.mjs` first, which writes a stub `[]` when the
+    // real exporter hasn't populated papers.json. We still want to know
+    // about a genuine read/parse error vs. the empty-stub case, so log it.
+    console.warn(`[viewer/[stem]] could not read ${dataPath}: ${err}. No viewer routes will be emitted.`);
+  }
+  if (papers.length === 0) {
+    console.warn(
+      "[viewer/[stem]] papers.json is empty — every /viewer/<stem>/ will 404 at runtime. " +
+        "Run the corpus exporter (or copy `data/papers/raw/*.pdf` into `web/public/pdfs/`) before deploying.",
+    );
   }
   return papers.map((p) => ({ params: { stem: p.file_name } }));
 }

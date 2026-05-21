@@ -84,7 +84,14 @@
   background: var(--panel-3);
   overflow-y: auto;
 }
-.pageWrap {
+/*
+  The controller creates page DOM with bare class names (pageWrap, pdfCanvas,
+  textLayer, searchLayer, bboxOverlay, pageLabel) because it has no knowledge
+  of the React component's scoping. We scope every rule under `.pdf-viewer`
+  here so those bare names can't collide with anything else on the page
+  (notably pdf.js's own `pdf_viewer.css`, which uses `.textLayer`).
+*/
+.pdf-viewer .pageWrap {
   position: relative;
   background: #fff;
   border: 1px solid var(--border);
@@ -94,37 +101,37 @@
      shrink to fit the cross axis by default. */
   flex-shrink: 0;
 }
-.pdfCanvas { position: absolute; left: 0; top: 0; }
-.textLayer {
+.pdf-viewer .pdfCanvas { position: absolute; left: 0; top: 0; }
+.pdf-viewer .textLayer {
   position: absolute; left: 0; top: 0;
   overflow: hidden;
   line-height: 1.0;
   user-select: text;
   forced-color-adjust: none;
 }
-.textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
-.textLayer span, .textLayer br {
+.pdf-viewer .textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
+.pdf-viewer .textLayer span, .pdf-viewer .textLayer br {
   color: transparent;
   position: absolute;
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
 }
-.searchLayer {
+.pdf-viewer .searchLayer {
   position: absolute; left: 0; top: 0;
   pointer-events: none;
 }
-.searchLayer .searchHit {
+.pdf-viewer .searchLayer .searchHit {
   position: absolute;
   background: rgba(255, 226, 92, 0.55);
   border-radius: 1px;
   mix-blend-mode: multiply;
 }
-.searchLayer .searchHit.searchHitActive {
+.pdf-viewer .searchLayer .searchHit.searchHitActive {
   background: rgba(255, 180, 30, 0.85);
   box-shadow: 0 0 0 1px rgba(204, 110, 16, 0.7);
 }
-.bboxOverlay {
+.pdf-viewer .bboxOverlay {
   position: absolute;
   pointer-events: none;
   background: rgba(255, 226, 92, 0.55);
@@ -133,7 +140,7 @@
   display: none;
   box-shadow: 0 0 0 1px rgba(204, 150, 16, 0.55);
 }
-.pageLabel {
+.pdf-viewer .pageLabel {
   position: absolute; left: 10px; top: 10px;
   color: var(--faint); font-size: 11px;
   font-family: var(--mono);

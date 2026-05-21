@@ -18,7 +18,6 @@ export default defineConfig({
         "/ingest_pubmed": forward,
         "/health": forward,
         "/phenotypes": forward,
-        "^/papers/[^/]+/pdf$": forward,
       },
     },
   },

@@ -3,15 +3,15 @@
 Endpoints
 ---------
 POST /query                       NL question → ranked rows + markdown table + summary
-GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
 GET  /static/*                    Static mount (PDF.js assets, plots)
 POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-The PDF viewer itself is served by the Astro app at /viewer/<stem>/. This
-backend just streams the raw PDF bytes via /papers/<stem>/pdf, which the
-viewer page fetches client-side.
+The PDF viewer is served entirely by the Astro app at /viewer/<stem>/.
+The PDF bytes themselves come from web/public/pdfs/<stem>.pdf, vendored
+into the Astro build, so the static site has no runtime dependency on
+this backend for PDF rendering.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
@@ -415,33 +415,6 @@ def get_rank_predictors(
         paper_ref=paper_ref,
         population_contains=population_contains,
         top_k=top_k,
-    )
-
-
-def _safe_stem(stem: str) -> str:
-    if "/" in stem or ".." in stem or "\\" in stem:
-        raise HTTPException(400, "invalid file_stem")
-    return stem
-
-
-# ---------------------------------------------------------------------------
-# /papers/{file_stem}/pdf
-# ---------------------------------------------------------------------------
-
-
-@app.get("/papers/{file_stem}/pdf")
-def get_pdf(file_stem: str):
-    safe = _safe_stem(file_stem)
-    pdf_path = PAPERS_RAW / f"{safe}.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(404, f"PDF not found: {safe}.pdf")
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{safe}.pdf"',
-            "Cache-Control": "public, max-age=3600",
-        },
     )
 
 

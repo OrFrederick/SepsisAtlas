@@ -29,6 +29,14 @@ export class PdfController {
   private bboxPage: number | null;
   private bboxOrigin: "tl" | "bl";
 
+  // Generation counters for stale-concurrency guards.
+  // renderGen is bumped by rerenderAll(); renderPage bails after every await
+  // when its snapshot no longer matches.
+  // searchGen is bumped by search() and clearSearch(); the search loop bails
+  // after every await when its snapshot no longer matches.
+  private renderGen = 0;
+  private searchGen = 0;
+
   // Observers
   private renderObserver: IntersectionObserver | null = null;
   private visibilityObserver: IntersectionObserver | null = null;
@@ -180,15 +188,24 @@ export class PdfController {
   // ---- search ----
 
   async search(query: string): Promise<void> {
+    // Bump searchGen before any await so a concurrent call from a later
+    // keystroke (or clearSearch) invalidates this invocation after any
+    // suspension point. Snapshot gen for our own checks.
+    this.searchGen++;
+    const gen = this.searchGen;
+
     this.clearSearchOverlay();
     this.searchQuery = query.toLowerCase();
     this.searchActiveIdx = -1;
     if (!this.searchQuery) { this.publishSearch(); return; }
     this.emit({ type: "status", message: "searching…" });
     for (const entry of this.pages) {
+      if (this.searchGen !== gen) return;
       if (!entry.rendered) await this.renderPage(entry);
+      if (this.searchGen !== gen) return;
       this.rebuildSearchForPage(entry);
     }
+    if (this.searchGen !== gen) return;
     this.emit({ type: "status", message: "" });
     // Sort matches by page then position for stable navigation.
     this.searchMatches.sort((a, b) =>
@@ -201,6 +218,9 @@ export class PdfController {
   searchPrev(): void { this.gotoSearchHit(this.searchActiveIdx - 1); }
 
   clearSearch(): void {
+    // Bump searchGen so any in-flight search() loop sees a stale snapshot and
+    // returns without pushing into searchMatches.
+    this.searchGen++;
     this.clearSearchOverlay();
     this.searchQuery = "";
     this.searchActiveIdx = -1;
@@ -262,8 +282,16 @@ export class PdfController {
     if (entry.rendered) return;
     if (entry.rendering) return entry.rendering;
 
+    // Snapshot the generation counter before the first await. If rerenderAll()
+    // bumps renderGen while we are suspended, the checks below will detect it
+    // and bail without writing entry.rendered = true, leaving the page free for
+    // a fresh render at the new scale.
+    const gen = this.renderGen;
+
     entry.rendering = (async () => {
       const page = await this.pdfDoc!.getPage(entry.num);
+      if (this.renderGen !== gen) return;
+
       const viewport = page.getViewport({ scale: this.scale });
       const cssW = Math.floor(viewport.width);
       const cssH = Math.floor(viewport.height);
@@ -281,7 +309,11 @@ export class PdfController {
 
       const ctx = entry.canvas.getContext("2d", { alpha: false })!;
       const transform = this.DPR !== 1 ? [this.DPR, 0, 0, this.DPR, 0, 0] : null;
+
+      // Check again before starting the expensive GPU paint.
+      if (this.renderGen !== gen) return;
       await page.render({ canvasContext: ctx, viewport, transform: transform ?? undefined }).promise;
+      if (this.renderGen !== gen) return;
 
       entry.textLayer.replaceChildren();
       entry.searchLayer.replaceChildren();
@@ -291,6 +323,7 @@ export class PdfController {
         viewport,
       });
       await tl.render();
+      if (this.renderGen !== gen) return;
 
       entry.viewport = viewport;
       this.drawBbox(entry);
@@ -304,7 +337,14 @@ export class PdfController {
 
   private async rerenderAll(): Promise<void> {
     if (!this.pdfDoc) return;
+    // Bump the generation counter first. Any renderPage() call already suspended
+    // inside an await will see a stale gen on its next check and bail without
+    // setting entry.rendered = true, so the IntersectionObserver's fresh fire
+    // can start a new render at the updated scale.
+    this.renderGen++;
+    const gen = this.renderGen;
     for (const entry of this.pages) {
+      if (this.renderGen !== gen) return;
       const page = await this.pdfDoc.getPage(entry.num);
       const viewport = page.getViewport({ scale: this.scale });
       const cssW = Math.floor(viewport.width);

@@ -102,12 +102,15 @@ export class PdfController {
     }
 
     // Outer-window resize triggers fit-width unless the user has zoomed.
-    this.resizeListener = () => {
+    // Assign + register in the same statement so destroy() never sees an
+    // in-between state where the field is null but the listener is live.
+    const onResize = () => {
       if (!this.pdfDoc || this.userZoomLocked) return;
       clearTimeout(this.resizeTimer);
       this.resizeTimer = window.setTimeout(() => this.fitWidth(), 120);
     };
-    window.addEventListener("resize", this.resizeListener);
+    this.resizeListener = onResize;
+    window.addEventListener("resize", onResize);
 
     // Flush any jump that arrived from the parent before init finished.
     if (this.pendingJump) {
@@ -315,6 +318,11 @@ export class PdfController {
       entry.searchLayer.style.width = `${cssW}px`;
       entry.searchLayer.style.height = `${cssH}px`;
       entry.rendered = false;
+      // Clear the in-flight render reference too — otherwise a render started
+      // before the zoom will still be reachable through `entry.rendering`, and
+      // a fresh renderPage() call would join it and complete at the OLD
+      // scale, locking the page at stale geometry until another rerender.
+      entry.rendering = null;
     }
     if (this.renderObserver) {
       for (const entry of this.pages) {
@@ -435,6 +443,12 @@ export class PdfController {
       });
       this.searchMatches.push({ page: entry.num, startSpanIdx: m.startSpanIdx, startOffset: m.startOffset, divs });
     }
+    // The global match array has been mutated in place; the previous
+    // `searchActiveIdx` no longer reliably points at the same hit. Reset
+    // it so the next Enter cycles to the first match, and republish so
+    // the toolbar updates the count.
+    this.searchActiveIdx = -1;
+    this.publishSearch();
   }
 
   private gotoSearchHit(idx: number): void {

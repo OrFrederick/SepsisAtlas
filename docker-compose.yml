@@ -17,16 +17,12 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: sepsis_backend
     env_file:
       - .env
     environment:
       - DATABASE_URL=sqlite:////app/db.sqlite
       - PYTHONPATH=/app/src
       - DISABLE_SEMANTIC_RERANK=1   # keyword fallback; flip off when HF model is pre-warmed
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=sepsisatlas
     volumes:
       - ./data:/app/data
       - ./db.sqlite:/app/db.sqlite
@@ -38,42 +34,12 @@ services:
       - "8000:8000"
     restart: unless-stopped
     networks: [sepsis]
-    depends_on:
-      neo4j:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
       timeout: 3s
       retries: 5
 
-  # KG store. The /query_kg agent loop reads from here; structure + predictor
-  # extraction (run_kg_extract) writes to here.
-  neo4j:
-    image: neo4j:5.26-community
-    container_name: sepsis_neo4j
-    environment:
-      - NEO4J_AUTH=neo4j/sepsisatlas
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_memory_heap_initial__size=512m
-      - NEO4J_dbms_memory_heap_max__size=1G
-    ports:
-      - "7687:7687"
-      - "7474:7474"
-    volumes:
-      - neo4j_data:/data
-    networks: [sepsis]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
 networks:
   sepsis:
     driver: bridge
-
-volumes:
-  neo4j_data:

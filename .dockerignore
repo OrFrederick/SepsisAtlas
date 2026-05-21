@@ -1,0 +1,39 @@
+# Keep the build context small. The Dockerfile only needs pyproject.toml + src/.
+.git
+.github
+.claude
+.venv
+venv
+**/__pycache__
+**/*.pyc
+*.egg-info
+.pytest_cache
+.idea
+.vscode
+
+# Frontend — built separately on the VPS, not in the backend image
+web/node_modules
+web/dist
+
+# Runtime state / data — never goes into the image
+data
+runs
+logs
+static/plots
+static/bbox_proof
+db.sqlite
+db.sqlite-journal
+db.sqlite-wal
+db.sqlite-shm
+
+# Local env files — secrets shouldn't bake into the image
+.env
+.env.*
+!.env.example
+
+# Docs and misc
+docs
+deploy
+.playwright-mcp
+*.log
+viewer-*.png

@@ -1,0 +1,52 @@
+# Sepsis Atlas — atlas.efferon.com
+#
+# Path matchers below mirror src/api/main.py exactly. They are tight on
+# purpose — trailing `*` was hijacking sibling Astro pages (/papers/index
+# was being routed to the backend instead of being served as a static SPA).
+# Any new FastAPI route must be added here as well.
+
+{
+	email ops@efferon.com
+}
+
+atlas.efferon.com {
+	encode zstd gzip
+	root * /var/www/atlas-main
+
+	# Server-side directives that shouldn't live in the public repo
+	# (basic-auth credential hash, IP allow-lists, etc.). Empty dir = no-op.
+	import /etc/caddy/conf.d/*.caddy
+
+	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py.
+	@api {
+		path /query
+		path /rank_predictors
+		path /viewer/*
+		path /papers/*/pdf
+		path /ingest_pubmed
+		path /health
+		path /health/cost
+		path /phenotypes
+		path /phenotypes/*
+		path /static/*
+	}
+	handle @api {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# Static SPA fallback for everything else (including /papers/<stem>,
+	# /graph, /rank Astro pages — Astro emits these as <route>/index.html,
+	# so try_files probes the directory's index before falling back to the
+	# root SPA shell. Without {path}/index.html every subroute was 200ing
+	# with the homepage instead of its own page. /viewer/<stem> is
+	# currently shadowed by the backend matcher above, kept that way
+	# pending a separate decision about which viewer is canonical.
+	handle {
+		try_files {path} {path}/index.html /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/atlas.efferon.com.access.log
+	}
+}

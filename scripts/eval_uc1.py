@@ -1,7 +1,7 @@
 """Quick UC1-scoped evaluation against ground truth.
 
-Scores only what UC1 in discord-exports/TASK.md requires:
-  predictor, outcome, timing, method, effect-size (label-aware), performance, anchor.
+Scores only UC1 fields: predictor, outcome, timing, method,
+effect-size (label-aware), performance, anchor.
 
 NOT a replacement for scripts/validate.py. Diagnostic only.
 """

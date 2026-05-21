@@ -1,15 +1,24 @@
 # Production override.
 #
 # Applied with:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d
 #
 # Differences from dev compose:
-#   - Backend bound to loopback only (Caddy on the host proxies in front)
-#   - Dev source-code volume mount is replaced with the prod set (no hot reload)
+#   - Backend is pulled from ghcr.io (built by .github/workflows/deploy.yml),
+#     never built on the host. The local `build:` directive is reset.
+#   - Backend bound to loopback only (Caddy proxies in front)
+#   - Source-code volume mount dropped (no hot reload in prod)
 #   - Neo4j has no published ports (only reachable inside the compose network)
+#   - Watchtower watches the backend container and pulls/restarts whenever a
+#     new image tag appears in ghcr.
 
 services:
   backend:
+    build: !reset null
+    image: ghcr.io/orfrederick/sepsis-atlas-backend:main
+    pull_policy: missing
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     volumes: !override
       - ./data:/app/data
       - ./db.sqlite:/app/db.sqlite
@@ -21,3 +30,17 @@ services:
 
   neo4j:
     ports: !override []
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: atlas-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"   # only update containers with the label above
+      WATCHTOWER_CLEANUP: "true"        # delete old images after upgrade
+      WATCHTOWER_POLL_INTERVAL: "300"   # 5 minutes
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+    networks: [sepsis]

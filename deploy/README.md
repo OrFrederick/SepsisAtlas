@@ -7,9 +7,52 @@ Production target: `atlas.efferon.com` (DigitalOcean droplet, Ubuntu 24.04).
 | Component         | Where                                  | Port           |
 | ----------------- | -------------------------------------- | -------------- |
 | Caddy             | host, systemd unit `caddy.service`     | 80, 443        |
-| Backend           | docker compose project `atlas-main`    | 127.0.0.1:8000 |
+| Backend           | docker compose project `atlas-main`, image pulled from ghcr | 127.0.0.1:8000 |
 | Neo4j             | docker compose project `atlas-main`    | internal only  |
+| Watchtower        | docker compose project `atlas-main`    | internal only  |
 | Astro static SPA  | /var/www/atlas-main (served by Caddy)  | n/a            |
+
+## Build / deploy flow
+
+`.github/workflows/deploy.yml` runs on every push to main (except docs-only):
+
+```
+push to main
+   │
+   ├─ job: changes        detect whether src/, Dockerfile, pyproject, or .dockerignore changed
+   │
+   ├─ job: build-backend  (only if backend changed, or workflow_dispatch)
+   │     └─ docker build --push  →  ghcr.io/orfrederick/sepsis-atlas-backend:main + :<sha>
+   │
+   └─ job: deploy         (waits for build-backend; skips it if not needed)
+         └─ ssh deploy@vps  →  deploy-main.sh
+                ├─ git fetch + reset --hard origin/main
+                ├─ bun install + build web  →  rsync /var/www/atlas-main
+                ├─ docker compose up -d   (pulls backend image if missing; idempotent otherwise)
+                └─ caddy reload
+```
+
+Independently, **Watchtower** runs on the VPS as a compose sidecar. It polls
+ghcr every 5 minutes and, when `:main` advances, pulls the new image and
+restarts `atlas-main-backend-1`. This is what makes "backend code lands on
+main → VPS picks it up" automatic — the SSH deploy step itself only pulls
+the image when missing, so it doesn't race with the build.
+
+Backend image is **never built on the VPS**. Frontend is built on the VPS
+(bun build is ~13s; not worth the registry round-trip).
+
+### First-time bootstrap (after merging the PR that adds this workflow)
+
+The first run needs the image to exist before compose can `up` the new
+backend service definition. Trigger the build once manually:
+
+```
+gh workflow run "deploy main" -R OrFrederick/SepsisAtlas
+```
+
+(`workflow_dispatch` forces the build-backend job to run even if no backend
+files changed in the latest commit.) After that, every push to main runs
+the full chain automatically.
 
 ## Initial bootstrap (one-shot, fresh server)
 
@@ -44,6 +87,15 @@ ssh deploy@<host> 'cd /opt/sepsisatlas/main && docker compose -f docker-compose.
 ```bash
 ssh deploy@<host> bash -c 'cd /opt/sepsisatlas/main && git fetch && git reset --hard <good-sha> && deploy/deploy-main.sh'
 ```
+
+## GHCR package visibility
+
+After the first run of `build-backend.yml`, the `sepsis-atlas-backend` package
+appears under `https://github.com/users/orfrederick/packages`. By default it
+inherits the repo's visibility (public). If you ever flip the repo private,
+either set the package to public manually or `docker login ghcr.io` on the
+VPS with a PAT that has `read:packages` (Watchtower picks up creds from
+`/root/.docker/config.json`, which is bind-mounted into the container).
 
 ## GitHub Actions deploy
 

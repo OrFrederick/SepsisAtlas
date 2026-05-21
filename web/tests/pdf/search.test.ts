@@ -37,7 +37,16 @@ describe("findMatches", () => {
     const spans = [mockSpan("foo"), mockSpan("bar")];
     const matches = findMatches(buildPageIndex(spans), "foo bar");
     expect(matches).toHaveLength(1);
-    expect(matches[0].startSpanIdx).toBe(0);
+    // The cross-boundary match must report the full span range + offsets so
+    // computeMatchRects can paint the highlight over both spans, not just
+    // the first. Without these asserts a regression that drops `endSpanIdx`
+    // would silently under-highlight.
+    expect(matches[0]).toMatchObject({
+      startSpanIdx: 0,
+      startOffset: 0,
+      endSpanIdx: 1,
+      endOffset: 3,
+    });
   });
 });
 

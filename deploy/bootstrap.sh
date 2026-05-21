@@ -30,7 +30,7 @@ EOF
 
 harden_ssh() {
   cat >/etc/ssh/sshd_config.d/99-hardening.conf <<'EOF'
-PermitRootLogin no
+PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 ChallengeResponseAuthentication no
@@ -43,8 +43,6 @@ ClientAliveCountMax 2
 EOF
   sshd -t
   systemctl reload ssh
-  # Revoke direct root SSH by emptying root's authorized_keys.
-  : >/root/.ssh/authorized_keys
 }
 
 setup_firewall() {

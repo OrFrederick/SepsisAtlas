@@ -17,7 +17,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: sepsis_backend
     env_file:
       - .env
     environment:

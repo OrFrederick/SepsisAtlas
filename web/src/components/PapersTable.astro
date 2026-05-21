@@ -19,7 +19,6 @@ const b = base.endsWith("/") ? base : base + "/";
       <th data-key="weak" data-type="num">~ weak</th>
       <th data-key="fail" data-type="num">✗ fail</th>
       <th data-key="parsed" data-type="bool">Parsed</th>
-      <th data-key="translated" data-type="bool">Translated</th>
       <th data-key="last_update" data-type="str" class="sort-desc">Last update</th>
     </tr>
   </thead>
@@ -36,7 +35,6 @@ const b = base.endsWith("/") ? base : base + "/";
           <td class="col-weak">{p.verdicts?.weak ?? 0}</td>
           <td class="col-fail">{p.verdicts?.fail ?? 0}</td>
           <td class={`col-flag ${p.parsed ? "yes" : "no"}`}>{p.parsed ? "yes" : "no"}</td>
-          <td class={`col-flag ${p.translated ? "yes" : "no"}`}>{p.translated ? "yes" : "no"}</td>
           <td>{p.last_update || ""}</td>
         </tr>
       );

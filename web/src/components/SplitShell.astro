@@ -138,6 +138,9 @@
     function show(href: string) {
       const parsed = parseViewerHref(href);
       if (parsed && currentStem === parsed.stem && iframe!.contentWindow) {
+        // Target the iframe's same-origin viewer page explicitly. The viewer
+        // is always served by the Astro app at this origin, so anything else
+        // is either a misconfiguration or an attempt to spoof — drop it.
         iframe!.contentWindow.postMessage(
           {
             type: "sepsis-atlas:jump",
@@ -145,7 +148,7 @@
             bbox: parsed.bbox,
             origin: parsed.origin,
           },
-          "*",
+          window.location.origin,
         );
         return;
       }
@@ -164,7 +167,7 @@
       restored = true;
     } else {
       try {
-        const last = localStorage.getItem("atlas_last_viewer_url");
+        const last = localStorage.getItem("sepsis_atlas.last_viewer_url.v1");
         if (last) {
           show(last);
           restored = true;
@@ -193,7 +196,7 @@
       if (!href) return;
       show(href);
       try {
-        localStorage.setItem("atlas_last_viewer_url", href);
+        localStorage.setItem("sepsis_atlas.last_viewer_url.v1", href);
       } catch (_) {
         // ignore quota/permission errors
       }

@@ -34,10 +34,12 @@ const fakeResponse = {
   ],
 };
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+type FetchSpy = ReturnType<typeof vi.spyOn<typeof globalThis, "fetch">>;
+let fetchSpy: FetchSpy;
 
 beforeEach(() => {
-  fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+  fetchSpy = vi.spyOn(globalThis, "fetch") as unknown as FetchSpy;
+  fetchSpy.mockResolvedValue(
     new Response(JSON.stringify(fakeResponse), { status: 200 }),
   );
 });

@@ -242,8 +242,10 @@ table.papers th {
 }
 table.papers th.sort-asc::after  { content: " ▲"; color: var(--accent); }
 table.papers th.sort-desc::after { content: " ▼"; color: var(--accent); }
-table.papers tbody tr { cursor: pointer; transition: background 120ms ease; }
+table.papers tbody tr { transition: background 120ms ease; }
 table.papers tbody tr:hover { background: var(--panel-2); }
+table.papers tbody td a { color: inherit; text-decoration: none; }
+table.papers tbody td a:hover { text-decoration: underline; }
 .col-ok   { color: var(--ok);   font-feature-settings: "tnum"; }
 .col-weak { color: var(--warn); font-feature-settings: "tnum"; }
 .col-fail { color: var(--fail); font-feature-settings: "tnum"; }

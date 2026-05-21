@@ -21,7 +21,7 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,20 +64,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def relax_iframe_headers(request: Request, call_next):
-    """Permissive frame headers so the SPA's PDF iframe can embed Astro pages.
-
-    No X-Frame-Options; CSP frame-ancestors '*'.
-    """
-    response = await call_next(request)
-    # Strip default deny if any upstream set it (Starlette MutableHeaders has no .pop).
-    if "x-frame-options" in response.headers:
-        del response.headers["x-frame-options"]
-    response.headers["Content-Security-Policy"] = "frame-ancestors *;"
-    return response
 
 
 # Static mount: /static/pdfjs (PDF.js bundle), /static/plots (rendered forest plots).

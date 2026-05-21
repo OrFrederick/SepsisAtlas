@@ -14,6 +14,7 @@ const EMPTY_SEARCH: SearchSnapshot = { query: "", total: 0, activeIdx: -1 };
 export default function PdfViewer({ stem, basePath }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<PdfController | null>(null);
+  const pageInputFocusedRef = useRef(false);
 
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -45,7 +46,9 @@ export default function PdfViewer({ stem, basePath }: Props) {
           case "ready": setNumPages(e.numPages); break;
           case "pageChange":
             setCurrentPage(e.page);
-            setPageInputValue(String(e.page));
+            // Don't overwrite the input value while the user is typing in it;
+            // commitPageInput / blur will reconcile when they're done.
+            if (!pageInputFocusedRef.current) setPageInputValue(String(e.page));
             break;
           case "scaleChange": setScalePercent(e.scalePercent); break;
           case "status": setStatus(e.message); break;
@@ -58,8 +61,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
     let cancelled = false;
     (async () => {
       const pdfjsLib = await import(/* @vite-ignore */ `${basePath}pdfjs/build/pdf.min.mjs`);
+      if (cancelled) return;
       pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}pdfjs/build/pdf.worker.min.mjs`;
-      if (!cancelled) await controller.init(pdfjsLib);
+      await controller.init(pdfjsLib);
+      if (cancelled) return;
       // Tell the parent shell we're ready (back-compat with SplitShell).
       try {
         window.parent.postMessage(
@@ -128,8 +133,8 @@ export default function PdfViewer({ stem, basePath }: Props) {
             if (e.key === "Enter") { e.preventDefault(); commitPageInput(); e.currentTarget.blur(); }
             else if (e.key === "Escape") { setPageInputValue(String(currentPage)); e.currentTarget.blur(); }
           }}
-          onBlur={commitPageInput}
-          onFocus={(e) => e.target.select()}
+          onBlur={() => { pageInputFocusedRef.current = false; commitPageInput(); }}
+          onFocus={(e) => { pageInputFocusedRef.current = true; e.target.select(); }}
           title="Type a page number, Enter to jump"
         />
         <span className="pdf-viewer__page-total">/ {numPages || "—"}</span>

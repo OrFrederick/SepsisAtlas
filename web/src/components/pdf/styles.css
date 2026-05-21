@@ -1,0 +1,138 @@
+/* web/src/components/pdf/styles.css */
+.pdf-viewer {
+  --bg: #FAFAF7;
+  --panel: #FFFFFF;
+  --panel-2: #F4F1EA;
+  --panel-3: #EFEAE0;
+  --border: #DDD7C7;
+  --border-strong: #BCB39C;
+  --fg: #1A1614;
+  --fg-soft: #403A33;
+  --muted: #6B6258;
+  --faint: #8E8576;
+  --accent: #0F4C5C;
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--panel-3);
+  color: var(--fg);
+}
+.pdf-viewer__toolbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; gap: 6px; align-items: center;
+  padding: 5px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  height: 36px;
+  box-sizing: border-box;
+}
+.pdf-viewer__toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
+.pdf-viewer__toolbar button {
+  background: var(--panel); color: var(--fg-soft);
+  border: 1px solid var(--border);
+  padding: 2px 9px; border-radius: 3px; cursor: pointer;
+  font: inherit; font-size: 12px; line-height: 1.4;
+  white-space: nowrap; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.pdf-viewer__toolbar button:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.pdf-viewer__toolbar button:disabled { opacity: 0.4; cursor: default; }
+.pdf-viewer__toolbar input {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 2px 6px; border-radius: 3px;
+  font: inherit; font-size: 12px; line-height: 1.4;
+  box-sizing: border-box; height: 24px;
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+}
+.pdf-viewer__toolbar input:focus { outline: none; border-color: var(--accent); }
+.pdf-viewer__page-input { width: 44px; text-align: center; }
+.pdf-viewer__page-total {
+  color: var(--muted);
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.pdf-viewer__zoom-info {
+  color: var(--muted); min-width: 44px; text-align: center;
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.pdf-viewer__search { width: 170px; min-width: 110px; flex-shrink: 1; }
+.pdf-viewer__search-info {
+  color: var(--muted); min-width: 36px; text-align: right;
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.pdf-viewer__filename {
+  color: var(--muted); margin-left: auto;
+  font-family: var(--mono); font-size: 12px;
+  flex-shrink: 0;
+}
+.pdf-viewer__status { color: var(--muted); font-style: italic; flex-shrink: 0; }
+.pdf-viewer__stage {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 28px 16px 80px;
+  gap: 22px;
+  background: var(--panel-3);
+  overflow-y: auto;
+}
+.pageWrap {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
+}
+.pdfCanvas { position: absolute; left: 0; top: 0; }
+.textLayer {
+  position: absolute; left: 0; top: 0;
+  overflow: hidden;
+  line-height: 1.0;
+  user-select: text;
+  forced-color-adjust: none;
+}
+.textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
+.textLayer span, .textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.searchLayer {
+  position: absolute; left: 0; top: 0;
+  pointer-events: none;
+}
+.searchLayer .searchHit {
+  position: absolute;
+  background: rgba(255, 226, 92, 0.55);
+  border-radius: 1px;
+  mix-blend-mode: multiply;
+}
+.searchLayer .searchHit.searchHitActive {
+  background: rgba(255, 180, 30, 0.85);
+  box-shadow: 0 0 0 1px rgba(204, 110, 16, 0.7);
+}
+.bboxOverlay {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(255, 226, 92, 0.55);
+  mix-blend-mode: multiply;
+  border-radius: 1px;
+  display: none;
+  box-shadow: 0 0 0 1px rgba(204, 150, 16, 0.55);
+}
+.pageLabel {
+  position: absolute; left: 10px; top: 10px;
+  color: var(--faint); font-size: 11px;
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  pointer-events: none;
+}

@@ -287,6 +287,11 @@ export default function ChatShell() {
     const parsed = parseViewerHref(url);
     const sameStem = parsed && currentStemRef.current === parsed.stem;
     if (sameStem && viewerIframeRef.current?.contentWindow) {
+      // Target the iframe's same-origin viewer page explicitly. The viewer
+      // is served by the same Astro app, so cross-origin posts here are
+      // either a misconfiguration or an attempt to spoof — drop them by
+      // pinning the targetOrigin.
+      const targetOrigin = BACKEND_URL || window.location.origin;
       viewerIframeRef.current.contentWindow.postMessage(
         {
           type: "sepsis-atlas:jump",
@@ -294,7 +299,7 @@ export default function ChatShell() {
           bbox: parsed!.bbox,
           origin: parsed!.origin,
         },
-        "*",
+        targetOrigin,
       );
       saveViewerUrl(url);
       return;

@@ -66,6 +66,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
       await controller.init(pdfjsLib);
       if (cancelled) return;
       // Tell the parent shell we're ready (back-compat with SplitShell).
+      // We can't know the parent's origin a priori (this iframe could be
+      // embedded anywhere), but the only payload we send is "viewer-ready"
+      // with a non-sensitive paper stem, so a permissive targetOrigin is
+      // acceptable here.
       try {
         window.parent.postMessage(
           { type: "sepsis-atlas:viewer-ready", file: stem, page: initialPage },
@@ -84,6 +88,13 @@ export default function PdfViewer({ stem, basePath }: Props) {
   // ---- listen for parent jump messages ----
   useEffect(() => {
     function onMessage(e: MessageEvent) {
+      // Only accept jump messages from the parent frame at our own origin.
+      // The viewer is always loaded as an iframe inside the Astro app, so
+      // anything else is either a misconfiguration or a third party
+      // attempting to drive the viewer (e.g. an unrelated site embedding
+      // /viewer/<stem>/). Drop both.
+      if (e.origin !== window.location.origin) return;
+      if (e.source !== window.parent) return;
       const data = e.data as { type?: string; page?: number; bbox?: number[] | string | null; origin?: string };
       if (!data || data.type !== "sepsis-atlas:jump") return;
       const c = controllerRef.current;

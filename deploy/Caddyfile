@@ -1,0 +1,43 @@
+# Sepsis Atlas — main site + per-PR previews
+#
+# Layout:
+#   atlas.efferon.com         → static Astro build at /var/www/atlas-main,
+#                               API paths reverse-proxied to 127.0.0.1:8000
+#   pr-<N>.atlas.efferon.com  → per-PR snippets in /etc/caddy/Caddyfile.d/pr-<N>.caddy
+#                               (each PR runs its own compose stack on a unique
+#                               loopback port, computed by deploy-pr.sh)
+#
+# TLS: automatic Let's Encrypt via HTTP-01. The main hostname always has a
+# cert. Per-PR snippets register their own hostname on reload, so Caddy
+# issues a cert when each PR is deployed. Wildcard DNS (*.atlas.efferon.com)
+# must resolve to this host for HTTP-01 to succeed on PR subdomains.
+
+{
+	email ops@efferon.com
+}
+
+# --- main site -------------------------------------------------------------
+atlas.efferon.com {
+	encode zstd gzip
+	root * /var/www/atlas-main
+
+	# API surface — every path that src/api/main.py serves. Keep this list in
+	# sync with the PR snippet template in deploy/render-caddy-snippet.sh.
+	@api path /query* /viewer/* /papers/* /static/* /health* /phenotypes* /rank_predictors* /ingest_pubmed /query_kg* /kg*
+	handle @api {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# Static SPA fallback for everything else
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/atlas.efferon.com.access.log
+	}
+}
+
+# Per-PR sites: each PR drops a file in this dir; reloads pick them up.
+import /etc/caddy/Caddyfile.d/*.caddy

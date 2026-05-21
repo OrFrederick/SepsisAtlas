@@ -1,17 +1,17 @@
-"""FastAPI app: headless query API + PDF.js viewer for the Astro frontend.
+"""FastAPI app: headless query API for the Astro frontend.
 
 Endpoints
 ---------
 POST /query                       NL question → ranked rows + markdown table + summary
-GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-side
 GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
-GET  /static/*                    Static mount (PDF.js bundle, viewer.html assets)
+GET  /static/*                    Static mount (PDF.js assets, plots)
 POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-The Astro app iframes `/viewer/<stem>` for source previews, so we keep the
-permissive frame headers below.
+The PDF viewer itself is served by the Astro app at /viewer/<stem>/. This
+backend just streams the raw PDF bytes via /papers/<stem>/pdf, which the
+viewer page fetches client-side.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
@@ -68,7 +68,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def relax_iframe_headers(request: Request, call_next):
-    """Permissive frame headers so the SPA's PDF iframe can embed /viewer/*.
+    """Permissive frame headers so the SPA's PDF iframe can embed Astro pages.
 
     No X-Frame-Options; CSP frame-ancestors '*'.
     """
@@ -415,32 +415,6 @@ def get_rank_predictors(
         paper_ref=paper_ref,
         population_contains=population_contains,
         top_k=top_k,
-    )
-
-
-# ---------------------------------------------------------------------------
-# /viewer
-# ---------------------------------------------------------------------------
-
-
-@app.get("/viewer/{file_stem}")
-def viewer(file_stem: str):
-    """Serve the static PDF.js viewer page.
-
-    Query params (read client-side): page, bbox=x0,y0,x1,y1.
-    The page itself fetches /papers/{file_stem}/pdf to load the PDF.
-    """
-    safe = _safe_stem(file_stem)
-    viewer_path = STATIC_DIR / "viewer.html"
-    if not viewer_path.exists():
-        raise HTTPException(500, "viewer.html missing")
-    html = viewer_path.read_text(encoding="utf-8")
-    # Inject the file_stem so client knows which PDF to fetch.
-    html = html.replace("__FILE_STEM__", safe)
-    return Response(
-        content=html,
-        media_type="text/html",
-        headers={"Content-Security-Policy": "frame-ancestors *;"},
     )
 
 

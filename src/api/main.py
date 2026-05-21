@@ -80,7 +80,7 @@ async def relax_iframe_headers(request: Request, call_next):
     return response
 
 
-# Static mount: /static/pdfjs, /static/plots, /static/viewer.html
+# Static mount: /static/pdfjs (PDF.js bundle), /static/plots (rendered forest plots).
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "plots").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -37,11 +37,14 @@ atlas.efferon.com {
 	}
 
 	# Static SPA fallback for everything else (including /papers/<stem>,
-	# /graph, /rank, /viewer/<stem> Astro pages — note the Astro /viewer
-	# route is currently shadowed by the backend matcher above, kept that
-	# way pending a separate decision about which viewer is canonical).
+	# /graph, /rank Astro pages — Astro emits these as <route>/index.html,
+	# so try_files probes the directory's index before falling back to the
+	# root SPA shell. Without {path}/index.html every subroute was 200ing
+	# with the homepage instead of its own page. /viewer/<stem> is
+	# currently shadowed by the backend matcher above, kept that way
+	# pending a separate decision about which viewer is canonical.
 	handle {
-		try_files {path} /index.html
+		try_files {path} {path}/index.html /index.html
 		file_server
 	}
 

@@ -141,6 +141,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
   transform: translateY(-1px);
   box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(0,0,0,0.04);
 }
+.card.active {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
 
 .card-head {
   display: flex; justify-content: space-between; gap: 12px;

@@ -378,12 +378,17 @@ export class PdfController {
         this.scrollToPage(this.bboxPage!, behavior);
         return;
       }
-      const scroller = document.scrollingElement || document.documentElement;
+      // The scrollable ancestor is the stage container (overflow-y: auto),
+      // not the document — the viewer page itself is fixed-height. Measure
+      // the wrap's offset within the stage and scroll the stage so the
+      // overlay lands roughly in the middle of the stage's viewport.
+      const scroller = this.stage;
       const wrapRect = entry.wrap.getBoundingClientRect();
+      const stageRect = scroller.getBoundingClientRect();
       const overlayTop = parseFloat(overlay.style.top) || 0;
       const overlayHeight = parseFloat(overlay.style.height) || 0;
-      const targetY = scroller.scrollTop + wrapRect.top + overlayTop
-                      - window.innerHeight / 2 + overlayHeight / 2;
+      const targetY = scroller.scrollTop + (wrapRect.top - stageRect.top) + overlayTop
+                      - stageRect.height / 2 + overlayHeight / 2;
       scroller.scrollTo({ top: Math.max(0, targetY), behavior });
     });
   }

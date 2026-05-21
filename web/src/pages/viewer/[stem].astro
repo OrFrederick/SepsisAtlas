@@ -1,5 +1,10 @@
 ---
-import Base from "../../layouts/Base.astro";
+/**
+ * Bare-bones HTML host for the React PDF viewer island. Intentionally
+ * skips the site-wide Base layout (header + nav) because this page is
+ * almost always loaded inside an iframe by the parent shells (chat,
+ * papers), where a second copy of the top bar is noise.
+ */
 import PdfViewer from "../../components/PdfViewer.astro";
 import type { Paper } from "../../lib/types";
 import { readFileSync } from "node:fs";
@@ -20,6 +25,17 @@ export async function getStaticPaths() {
 
 const { stem } = Astro.params;
 ---
-<Base title={`Sepsis Atlas — ${stem}`} route="viewer">
-  <PdfViewer stem={stem!} />
-</Base>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{stem} — PDF</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <PdfViewer stem={stem!} />
+  </body>
+</html>

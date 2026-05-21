@@ -89,6 +89,10 @@
   background: #fff;
   border: 1px solid var(--border);
   box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
+  /* The stage is a flex column; without flex-shrink: 0 the inline height set
+     by the controller (e.g. 1220px) collapses to ~30px because flex items
+     shrink to fit the cross axis by default. */
+  flex-shrink: 0;
 }
 .pdfCanvas { position: absolute; left: 0; top: 0; }
 .textLayer {

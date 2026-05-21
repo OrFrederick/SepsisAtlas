@@ -22,10 +22,6 @@ dependencies = [
     "tenacity>=8.5.0",
     "rich>=13.7.0",
     "sentence-transformers>=3.0.0",
-    "neo4j>=5.20.0",
-    "langchain>=0.3.0",
-    "langchain-openai>=0.2.0",
-    "langgraph>=0.2.0",
 ]
 
 [project.optional-dependencies]

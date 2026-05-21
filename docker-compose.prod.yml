@@ -8,7 +8,6 @@
 #     never built on the host. The local `build:` directive is reset.
 #   - Backend bound to loopback only (Caddy proxies in front)
 #   - Source-code volume mount dropped (no hot reload in prod)
-#   - Neo4j has no published ports (only reachable inside the compose network)
 #   - Watchtower watches the backend container and pulls/restarts whenever a
 #     new image tag appears in ghcr.
 
@@ -30,9 +29,6 @@ services:
       - ./logs:/app/logs
     ports: !override
       - "127.0.0.1:8000:8000"
-
-  neo4j:
-    ports: !override []
 
   watchtower:
     image: containrrr/watchtower:latest

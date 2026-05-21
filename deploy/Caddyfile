@@ -20,8 +20,6 @@ atlas.efferon.com {
 	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py.
 	@api {
 		path /query
-		path /query_kg
-		path /kg/*
 		path /rank_predictors
 		path /viewer/*
 		path /papers/*/pdf

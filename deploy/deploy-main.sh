@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-REPO_URL="git@github.com:OrFrederick/SepsisAtlas.git"
+REPO_URL="https://github.com/OrFrederick/SepsisAtlas.git"
 WORK_DIR="/opt/sepsisatlas/main"
 WEB_OUT="/var/www/atlas-main"
 PROJECT="atlas-main"

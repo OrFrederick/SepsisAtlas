@@ -10,7 +10,7 @@ set -euo pipefail
 PR="${1:?pr number}"
 SHA="${2:?git sha}"
 
-REPO_URL="git@github.com:OrFrederick/SepsisAtlas.git"
+REPO_URL="https://github.com/OrFrederick/SepsisAtlas.git"
 WORK_DIR="/opt/sepsisatlas/pr-$PR"
 WEB_OUT="/var/www/atlas-pr-$PR"
 PROJECT="atlas-pr-$PR"

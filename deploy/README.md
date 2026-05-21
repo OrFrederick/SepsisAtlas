@@ -69,9 +69,10 @@ Workflows SSH to the server as `deploy@<host>` with a key stored in repo secrets
 Generate with `ssh-keygen -t ed25519 -f atlas-deploy -N ''`, install the `.pub`
 on the server, push the private key into the GitHub secret.
 
-The server also needs a read-only **GitHub deploy key** (in `~deploy/.ssh/id_ed25519`)
-so it can `git clone` the repo. Generate it on the server, install the `.pub`
-half via `gh repo deploy-key add`.
+The repo is public, so the server clones over HTTPS with no auth — no deploy
+key required. If the repo ever goes private, generate a deploy key on the server
+(`ssh-keygen -t ed25519 -f ~deploy/.ssh/id_ed25519 -N ''`) and install the
+public half via `gh repo deploy-key add` (requires admin on the repo).
 
 ## Common failures
 

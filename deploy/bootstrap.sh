@@ -138,7 +138,7 @@ set_hostname_and_tz() {
 main() {
   require_root
   apt-get update
-  apt-get install -y git curl ca-certificates gnupg lsb-release rsync
+  apt-get install -y git curl ca-certificates gnupg lsb-release rsync unzip
   create_deploy_user
   setup_firewall
   setup_fail2ban

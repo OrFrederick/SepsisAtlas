@@ -17,7 +17,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: sepsis_backend
     env_file:
       - .env
     environment:
@@ -51,7 +50,6 @@ services:
   # extraction (run_kg_extract) writes to here.
   neo4j:
     image: neo4j:5.26-community
-    container_name: sepsis_neo4j
     environment:
       - NEO4J_AUTH=neo4j/sepsisatlas
       - NEO4J_PLUGINS=["apoc"]

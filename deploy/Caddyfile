@@ -1,10 +1,9 @@
 # Sepsis Atlas — atlas.efferon.com
 #
-# Single site:
-#   /             → static Astro build at /var/www/atlas-main
-#   /query, /viewer/*, /papers/*, /static/*, /health*, /phenotypes,
-#   /rank_predictors, /ingest_pubmed, /query_kg*, /kg*
-#                 → reverse-proxied to FastAPI at 127.0.0.1:8000
+# Path matchers below mirror src/api/main.py exactly. They are tight on
+# purpose — trailing `*` was hijacking sibling Astro pages (/papers/index
+# was being routed to the backend instead of being served as a static SPA).
+# Any new FastAPI route must be added here as well.
 
 {
 	email ops@efferon.com
@@ -15,17 +14,32 @@ atlas.efferon.com {
 	root * /var/www/atlas-main
 
 	# Server-side directives that shouldn't live in the public repo
-	# (basic-auth credential hash, IP allow-lists, etc.). Glob import is
-	# a no-op when the directory is empty.
+	# (basic-auth credential hash, IP allow-lists, etc.). Empty dir = no-op.
 	import /etc/caddy/conf.d/*.caddy
 
-	# API surface — keep in sync with src/api/main.py.
-	@api path /query* /viewer/* /papers/* /static/* /health* /phenotypes* /rank_predictors* /ingest_pubmed /query_kg* /kg*
+	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py.
+	@api {
+		path /query
+		path /query_kg
+		path /kg/*
+		path /rank_predictors
+		path /viewer/*
+		path /papers/*/pdf
+		path /ingest_pubmed
+		path /health
+		path /health/cost
+		path /phenotypes
+		path /phenotypes/*
+		path /static/*
+	}
 	handle @api {
 		reverse_proxy 127.0.0.1:8000
 	}
 
-	# Static SPA fallback for everything else.
+	# Static SPA fallback for everything else (including /papers/<stem>,
+	# /graph, /rank, /viewer/<stem> Astro pages — note the Astro /viewer
+	# route is currently shadowed by the backend matcher above, kept that
+	# way pending a separate decision about which viewer is canonical).
 	handle {
 		try_files {path} /index.html
 		file_server

@@ -1,5 +1,16 @@
 # SepsisAtlas Production Deployment Plan
 
+> **HISTORICAL — partially superseded.** This plan was written before the
+> deploy session and includes a per-PR preview design (subdomain-based and
+> later path-based) that was dropped during implementation. The PR-preview
+> tasks (15, 17, 25) and any references to `pr-<N>.atlas.efferon.com`,
+> `/pr/<N>/`, `deploy-pr.sh`, `cleanup-pr.sh`, or the `pr-preview.yml`
+> workflow are **not** in the shipped code. Reason: real per-PR isolation
+> needed wildcard DNS or DNS-01 API access we didn't have, and the
+> path-prefix workaround shared `/static` and browser origin with prod,
+> which didn't qualify as isolation. The shipped surface is main only;
+> see `deploy/README.md` for the as-built layout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deploy SepsisAtlas to a fresh DigitalOcean Ubuntu 24.04 droplet at `atlas.efferon.com` over HTTPS, with security hardening, automatic deploys from `main`, and per-PR preview environments at `pr-<N>.atlas.efferon.com`.

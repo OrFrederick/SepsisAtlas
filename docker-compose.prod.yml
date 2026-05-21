@@ -16,6 +16,9 @@ services:
   backend:
     build: !reset null
     image: ghcr.io/orfrederick/sepsis-atlas-backend:main
+    # `missing` so a transient ghcr outage during deploy doesn't recreate
+    # the container into a hole. Ongoing image refreshes are owned by the
+    # Watchtower sidecar below, which polls ghcr every 5 minutes.
     pull_policy: missing
     labels:
       com.centurylinklabs.watchtower.enable: "true"

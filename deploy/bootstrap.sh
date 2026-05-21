@@ -21,11 +21,11 @@ create_deploy_user() {
     chown "$DEPLOY_USER:$DEPLOY_USER" "/home/$DEPLOY_USER/.ssh/authorized_keys"
     chmod 600 "/home/$DEPLOY_USER/.ssh/authorized_keys"
   fi
-  cat >/etc/sudoers.d/"$DEPLOY_USER" <<EOF
-$DEPLOY_USER ALL=(ALL) NOPASSWD: ALL
-EOF
-  chmod 440 /etc/sudoers.d/"$DEPLOY_USER"
-  visudo -cf /etc/sudoers.d/"$DEPLOY_USER" >/dev/null
+  # NOTE: deliberately no broad NOPASSWD: ALL grant. prepare_dirs installs a
+  # narrow rule limited to the exact commands deploy-main.sh needs (rsync,
+  # install, chown, cp, systemctl reload caddy). If the deploy SSH key
+  # leaks, the attacker can re-trigger a deploy but cannot escalate to
+  # root or run arbitrary commands.
 }
 
 harden_ssh() {
@@ -119,10 +119,17 @@ prepare_dirs() {
   install -d -o caddy -g caddy -m 755 /var/log/caddy
   install -d -o caddy -g caddy -m 750 /etc/caddy/conf.d
 
-  # Allow the deploy user to rsync into /var/www/atlas-main, install the
-  # Caddyfile, and reload caddy — all without an interactive sudo password.
+  # Narrow sudoers: exactly the commands deploy-main.sh runs, with literal
+  # paths so wildcards can't be abused to read/write other files. This is
+  # the ONLY sudo grant the deploy user has — there is no broad NOPASSWD
+  # rule elsewhere.
   cat >/etc/sudoers.d/deploy-caddy <<'EOF'
-deploy ALL=(root) NOPASSWD: /bin/systemctl reload caddy, /usr/bin/systemctl reload caddy, /usr/bin/install -d -o caddy -g caddy /var/www/*, /usr/bin/chown -R caddy\:caddy /var/www/*, /usr/bin/rsync -a --delete /opt/sepsisatlas/*, /usr/bin/cp /opt/sepsisatlas/*/deploy/Caddyfile /etc/caddy/Caddyfile
+deploy ALL=(root) NOPASSWD: \
+    /usr/bin/install -d -o caddy -g caddy /var/www/atlas-main, \
+    /usr/bin/rsync -a --delete /opt/sepsisatlas/main/web/dist/ /var/www/atlas-main/, \
+    /usr/bin/chown -R caddy\:caddy /var/www/atlas-main, \
+    /usr/bin/cp /opt/sepsisatlas/main/deploy/Caddyfile /etc/caddy/Caddyfile, \
+    /usr/bin/systemctl reload caddy
 EOF
   chmod 440 /etc/sudoers.d/deploy-caddy
   visudo -cf /etc/sudoers.d/deploy-caddy >/dev/null

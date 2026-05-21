@@ -88,8 +88,11 @@ smoke() {
 }
 
 reload_caddy() {
+  # Validate from the source file BEFORE overwriting the live config —
+  # otherwise a bad Caddyfile lands on disk and a future reload (e.g. on
+  # service restart) brings caddy down.
+  caddy validate --config "$WORK_DIR/deploy/Caddyfile" --adapter caddyfile
   sudo cp "$WORK_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
   sudo systemctl reload caddy
 }
 

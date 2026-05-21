@@ -186,16 +186,17 @@ export default function PdfViewer({ stem, basePath }: Props) {
         </span>
         <span className="sep" />
         <button type="button" onClick={() => controllerRef.current?.jumpToBbox()} title="Jump back to highlight">↩ Highlight</button>
-        <button
-          type="button"
-          onClick={() => {
-            const c = controllerRef.current;
-            if (c) window.open(c.pdfUrl, "_blank", "noopener");
-          }}
-          title="Open PDF in a new tab"
-        >Open PDF ↗</button>
-        <span className="pdf-viewer__status">{status}</span>
-        <span className="pdf-viewer__filename">{stem}.pdf</span>
+        {status && <span className="pdf-viewer__status">{status}</span>}
+        <a
+          className="pdf-viewer__open"
+          href={`${basePath}pdfs/${encodeURIComponent(stem)}.pdf`}
+          target="_blank"
+          rel="noopener"
+          title={`Open ${stem}.pdf in a new tab`}
+        >
+          <span className="pdf-viewer__open-name">{stem}.pdf</span>
+          <span className="pdf-viewer__open-arrow" aria-hidden="true">↗</span>
+        </a>
       </div>
       <div className="pdf-viewer__stage" ref={stageRef} />
     </div>

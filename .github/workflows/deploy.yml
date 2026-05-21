@@ -1,8 +1,9 @@
 name: deploy main
 
 # On every push to main (except docs-only):
-#   1. build + push backend image to ghcr (no-op via gha cache if backend
-#      code didn't change — ~30s vs ~10min cold)
+#   1. build + push backend image to ghcr (~30s warm via gha cache when
+#      no backend files changed; ~10min cold if the cache is evicted or
+#      the Dockerfile changes a layer)
 #   2. ssh to VPS and run deploy-main.sh (frontend rebuild + caddy reload)
 #
 # Watchtower on the VPS polls ghcr every 5 minutes and restarts the

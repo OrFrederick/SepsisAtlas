@@ -37,17 +37,10 @@
       background: var(--bg);
       border-bottom: 1px solid var(--border);
       font-size: 12px;
-      min-height: 32px;
+      height: 36px;
+      box-sizing: border-box;
     }
-    #toolbar strong {
-      font-family: var(--serif);
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--fg);
-      letter-spacing: 0;
-    }
-    #toolbar strong::first-letter { color: var(--accent); }
-    #toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+    #toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
     #toolbar button {
       background: var(--panel); color: var(--fg-soft);
       border: 1px solid var(--border);
@@ -63,20 +56,44 @@
       color: var(--fg);
     }
     #toolbar button:disabled { opacity: 0.4; cursor: default; }
-    #pageinfo {
-      color: var(--muted); min-width: 80px; text-align: center;
+    #toolbar input {
+      background: var(--panel); color: var(--fg);
+      border: 1px solid var(--border);
+      padding: 2px 6px; border-radius: 3px;
+      font: inherit; font-size: 12px; line-height: 1.4;
+      box-sizing: border-box; height: 24px;
       font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
     }
-    #zoominfo {
-      color: var(--muted); min-width: 50px; text-align: center;
+    #toolbar input:focus { outline: none; border-color: var(--accent); }
+    #pageinput { width: 44px; text-align: center; }
+    #pagetotal {
+      color: var(--muted);
       font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+    #pageinput::-webkit-outer-spin-button,
+    #pageinput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    #zoominfo {
+      color: var(--muted); min-width: 44px; text-align: center;
+      font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+    #search {
+      width: 170px; min-width: 110px;
+      flex-shrink: 1;
+    }
+    #search-info {
+      color: var(--muted); min-width: 36px; text-align: right;
+      font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
     }
     #filename {
       color: var(--muted); margin-left: auto;
       font-family: var(--mono); font-size: 12px;
       font-feature-settings: "tnum";
+      flex-shrink: 0;
     }
-    #status { color: var(--muted); font-style: italic; }
+    #status { color: var(--muted); font-style: italic; flex-shrink: 0; }
 
     #stage {
       display: flex; flex-direction: column; align-items: center;
@@ -111,6 +128,14 @@
       cursor: text;
       transform-origin: 0% 0%;
     }
+    .textLayer span.searchHit {
+      background: rgba(255, 226, 92, 0.65);
+      border-radius: 1px;
+    }
+    .textLayer span.searchHit.searchHitActive {
+      background: rgba(255, 180, 30, 0.85);
+      box-shadow: 0 0 0 1px rgba(204, 110, 16, 0.7);
+    }
     .bboxOverlay {
       position: absolute;
       pointer-events: none;
@@ -131,10 +156,9 @@
 </head>
 <body>
   <div id="toolbar">
-    <strong>Sepsis Atlas</strong>
-    <span class="sep"></span>
     <button id="prev" title="Previous page (←, PageUp)">‹</button>
-    <span id="pageinfo">— / —</span>
+    <input id="pageinput" type="text" inputmode="numeric" value="—" title="Type a page number, Enter to jump">
+    <span id="pagetotal">/ —</span>
     <button id="next" title="Next page (→, PageDown)">›</button>
     <span class="sep"></span>
     <button id="zoomOut" title="Zoom out (-)">−</button>
@@ -142,7 +166,11 @@
     <button id="zoomIn" title="Zoom in (+)">+</button>
     <button id="fit" title="Fit width">Fit</button>
     <span class="sep"></span>
+    <input id="search" type="search" placeholder="Search…" title="Find in PDF (Enter = next, Shift+Enter = previous)">
+    <span id="search-info"></span>
+    <span class="sep"></span>
     <button id="jumpBbox" title="Jump back to highlight">↩ Highlight</button>
+    <button id="openPdf" title="Open PDF in a new tab">Open PDF</button>
     <span id="status"></span>
     <span id="filename">__FILE_STEM__.pdf</span>
   </div>
@@ -174,16 +202,24 @@
     let scale = 1.5;
     let pdfDoc = null;
     let currentPage = initialPage;
+    // Tracks whether the user has manually changed scale (zoom buttons or
+    // explicit Fit click). Once true, automatic fit-to-width on outer-window
+    // resize stops overriding the user's choice.
+    let userZoomLocked = false;
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
 
     const stage = document.getElementById("stage");
     const statusEl = document.getElementById("status");
-    const pageInfoEl = document.getElementById("pageinfo");
+    const pageInputEl = document.getElementById("pageinput");
+    const pageTotalEl = document.getElementById("pagetotal");
     const zoomInfoEl = document.getElementById("zoominfo");
     const prevBtn = document.getElementById("prev");
     const nextBtn = document.getElementById("next");
     const fitBtn = document.getElementById("fit");
     const jumpBtn = document.getElementById("jumpBbox");
+    const openPdfBtn = document.getElementById("openPdf");
+    const searchEl = document.getElementById("search");
+    const searchInfoEl = document.getElementById("search-info");
 
     // Per-page state. pages[i] is the entry for page i+1 (1-indexed via .num).
     const pages = [];
@@ -260,6 +296,9 @@
 
         entry.viewport = viewport;
         drawBbox(entry, viewport);
+        // Re-apply current search highlight to this page's freshly built text
+        // layer (the old spans were thrown away by replaceChildren above).
+        if (searchState.query) highlightPage(entry);
         entry.rendered = true;
       })();
 
@@ -385,9 +424,122 @@
     }
 
     function updateNavUi() {
-      pageInfoEl.textContent = `${currentPage} / ${pdfDoc.numPages}`;
+      pageTotalEl.textContent = `/ ${pdfDoc.numPages}`;
+      // Only refresh the input value when the input is not focused, so a
+      // mid-typing page number isn't clobbered by the visibility observer.
+      if (document.activeElement !== pageInputEl) {
+        pageInputEl.value = String(currentPage);
+      }
       prevBtn.disabled = currentPage <= 1;
       nextBtn.disabled = currentPage >= pdfDoc.numPages;
+    }
+
+    // ---- search ---------------------------------------------------------
+    // Lightweight in-PDF search built on top of the rendered text layers.
+    // We tokenise each page on demand (cached in `pageText`) into spans +
+    // string positions, walk the lowercase string for the query, then mark
+    // the corresponding spans with .searchHit. The active match also gets
+    // .searchHitActive and is scrolled into view.
+    const searchState = {
+      query: "",
+      hits: [],          // [{ page, spans: [span,...] }, ...] absolute order
+      activeIdx: -1,
+    };
+    const pageText = new Map(); // page num -> { lower, spans, spanStarts, spanEnds }
+
+    function ensurePageTextIndex(entry) {
+      if (pageText.has(entry.num)) return pageText.get(entry.num);
+      const spans = Array.from(entry.textLayer.querySelectorAll("span"));
+      let text = "";
+      const spanStarts = [];
+      const spanEnds = [];
+      for (const s of spans) {
+        spanStarts.push(text.length);
+        text += s.textContent;
+        spanEnds.push(text.length);
+        text += " ";
+      }
+      const rec = { lower: text.toLowerCase(), spans, spanStarts, spanEnds };
+      pageText.set(entry.num, rec);
+      return rec;
+    }
+
+    function clearHighlights() {
+      for (const hit of searchState.hits) {
+        for (const s of hit.spans) {
+          s.classList.remove("searchHit", "searchHitActive");
+        }
+      }
+      searchState.hits = [];
+      searchState.activeIdx = -1;
+      searchInfoEl.textContent = "";
+    }
+
+    function highlightPage(entry) {
+      // Re-derives matches for this page (used when a page re-renders).
+      const q = searchState.query;
+      if (!q) return;
+      // Drop existing hits for this page so we can rebuild them.
+      searchState.hits = searchState.hits.filter(h => h.page !== entry.num);
+      pageText.delete(entry.num);
+      const rec = ensurePageTextIndex(entry);
+      if (!rec) return;
+      const lower = rec.lower;
+      let from = 0;
+      while (true) {
+        const i = lower.indexOf(q, from);
+        if (i < 0) break;
+        const end = i + q.length;
+        const spans = [];
+        for (let k = 0; k < rec.spans.length; k++) {
+          if (rec.spanEnds[k] > i && rec.spanStarts[k] < end) {
+            spans.push(rec.spans[k]);
+            rec.spans[k].classList.add("searchHit");
+          }
+        }
+        if (spans.length) searchState.hits.push({ page: entry.num, spans });
+        from = i + Math.max(1, q.length);
+      }
+      // Keep hits sorted by page so navigation is deterministic.
+      searchState.hits.sort((a, b) => a.page - b.page);
+    }
+
+    async function runSearch(q) {
+      clearHighlights();
+      searchState.query = q;
+      if (!q) return;
+      // Render every page so each text layer exists for the substring scan.
+      // Pages render lazily under normal scrolling; for search we force them.
+      setStatus("searching…");
+      for (const entry of pages) {
+        if (!entry.rendered) await renderPage(entry);
+        highlightPage(entry);
+      }
+      setStatus("");
+      if (searchState.hits.length === 0) {
+        searchInfoEl.textContent = "0";
+        return;
+      }
+      gotoHit(0);
+    }
+
+    function gotoHit(idx) {
+      if (searchState.hits.length === 0) return;
+      const wrapped = (idx + searchState.hits.length) % searchState.hits.length;
+      // Deactivate previous active hit.
+      if (searchState.activeIdx >= 0) {
+        const prev = searchState.hits[searchState.activeIdx];
+        for (const s of prev.spans) s.classList.remove("searchHitActive");
+      }
+      const hit = searchState.hits[wrapped];
+      for (const s of hit.spans) s.classList.add("searchHitActive");
+      searchState.activeIdx = wrapped;
+      searchInfoEl.textContent = `${wrapped + 1}/${searchState.hits.length}`;
+      // Scroll the active hit into view.
+      const span = hit.spans[0];
+      if (span && span.scrollIntoView) {
+        span.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
 
     async function init() {
@@ -458,27 +610,89 @@
       if (pdfDoc && currentPage < pdfDoc.numPages) scrollToPage(currentPage + 1);
     });
     document.getElementById("zoomIn").addEventListener("click", () => {
+      userZoomLocked = true;
       scale = Math.min(4, scale * 1.2); rerenderAll();
     });
     document.getElementById("zoomOut").addEventListener("click", () => {
+      userZoomLocked = true;
       scale = Math.max(0.5, scale / 1.2); rerenderAll();
     });
-    fitBtn.addEventListener("click", fitWidth);
+    fitBtn.addEventListener("click", () => {
+      userZoomLocked = false;
+      fitWidth();
+    });
     jumpBtn.addEventListener("click", scrollToBbox);
+    openPdfBtn.addEventListener("click", () => {
+      window.open(PDF_URL, "_blank", "noopener");
+    });
 
-    // Re-fit when the iframe size changes (chat split resize, window resize),
-    // debounced so dragging doesn't spam rerenders.
+    // Page-number input: jump on Enter / blur. Keep input editable freely
+    // while the user types — updateNavUi() only writes the input value when
+    // it doesn't currently have focus.
+    function commitPageInput() {
+      const v = parseInt(pageInputEl.value, 10);
+      if (!Number.isFinite(v) || !pdfDoc) { pageInputEl.value = String(currentPage); return; }
+      const n = Math.max(1, Math.min(pdfDoc.numPages, v));
+      pageInputEl.value = String(n);
+      if (n !== currentPage) {
+        currentPage = n;
+        updateNavUi();
+        scrollToPage(n);
+      }
+    }
+    pageInputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); commitPageInput(); pageInputEl.blur(); }
+      else if (e.key === "Escape") { pageInputEl.value = String(currentPage); pageInputEl.blur(); }
+    });
+    pageInputEl.addEventListener("blur", commitPageInput);
+    pageInputEl.addEventListener("focus", () => pageInputEl.select());
+
+    // Search input. Live filter on input (debounced); Enter / Shift+Enter
+    // navigates between hits.
+    let searchTimer = 0;
+    searchEl.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const q = searchEl.value.trim().toLowerCase();
+      searchTimer = window.setTimeout(() => {
+        if (q === searchState.query) return;
+        if (q.length === 0) { clearHighlights(); searchState.query = ""; return; }
+        runSearch(q);
+      }, 220);
+    });
+    searchEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (searchState.hits.length === 0) return;
+        gotoHit(searchState.activeIdx + (e.shiftKey ? -1 : 1));
+      } else if (e.key === "Escape") {
+        searchEl.value = "";
+        clearHighlights();
+        searchState.query = "";
+        searchEl.blur();
+      }
+    });
+
+    // Outer-window resize: refit page width unless the user has manually
+    // zoomed. We listen on `window` (not a ResizeObserver on `stage`) so
+    // zoom-induced layout changes don't trigger an unwanted re-fit.
     let resizeTimer = 0;
-    new ResizeObserver(() => {
-      if (!pdfDoc) return;
+    window.addEventListener("resize", () => {
+      if (!pdfDoc || userZoomLocked) return;
       clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(fitWidth, 120);
-    }).observe(stage);
+    });
 
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       // Don't swallow browser's native Ctrl+F.
-      if (e.ctrlKey || e.metaKey) return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "f" || e.key === "F") {
+          e.preventDefault();
+          searchEl.focus();
+          searchEl.select();
+        }
+        return;
+      }
       if ((e.key === "ArrowLeft" || e.key === "PageUp") && currentPage > 1) {
         e.preventDefault();
         scrollToPage(currentPage - 1);
@@ -486,10 +700,13 @@
         e.preventDefault();
         scrollToPage(currentPage + 1);
       } else if (e.key === "+" || e.key === "=") {
+        userZoomLocked = true;
         scale = Math.min(4, scale * 1.2); rerenderAll();
       } else if (e.key === "-") {
+        userZoomLocked = true;
         scale = Math.max(0.5, scale / 1.2); rerenderAll();
       } else if (e.key === "0") {
+        userZoomLocked = false;
         scale = 1.5; rerenderAll();
       }
     });

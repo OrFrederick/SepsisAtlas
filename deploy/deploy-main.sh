@@ -3,11 +3,14 @@
 # Run as `deploy` user (locally or via SSH from CI).
 #
 # Backend image lives in ghcr.io and is built by GitHub Actions; this script
-# does NOT build it. The compose `pull_policy: always` and the Watchtower
-# sidecar pick up new tags. This script:
+# does NOT build it. The compose override sets `pull_policy: missing`, the
+# pre-flight `docker pull` below fetches the image, and the Watchtower
+# sidecar picks up subsequent tags on its own. This script:
 #   - syncs the repo
 #   - builds the frontend (bun)
-#   - starts the compose stack (which pulls the latest backend image)
+#   - pre-flights the backend image pull (so a missing image leaves the
+#     running container alone instead of recreating into a hole)
+#   - starts the compose stack
 #   - reloads caddy
 
 set -euo pipefail

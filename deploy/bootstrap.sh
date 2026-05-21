@@ -26,6 +26,20 @@ create_deploy_user() {
   # install, chown, cp, systemctl reload caddy). If the deploy SSH key
   # leaks, the attacker can re-trigger a deploy but cannot escalate to
   # root or run arbitrary commands.
+  #
+  # Clean up the broad grant a previous bootstrap revision wrote at
+  # /etc/sudoers.d/$DEPLOY_USER. Without this, an earlier-provisioned host
+  # keeps the broad NOPASSWD: ALL alongside the new narrow rule, silently
+  # undoing the sudoers tightening.
+  rm -f "/etc/sudoers.d/$DEPLOY_USER"
+
+  # Pre-create the docker creds file so the Watchtower bind-mount lands on
+  # a file, not a directory. (Docker creates a directory if the source path
+  # doesn't exist at bind-mount time, which then breaks the next
+  # `docker login`.)
+  install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "/home/$DEPLOY_USER/.docker"
+  [[ -f "/home/$DEPLOY_USER/.docker/config.json" ]] || \
+    install -m 600 -o "$DEPLOY_USER" -g "$DEPLOY_USER" /dev/null "/home/$DEPLOY_USER/.docker/config.json"
 }
 
 harden_ssh() {

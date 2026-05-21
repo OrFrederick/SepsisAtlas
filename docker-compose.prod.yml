@@ -31,7 +31,7 @@ services:
       - "127.0.0.1:8000:8000"
 
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower:1.7.1
     container_name: atlas-watchtower
     restart: unless-stopped
     volumes:

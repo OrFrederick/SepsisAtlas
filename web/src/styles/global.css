@@ -126,7 +126,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 
 #results { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
 
-/* Card style used by ResultCard.astro on /papers */
+/* Card style used by ResultCard on /papers */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);

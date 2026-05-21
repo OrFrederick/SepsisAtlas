@@ -46,6 +46,14 @@ build_frontend() {
   cd "$WORK_DIR/web"
   log "installing web deps"
   bun install --frozen-lockfile
+  # The Astro PDF viewer reads source PDFs from `web/public/pdfs/<stem>.pdf`
+  # (gitignored), so we have to populate that directory from the canonical
+  # corpus in `data/papers/raw/` before `astro build` runs. Without this the
+  # build succeeds but every viewer page 404s on its PDF fetch in production.
+  log "populating web/public/pdfs from data/papers/raw"
+  mkdir -p "$WORK_DIR/web/public/pdfs"
+  rsync -a --delete --include='*.pdf' --exclude='*' \
+    "$WORK_DIR/data/papers/raw/" "$WORK_DIR/web/public/pdfs/"
   log "building web"
   PUBLIC_BACKEND_URL="" bun run build
   sudo install -d -o caddy -g caddy "$WEB_OUT"

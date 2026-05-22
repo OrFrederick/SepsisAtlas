@@ -1,11 +1,21 @@
 /*
-  Explicit ISR revalidation. Threat model: this endpoint runs behind the
-  droplet's firewall and nginx denies external access via an explicit
-  `location = /api/revalidate { deny all; ... }` rule. The Python exporter
-  is the only intended caller and reaches the endpoint over 127.0.0.1.
-  A shared-secret header (REVALIDATE_TOKEN env, constant-time compared)
-  guards against accidental misuse; it is NOT the only barrier.
-  Do not widen scope without revisiting auth + the nginx rule.
+  Explicit ISR revalidation. Threat model: this endpoint runs behind
+  Caddy on the droplet, and Caddy denies external access via the
+  `@revalidate { respond 404 }` directive in deploy/Caddyfile. The
+  Python exporter is the only intended caller and reaches the endpoint
+  inside the compose network (the frontend container shares the
+  `sepsis` network with `backend`, so the exporter POSTs to
+  http://frontend:3000/api/revalidate directly, bypassing the public
+  Caddy listener entirely). A shared-secret header (REVALIDATE_TOKEN
+  env, constant-time compared) guards against accidental misuse; it is
+  NOT the only barrier. Do not widen scope without revisiting auth +
+  the Caddy deny rule.
+
+  Status: the receiver side (this file) and the compose plumbing are in
+  place. The Python exporter has not been wired up to POST here yet;
+  until it is, ISR falls back to the per-route `revalidate = 3600`
+  stale-while-revalidate window. Tracked as a deploy follow-up in the
+  PR description, not in this file.
 */
 
 import { revalidatePath } from "next/cache";

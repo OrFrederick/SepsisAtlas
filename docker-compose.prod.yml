@@ -43,10 +43,17 @@ services:
       - "443:443/udp"
     environment:
       # Required by app/api/revalidate/route.ts. Without it the endpoint
-      # returns 401 for every request (including the legitimate exporter
-      # call) and the route's POST handler logs the misconfiguration.
-      # Source the value from the host shell (set in /etc/sepsisatlas/env
-      # or similar) — do NOT bake the token into git or the image.
+      # returns 401 for every request and the route's POST handler logs
+      # the misconfiguration. Source the value from the host shell (set
+      # in /etc/sepsisatlas/env or similar) — do NOT bake the token into
+      # git or the image.
+      #
+      # Status: the receiver is live, but the Python exporter that POSTs
+      # to /api/revalidate after writing public/data/*.json is not yet
+      # implemented (tracked as a deploy follow-up). Until that lands,
+      # ISR is fed only by the per-route `revalidate = 3600` stale-while-
+      # revalidate window. Setting the token to anything is fine for now;
+      # it will become load-bearing once the exporter is wired up.
       REVALIDATE_TOKEN: ${REVALIDATE_TOKEN:?REVALIDATE_TOKEN must be set on the host}
       # Next reads NODE_ENV=production from the Dockerfile already; the
       # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.

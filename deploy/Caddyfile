@@ -26,11 +26,12 @@ atlas.efferon.com {
 	import /etc/caddy/conf.d/*.caddy
 
 	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py
-	# and the rewrites() block in web/next.config.ts.
+	# and the rewrites() block in web/next.config.ts. Raw PDFs are served by
+	# Next from web/public/pdfs/<stem>.pdf, not by FastAPI, so /papers/*/pdf
+	# (which used to be in this matcher) does not belong here.
 	@api {
 		path /query
 		path /rank_predictors
-		path /papers/*/pdf
 		path /ingest_pubmed
 		path /health
 		path /health/cost

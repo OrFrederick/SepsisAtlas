@@ -70,6 +70,9 @@ COPY --from=build /app/web/.next/standalone ./
 COPY --from=build /app/web/.next/static ./.next/static
 COPY --from=build /app/web/public ./public
 
+# wget is needed by the healthcheck below. Install once with the rest.
+RUN apk add --no-cache wget
+
 # Caddy config (baked in; conf.d allows per-deploy overrides via the
 # host bind-mount declared in docker-compose.prod.yml).
 RUN mkdir -p /etc/caddy/conf.d
@@ -85,8 +88,21 @@ ENV NODE_ENV=production \
 
 EXPOSE 80 443 443/udp
 
-# Run Caddy in the background; exec Next in the foreground so its exit
-# code is the container's. If Next dies, the container restarts (compose
-# `restart: unless-stopped`); if Caddy dies, Next stays up but external
-# traffic stops — Watchtower will notice the unhealthy state.
-CMD ["sh", "-c", "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile & exec node server.js"]
+# Healthcheck probes Caddy on :80 (so a dead Caddy gets noticed) and
+# Next on :3000 (so a dead Next does too). Both must return 2xx/3xx
+# inside the timeout for the container to stay healthy. The 308 from
+# Caddy's auto-HTTPS redirect counts as healthy. Compose's
+# `restart: unless-stopped` combined with a failing healthcheck plus
+# Watchtower's poll loop is what eventually recreates the container.
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q --spider http://localhost:80/ \
+      && wget -q --spider http://localhost:3000/
+
+# Run-both wrapper: trap SIGCHLD so the container exits the moment
+# either Caddy or Next dies. PID 1 must be the trap-holding shell so
+# the signal reaches us; we wait on both children and exit non-zero if
+# the first to die was abnormal. Compose `restart: unless-stopped`
+# then recreates the container. Without this trap, the exec form
+# (`exec node server.js`) made Node PID 1, and a Caddy crash left the
+# container alive but with TLS dark.
+CMD ["sh", "-c", "set -e; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile & CADDY_PID=$!; node server.js & NEXT_PID=$!; trap 'kill $CADDY_PID $NEXT_PID 2>/dev/null' TERM INT; wait -n $CADDY_PID $NEXT_PID; STATUS=$?; kill $CADDY_PID $NEXT_PID 2>/dev/null; exit $STATUS"]

@@ -15,13 +15,21 @@ function labelsFor(payload: FeedbackPayload): string[] {
 }
 
 function bodyFor(payload: FeedbackPayload): string {
+  const rowSerialized = payload.rowContext !== undefined
+    ? JSON.stringify(payload.rowContext, null, 2)
+    : "n/a";
+  // Pick a fence longer than any backtick run inside the content so user
+  // input can't break out. Min 3, then bump by one per matched run.
+  const longest = [...rowSerialized.matchAll(/`+/g)].reduce((m, x) => Math.max(m, x[0].length), 0);
+  const fence = "`".repeat(Math.max(3, longest + 1));
+
   const lines = [
     `**Type:** ${payload.type}`,
     `**Paper:** ${payload.paperStem ?? "n/a"}`,
     "**Row context:**",
-    "```json",
-    payload.rowContext !== undefined ? JSON.stringify(payload.rowContext, null, 2) : "n/a",
-    "```",
+    `${fence}json`,
+    rowSerialized,
+    fence,
     `**Contact:** ${payload.contact ?? "anon"}`,
     `**Submitted:** ${new Date().toISOString()}`,
     "",
@@ -83,7 +91,7 @@ export async function createFeedbackIssue(
     }),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = (await res.text().catch(() => "")).slice(0, 200);
     throw new Error(`github issues POST ${res.status}: ${text}`);
   }
   const data = (await res.json()) as { html_url: string };

@@ -91,6 +91,35 @@ describe("createFeedbackIssue", () => {
     ).rejects.toThrow(/500/);
   });
 
+  it("renders rowContext with a long-enough fence so backticks in content cannot break out", async () => {
+    await createFeedbackIssue({
+      ...base,
+      rowContext: { note: "evil ``` content" },
+    }, { fetch: fetchMock, repo: "o/r", token: "t" });
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/issues"))!;
+    const payload = JSON.parse(String((call[1] as RequestInit).body));
+    // The opening fence must be longer than any backtick run inside the JSON.
+    const openingFence = payload.body.match(/`+json/)![0].replace("json", "");
+    expect(openingFence.length).toBeGreaterThan(3);
+    expect(payload.body).toContain("evil ``` content");
+  });
+
+  it("still creates the issue when label-create returns 500", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      fetchMock = vi.fn(async (url: string) => {
+        if (url.endsWith("/labels")) return jsonResponse(500, { message: "boom" });
+        if (url.endsWith("/issues")) return jsonResponse(201, { html_url: "https://github.com/o/r/issues/9" });
+        return jsonResponse(404, {});
+      });
+      const res = await createFeedbackIssue(base, { fetch: fetchMock, repo: "o/r", token: "t" });
+      expect(res.issueUrl).toBe("https://github.com/o/r/issues/9");
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("includes contact + rowContext + submitted timestamp in body when provided", async () => {
     await createFeedbackIssue({
       ...base,

@@ -93,15 +93,21 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 
 .split {
   display: grid;
-  /* Percent tracks (not fr) so solo → split interpolates cleanly in
-     every browser. Inline style provides the actual ratio per state;
+  /* Percent tracks (not fr) so solo → split interpolates cleanly. The
+     active ratio comes from --chat-pct set as an inline style on .split;
      the divider is absolutely positioned inside .viewer-wrap, straddling
-     the boundary. */
+     the boundary. Smooth grid-template-columns interpolation needs
+     Chromium 111+ / Safari 17+ / Firefox 124+ — older engines snap to
+     the end state but the visual reveal is still carried by the
+     .viewer-wrap opacity + translateX, so no regression. */
   grid-template-columns: 100% 0%;
   height: 100%;
   width: 100%;
   overflow: hidden;
   transition: grid-template-columns 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.split.active {
+  grid-template-columns: var(--chat-pct, 50%) calc(100% - var(--chat-pct, 50%));
 }
 .split.resizing {
   cursor: col-resize;
@@ -166,8 +172,11 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  width: 6px;
+  /* 10px hit area centered on the column boundary (visual hairline is
+     the 1px ::before pseudo-element below). Wide enough for touch and
+     imprecise trackpad gestures without showing a thicker handle. */
+  left: -5px;
+  width: 10px;
   z-index: 2;
   background: transparent;
   cursor: col-resize;

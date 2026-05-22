@@ -14,7 +14,7 @@
   gain.
 */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { motion, MotionConfig } from "framer-motion";
@@ -235,11 +235,22 @@ export default function ChatShell() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const splitRef = useRef<HTMLElement | null>(null);
   const draggingRef = useRef(false);
+  // Latest pct computed during a drag. Pointerup reads this when the
+  // final clientX falls outside the split rect and computePctFromClientX
+  // returns null — otherwise we'd commit the stale state value instead
+  // of the most recent pointermove result.
+  const latestPctRef = useRef<number>(DEFAULT_CHAT_PCT);
+  // rAF coalescing for pointermove. Multiple pointermove events per frame
+  // are common at high-Hz polling; one setState per frame is enough.
+  const moveRafRef = useRef<number | null>(null);
+  const lastMoveXRef = useRef<number>(0);
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
     setHistory(loadHistory());
-    setChatPct(loadChatPct());
+    const restoredPct = loadChatPct();
+    setChatPct(restoredPct);
+    latestPctRef.current = restoredPct;
     const last = loadViewerUrl();
     if (last) {
       try {
@@ -384,6 +395,7 @@ export default function ChatShell() {
   };
 
   const commitChatPct = (pct: number) => {
+    latestPctRef.current = pct;
     setChatPct(pct);
     saveChatPct(pct);
   };
@@ -397,18 +409,29 @@ export default function ChatShell() {
 
   const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
-    const pct = computePctFromClientX(e.clientX);
-    if (pct != null) setChatPct(pct);
+    lastMoveXRef.current = e.clientX;
+    if (moveRafRef.current != null) return;
+    moveRafRef.current = requestAnimationFrame(() => {
+      moveRafRef.current = null;
+      const pct = computePctFromClientX(lastMoveXRef.current);
+      if (pct == null) return;
+      latestPctRef.current = pct;
+      setChatPct(pct);
+    });
   };
 
   const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
     setResizing(false);
+    if (moveRafRef.current != null) {
+      cancelAnimationFrame(moveRafRef.current);
+      moveRafRef.current = null;
+    }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    commitChatPct(computePctFromClientX(e.clientX) ?? chatPct);
+    commitChatPct(computePctFromClientX(e.clientX) ?? latestPctRef.current);
   };
 
   const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
@@ -418,10 +441,21 @@ export default function ChatShell() {
   // back to the centered-chat landing state.
   const showPdf = pending || history.length > 0;
 
+  // Drive grid-template-columns via a CSS custom property so React only
+  // touches the style object when chatPct changes. The actual track
+  // template lives in chat.css (.split / .split.active).
+  const splitStyle = useMemo(
+    () => ({ "--chat-pct": `${chatPct}%` }) as React.CSSProperties,
+    [chatPct],
+  );
+
   // Pointer/focus stays disabled on the viewer pane until the slide-in
   // finishes — prevents grabbing the divider mid-animation when its
   // visual position is still mid-translate. Re-disabled instantly on
   // the reverse (Clear chat → solo).
+  // Must be ≥ the .viewer-wrap reveal in chat.css:
+  //   opacity 360ms + 80ms delay = 440ms, transform 520ms + 80ms delay = 600ms.
+  // Update both in lockstep if you change either.
   const VIEWER_REVEAL_MS = 600;
   const [viewerInteractive, setViewerInteractive] = useState(false);
   useEffect(() => {
@@ -434,28 +468,43 @@ export default function ChatShell() {
   }, [showPdf]);
 
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    let next: number | null = null;
+    // 10% step with Shift held — faster keyboard nav across wide layouts.
+    const step = (e.shiftKey ? 5 : 1) * KEYBOARD_STEP_PCT;
+    let absolute: number | null = null;
+    let delta = 0;
     switch (e.key) {
       case "ArrowLeft":
-        next = clampChatPct(chatPct - KEYBOARD_STEP_PCT);
+        delta = -step;
         break;
       case "ArrowRight":
-        next = clampChatPct(chatPct + KEYBOARD_STEP_PCT);
+        delta = step;
         break;
       case "Home":
-        next = MIN_CHAT_PCT;
+        absolute = MIN_CHAT_PCT;
         break;
       case "End":
-        next = MAX_CHAT_PCT;
+        absolute = MAX_CHAT_PCT;
         break;
       case "Enter":
       case " ":
-        next = DEFAULT_CHAT_PCT;
+        absolute = DEFAULT_CHAT_PCT;
         break;
+      default:
+        return;
     }
-    if (next == null) return;
     e.preventDefault();
-    commitChatPct(next);
+    if (delta !== 0) {
+      // Functional update — held-key repeats can fire multiple events
+      // per render, and reading `chatPct` from closure would lose steps.
+      setChatPct((prev) => {
+        const next = clampChatPct(prev + delta);
+        latestPctRef.current = next;
+        saveChatPct(next);
+        return next;
+      });
+    } else if (absolute !== null) {
+      commitChatPct(absolute);
+    }
   };
 
   return (
@@ -475,13 +524,7 @@ export default function ChatShell() {
       <main
         className={`split${resizing ? " resizing" : ""}${showPdf ? " active" : ""}`}
         ref={splitRef}
-        style={{
-          // Percent tracks (rather than fr) so the solo → split transition
-          // interpolates cleanly across Chromium, Safari, and Firefox.
-          gridTemplateColumns: showPdf
-            ? `${chatPct}% ${100 - chatPct}%`
-            : "100% 0%",
-        }}
+        style={splitStyle}
       >
         <section className="chat">
           <div ref={scrollbackRef} className="scrollback">

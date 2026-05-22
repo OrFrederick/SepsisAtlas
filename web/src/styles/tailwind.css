@@ -1104,6 +1104,11 @@
     border-color: var(--color-accent-soft);
     background: var(--color-accent-soft);
   }
+  .method__stage-kind[data-kind="local-llm"] {
+    color: var(--color-ok);
+    border-color: var(--color-ok-border);
+    background: var(--color-ok-soft);
+  }
   .method__stage-kind[data-kind="hybrid"] {
     color: var(--color-warn);
     border-color: var(--color-warn-border);

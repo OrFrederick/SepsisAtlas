@@ -8,7 +8,7 @@ type Stage = {
   name: string;
   module: string;
   role: string;
-  kind: "deterministic" | "llm" | "hybrid";
+  kind: "deterministic" | "llm" | "local-llm" | "hybrid";
 };
 
 const STAGES: Stage[] = [
@@ -22,7 +22,7 @@ const STAGES: Stage[] = [
   {
     n: "2",
     name: "Extract",
-    module: "src/extract/ · Sonnet 4.5",
+    module: "src/extract/ · Claude via OpenRouter",
     role: "Two schema-guided passes. First cohort enumeration, then predictor extraction per cohort. Model writes the verbatim effect_size_str. Numbers are never computed by the model.",
     kind: "llm",
   },
@@ -38,12 +38,12 @@ const STAGES: Stage[] = [
     name: "Verify",
     module: "src/extract/verify_nli.py",
     role: "Regex matches numeric atoms (AUC, CI, p, sens/spec) against the anchor span. DeBERTa-MNLI checks free-text claims. Local inference, no API call.",
-    kind: "llm",
+    kind: "local-llm",
   },
   {
     n: "4",
     name: "Query",
-    module: "src/api/ · Haiku intent + SQL",
+    module: "src/api/ · Claude intent + SQL",
     role: "Natural language → structured intent → deterministic SQL. Answerability gate refuses queries too vague to narrow the corpus. Rows come from the DB, not the model.",
     kind: "hybrid",
   },
@@ -67,6 +67,7 @@ const INVARIANTS = [
 const KIND_LABEL: Record<Stage["kind"], string> = {
   deterministic: "deterministic",
   llm: "LLM",
+  "local-llm": "local LLM",
   hybrid: "hybrid",
 };
 
@@ -115,9 +116,9 @@ export default function MethodologyPage() {
       </ul>
 
       <p className="method__foot">
-        Full walkthrough with diagrams lives in <code>docs/pipeline.md</code> in
-        the source repository. Stage changes land in the same PR as that
-        document.
+        Source repository: <code>docs/pipeline.md</code> walks every stage
+        (including storage, audit logging, and the validation harness) with
+        diagrams and code pointers.
       </p>
     </article>
   );

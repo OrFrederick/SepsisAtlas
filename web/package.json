@@ -37,5 +37,10 @@
     "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
     "vitest": "^2"
+  },
+  "optionalDependencies": {
+    "@esbuild/linux-x64": "0.27.7",
+    "@rollup/rollup-linux-x64-gnu": "4.60.3",
+    "@rollup/rollup-linux-x64-musl": "4.60.3"
   }
 }

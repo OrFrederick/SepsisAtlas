@@ -73,15 +73,6 @@ export function FeedbackForm(props: FeedbackFormProps) {
     return (
       <div className="feedback-success">
         <h2>Thanks — feedback received</h2>
-        <p>Your report was filed as a GitHub issue.</p>
-        <a
-          className="issue-link"
-          href={status.issueUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          View issue on GitHub ↗
-        </a>
       </div>
     );
   }

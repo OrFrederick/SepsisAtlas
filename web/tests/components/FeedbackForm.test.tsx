@@ -31,15 +31,15 @@ describe("FeedbackForm", () => {
     expect(screen.getByText(/Seymour_2016/)).toBeInTheDocument();
   });
 
-  it("submits valid payload and shows success state with issue link", async () => {
+  it("submits valid payload and shows success state without leaking GitHub URL", async () => {
     const user = userEvent.setup();
     setup();
     await user.type(screen.getByLabelText(/title/i), "Site is broken");
     await user.type(screen.getByLabelText(/details|body/i), "Pages return blank.");
     await user.click(screen.getByRole("button", { name: /send feedback/i }));
     await waitFor(() => expect(screen.getByText(/thanks/i)).toBeInTheDocument());
-    const link = screen.getByRole("link", { name: /view issue|on github/i });
-    expect(link).toHaveAttribute("href", "https://github.com/o/r/issues/9");
+    expect(screen.queryByRole("link", { name: /view issue|github/i })).toBeNull();
+    expect(screen.queryByText(/github/i)).toBeNull();
   });
 
   it("shows error state on 4xx/5xx and keeps form contents", async () => {

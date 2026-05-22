@@ -72,12 +72,32 @@ create_field() {
     --single-select-options "${opts}" >/dev/null
 }
 
-# Note: GitHub auto-creates a "Status" field on new projects. We re-create only
-# if missing; the default Status field's options ("Todo/In Progress/Done") will
-# not be modified here — adjust manually in the UI or delete + recreate.
-create_field "Status"   "${STATUS_OPTIONS}"
+# Type and Priority are pure new fields — gh project handles them.
 create_field "Type"     "${TYPE_OPTIONS}"
 create_field "Priority" "${PRIORITY_OPTIONS}"
+
+# Status is auto-created by GitHub with default Todo/In Progress/Done. Replace
+# its options via GraphQL (gh project field-create cannot edit an existing
+# single-select field).
+log "Replacing Status field options"
+STATUS_FIELD_ID=$(gh project field-list "${PROJECT_NUMBER}" --owner "${OWNER}" \
+  --format json | jq -r '.fields[] | select(.name=="Status") | .id')
+[[ -n "${STATUS_FIELD_ID}" ]] || err "Status field not found"
+
+gh api graphql -f query='
+mutation($fieldId: ID!) {
+  updateProjectV2Field(input: {
+    fieldId: $fieldId,
+    singleSelectOptions: [
+      {name: "Inbox",       color: GRAY,   description: "New, unreviewed"},
+      {name: "Triaged",     color: BLUE,   description: "Reviewed, prioritized"},
+      {name: "In progress", color: YELLOW, description: "Being worked"},
+      {name: "In review",   color: PURPLE, description: "PR open"},
+      {name: "Done",        color: GREEN,  description: "Shipped or closed"},
+      {name: "Wontfix",     color: RED,    description: "Closed not planned"}
+    ]
+  }) { projectV2Field { ... on ProjectV2SingleSelectField { name } } }
+}' -f fieldId="${STATUS_FIELD_ID}" >/dev/null
 
 # 4. Backfill currently-open issues
 log "Backfilling open issues from ${REPO}"
@@ -87,6 +107,50 @@ mapfile -t ISSUE_URLS < <(gh issue list --repo "${REPO}" --state open --limit 20
 for url in "${ISSUE_URLS[@]}"; do
   log "  Adding ${url}"
   gh project item-add "${PROJECT_NUMBER}" --owner "${OWNER}" --url "${url}" >/dev/null || true
+done
+
+# 5. Set Status="Inbox" on every item that has no status yet
+log "Defaulting items without Status to Inbox"
+PROJECT_INFO=$(gh api graphql -f query='
+query($login: String!, $num: Int!) {
+  user(login: $login) {
+    projectV2(number: $num) {
+      id
+      field(name: "Status") {
+        ... on ProjectV2SingleSelectField {
+          id
+          options(names: ["Inbox"]) { id name }
+        }
+      }
+      items(first: 100) {
+        nodes {
+          id
+          fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue { name }
+          }
+        }
+      }
+    }
+  }
+}' -F login="${OWNER}" -F num="${PROJECT_NUMBER}")
+
+PROJECT_ID=$(jq -r '.data.user.projectV2.id'                <<<"${PROJECT_INFO}")
+STATUS_FID=$(jq -r '.data.user.projectV2.field.id'          <<<"${PROJECT_INFO}")
+INBOX_OID=$( jq -r '.data.user.projectV2.field.options[0].id' <<<"${PROJECT_INFO}")
+mapfile -t UNSET_ITEM_IDS < <(jq -r '
+  .data.user.projectV2.items.nodes[]
+  | select(.fieldValueByName == null) | .id' <<<"${PROJECT_INFO}")
+
+for item in "${UNSET_ITEM_IDS[@]}"; do
+  gh api graphql -f query='
+    mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) {
+      updateProjectV2ItemFieldValue(input: {
+        projectId: $p, itemId: $i, fieldId: $f,
+        value: { singleSelectOptionId: $o }
+      }) { projectV2Item { id } }
+    }' -f p="${PROJECT_ID}" -f i="${item}" -f f="${STATUS_FID}" \
+       -f o="${INBOX_OID}" >/dev/null
+  log "  ${item} → Inbox"
 done
 
 log "Done."

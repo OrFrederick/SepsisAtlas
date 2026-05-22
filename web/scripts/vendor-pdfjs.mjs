@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Copy pdfjs-dist build artifacts into web/public/pdfjs/. Idempotent.
- * Run via `npm run vendor`.
+ * Run via `bun run vendor`.
  */
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,7 +13,7 @@ const src = join(root, "node_modules", "pdfjs-dist");
 const dest = join(root, "public", "pdfjs");
 
 if (!existsSync(src)) {
-  console.error("vendor-pdfjs: pdfjs-dist not installed; run `npm install` first.");
+  console.error("vendor-pdfjs: pdfjs-dist not installed; run `bun install` first.");
   process.exit(1);
 }
 

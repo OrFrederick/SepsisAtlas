@@ -273,6 +273,231 @@ dialog.settings input:focus {
   box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.10);
 }
 
+/* Feedback dialog + form (used in navbar button and /feedback page). */
+.feedback-trigger {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  padding: 4px 2px;
+  margin: 0 10px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.feedback-trigger:hover {
+  color: var(--fg);
+}
+
+dialog.feedback {
+  /* Tailwind v4 preflight resets `margin: 0` on all elements which kills the
+     UA-default `margin: auto` that <dialog> relies on for centering when
+     opened with showModal(). Restore it explicitly. */
+  margin: auto;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+  width: min(560px, 92vw);
+  max-height: 88vh;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+dialog.feedback::backdrop {
+  background: rgba(26, 22, 20, 0.4);
+  backdrop-filter: blur(2px);
+}
+dialog.feedback .feedback-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+dialog.feedback .feedback-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--fg);
+}
+dialog.feedback .feedback-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+dialog.feedback .feedback-close:hover {
+  background: var(--panel-3);
+  color: var(--fg);
+}
+dialog.feedback .feedback-body {
+  padding: 18px;
+  overflow-y: auto;
+  max-height: calc(88vh - 56px);
+}
+
+.feedback-form { display: flex; flex-direction: column; gap: 14px; }
+.feedback-form .field { display: flex; flex-direction: column; gap: 4px; }
+.feedback-form .field-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.feedback-form input,
+.feedback-form textarea,
+.feedback-form select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.feedback-form textarea { resize: vertical; min-height: 110px; }
+.feedback-form input:focus,
+.feedback-form textarea:focus,
+.feedback-form select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.10);
+}
+.feedback-form .row-context {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 8px 10px;
+}
+.feedback-form .row-context summary {
+  cursor: pointer;
+  color: var(--fg-soft);
+  font-size: 13px;
+  user-select: none;
+}
+.feedback-form .row-context pre {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-soft);
+  overflow-x: auto;
+  max-height: 160px;
+}
+.feedback-form .paper-pill {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--fg-soft);
+  background: var(--accent-soft);
+  border: 1px solid #c2d8db;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.feedback-form .paper-pill code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+.feedback-form .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.feedback-form .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.feedback-form .btn-primary:hover { background: #0c3d4b; }
+.feedback-form .btn-primary:disabled { opacity: 0.5; cursor: default; }
+.feedback-form .btn-ghost {
+  background: transparent;
+  color: var(--fg-soft);
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.feedback-form .btn-ghost:hover { background: var(--panel-2); border-color: var(--border-strong); }
+.feedback-form .alert-error {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--fail-soft);
+  border: 1px solid #dcb7b7;
+  border-radius: 6px;
+  color: var(--fail);
+  font-size: 13px;
+}
+
+.feedback-success {
+  text-align: center;
+  padding: 12px 6px;
+}
+.feedback-success h2 {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--ok);
+  margin: 0 0 8px;
+}
+.feedback-success p { color: var(--fg-soft); margin: 6px 0; }
+.feedback-success .issue-link {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 14px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid #b6d4c2;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.feedback-success .issue-link:hover { text-decoration: none; background: #dceee3; }
+
+.feedback-page {
+  max-width: 640px;
+  margin: 24px auto;
+  padding: 0 20px;
+}
+.feedback-page h1 {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 500;
+  margin: 0 0 6px;
+}
+.feedback-page .intro {
+  color: var(--fg-muted);
+  margin: 0 0 18px;
+  font-size: 14px;
+}
+.feedback-page .card-wrap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+
 /* App-wide override: split-pane shells (chat, paper detail) need the main
    element to span edge-to-edge instead of inheriting the centered max-width
    used on chrome pages. Selector is body-level so it applies wherever a

@@ -36,7 +36,7 @@ describe("FeedbackForm", () => {
     setup();
     await user.type(screen.getByLabelText(/title/i), "Site is broken");
     await user.type(screen.getByLabelText(/details|body/i), "Pages return blank.");
-    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await user.click(screen.getByRole("button", { name: /send feedback/i }));
     await waitFor(() => expect(screen.getByText(/thanks/i)).toBeInTheDocument());
     const link = screen.getByRole("link", { name: /view issue|on github/i });
     expect(link).toHaveAttribute("href", "https://github.com/o/r/issues/9");
@@ -51,7 +51,7 @@ describe("FeedbackForm", () => {
     setup();
     await user.type(screen.getByLabelText(/title/i), "Title here");
     await user.type(screen.getByLabelText(/details|body/i), "Long enough body text.");
-    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await user.click(screen.getByRole("button", { name: /send feedback/i }));
     await waitFor(() => expect(screen.getByText(/couldn.t submit|error|failed/i)).toBeInTheDocument());
     expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe("Title here");
   });
@@ -66,7 +66,7 @@ describe("FeedbackForm", () => {
     setup();
     await user.type(screen.getByLabelText(/title/i), "Title here");
     await user.type(screen.getByLabelText(/details|body/i), "Long enough body text.");
-    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await user.click(screen.getByRole("button", { name: /send feedback/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
     const body = JSON.parse(String(init?.body));

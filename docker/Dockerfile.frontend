@@ -25,16 +25,19 @@ WORKDIR /app
 # PDF set into web/public/pdfs/ exactly the way deploy-main.sh did).
 RUN apk add --no-cache rsync
 
-# Cache deps on package.json only. We deliberately drop bun.lock for this
-# step because bun records platform-specific optional dependencies on the
-# host that generated it (e.g. only `@esbuild/darwin-arm64` after a macOS
-# install). Reusing that lockfile on Linux fails esbuild's postinstall
-# sanity check ("Expected 0.27.7 but got 0.21.5"). Resolving fresh in the
-# build container picks the right linux-arm64 / linux-x64 binary. The
-# package.json still pins major versions for reproducibility; the lock
-# rewrite happens in a discarded build layer.
-COPY web/package.json ./web/
-RUN cd web && bun install
+# Cache deps on package.json + bun.lock. Pinned via --frozen-lockfile for
+# reproducible builds. --ignore-scripts skips esbuild's postinstall sanity
+# check: bun's lockfile only encodes the host-platform optional-dep for
+# `esbuild@0.27.7` (e.g. `@esbuild/darwin-arm64` after a macOS install),
+# so on Linux arm64 the postinstall would fail with "Expected 0.27.7 but
+# got 0.21.5". esbuild is only a transitive dev dep (vitest → vite →
+# esbuild) and is not invoked by `next build` (Next uses its own SWC),
+# so skipping the install-time validation is safe. The downside is that
+# `node_modules/esbuild` would not be functional inside this stage, but
+# we never call it; the final runtime image (stage 2) ships only the
+# Next standalone output and never touches `node_modules` from stage 1.
+COPY web/package.json web/bun.lock ./web/
+RUN cd web && bun install --frozen-lockfile --ignore-scripts
 
 # Web source.
 COPY web ./web

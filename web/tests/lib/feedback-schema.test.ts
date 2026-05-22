@@ -1,0 +1,79 @@
+import { describe, it, expect } from "vitest";
+import { validateFeedback, FEEDBACK_TYPES } from "../../src/lib/feedback-schema";
+
+const base = {
+  type: "bug",
+  title: "Form blank on Safari",
+  body: "When I open /papers on Safari 17, the table is empty.",
+  website: "",
+};
+
+describe("validateFeedback", () => {
+  it("accepts a minimal valid payload", () => {
+    const r = validateFeedback(base);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.type).toBe("bug");
+  });
+
+  it.each(FEEDBACK_TYPES)("accepts type %s", (t) => {
+    expect(validateFeedback({ ...base, type: t }).ok).toBe(true);
+  });
+
+  it("rejects unknown type", () => {
+    expect(validateFeedback({ ...base, type: "spam" }).ok).toBe(false);
+  });
+
+  it("rejects title shorter than 5 chars", () => {
+    expect(validateFeedback({ ...base, title: "hi" }).ok).toBe(false);
+  });
+
+  it("rejects title longer than 120 chars", () => {
+    expect(validateFeedback({ ...base, title: "x".repeat(121) }).ok).toBe(false);
+  });
+
+  it("rejects body shorter than 10 chars", () => {
+    expect(validateFeedback({ ...base, body: "short" }).ok).toBe(false);
+  });
+
+  it("rejects body longer than 5000 chars", () => {
+    expect(validateFeedback({ ...base, body: "x".repeat(5001) }).ok).toBe(false);
+  });
+
+  it("rejects when honeypot field is non-empty", () => {
+    const r = validateFeedback({ ...base, website: "http://spam.example" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("honeypot");
+  });
+
+  it("rejects invalid email in contact", () => {
+    expect(validateFeedback({ ...base, contact: "not-an-email" }).ok).toBe(false);
+  });
+
+  it("accepts a valid email in contact", () => {
+    const r = validateFeedback({ ...base, contact: "user@example.com" });
+    expect(r.ok).toBe(true);
+  });
+
+  it("accepts an optional paperStem matching [A-Za-z0-9_-]+", () => {
+    expect(validateFeedback({ ...base, paperStem: "Seymour_2016" }).ok).toBe(true);
+  });
+
+  it("rejects a paperStem with path traversal characters", () => {
+    expect(validateFeedback({ ...base, paperStem: "../etc/passwd" }).ok).toBe(false);
+  });
+
+  it("accepts rowContext as arbitrary JSON-serializable value", () => {
+    const r = validateFeedback({ ...base, rowContext: { age: 65, outcome: "death" } });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects rowContext that is not plain JSON-serializable", () => {
+    const cyclic: any = {}; cyclic.self = cyclic;
+    expect(validateFeedback({ ...base, rowContext: cyclic }).ok).toBe(false);
+  });
+
+  it("rejects non-object input", () => {
+    expect(validateFeedback("nope").ok).toBe(false);
+    expect(validateFeedback(null).ok).toBe(false);
+  });
+});

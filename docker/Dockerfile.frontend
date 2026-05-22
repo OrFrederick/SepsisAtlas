@@ -46,8 +46,16 @@ COPY web ./web
 # rsync inside the image (rather than from the build context directly into
 # web/public/pdfs/) keeps the file layout obvious in case the build is
 # debugged later.
+#
+# Important: `web/public/pdfs` is a *symlink* in the repo (-> ../../data/papers/raw)
+# so that `next dev` resolves PDFs from the source tree without copying. BuildKit's
+# COPY preserves that symlink, and the relative target points outside stage 2's
+# final filesystem — leaving a dangling link that 404s every /pdfs/*.pdf request
+# in production. Delete the symlink first so the rsync below writes a real
+# directory that stage 2 can copy verbatim.
 COPY data/papers/raw ./data/papers/raw
-RUN mkdir -p web/public/pdfs && \
+RUN rm -f web/public/pdfs && \
+    mkdir -p web/public/pdfs && \
     rsync -a --delete --include='*.pdf' --exclude='*' \
       data/papers/raw/ web/public/pdfs/
 

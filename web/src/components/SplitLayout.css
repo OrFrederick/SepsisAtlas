@@ -1,7 +1,7 @@
 .split-shell {
   display: grid;
   grid-template-columns: 480px 1px 1fr;
-  height: calc(100vh - 40px);
+  height: calc(100vh - 49px);
   width: 100%;
 }
 .split-left {

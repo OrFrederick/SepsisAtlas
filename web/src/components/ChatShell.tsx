@@ -21,6 +21,15 @@ import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
 import PdfViewerPane from "./PdfViewerPane";
 import { rowsToCsv, downloadCsv } from "../lib/csv";
+import {
+  clampChatPct,
+  DEFAULT_CHAT_PCT,
+  KEYBOARD_STEP_PCT,
+  loadChatPct,
+  MAX_CHAT_PCT,
+  MIN_CHAT_PCT,
+  saveChatPct,
+} from "../lib/chatPct";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -37,35 +46,7 @@ const SLIDE_IN_RIGHT = {
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
-const CHAT_WIDTH_KEY = "sepsis_atlas.chat_width.v1";
 const HISTORY_MAX = 50;
-const MIN_CHAT_PCT = 20;
-const MAX_CHAT_PCT = 80;
-const DEFAULT_CHAT_PCT = 50;
-const KEYBOARD_STEP_PCT = 2;
-
-function clampChatPct(n: number): number {
-  return Math.min(MAX_CHAT_PCT, Math.max(MIN_CHAT_PCT, n));
-}
-
-function loadChatPct(): number {
-  if (typeof window === "undefined") return DEFAULT_CHAT_PCT;
-  try {
-    const n = parseFloat(localStorage.getItem(CHAT_WIDTH_KEY) || "");
-    return Number.isFinite(n) ? clampChatPct(n) : DEFAULT_CHAT_PCT;
-  } catch {
-    return DEFAULT_CHAT_PCT;
-  }
-}
-
-function saveChatPct(pct: number): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(CHAT_WIDTH_KEY, String(pct));
-  } catch {
-    /* quota errors are non-fatal */
-  }
-}
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 

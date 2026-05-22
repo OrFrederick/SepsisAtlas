@@ -1,3 +1,5 @@
+"use client";
+
 import type { RankFilters } from "../lib/rank";
 
 type Props = {

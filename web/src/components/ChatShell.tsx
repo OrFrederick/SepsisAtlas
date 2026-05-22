@@ -1,3 +1,5 @@
+"use client";
+
 /*
   Chat shell — React port of the original `static/app.html` vanilla-JS chat,
   living inside an Astro island.
@@ -37,10 +39,7 @@ const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 const HISTORY_MAX = 50;
 
-const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) || "").replace(
-  /\/$/,
-  "",
-);
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",

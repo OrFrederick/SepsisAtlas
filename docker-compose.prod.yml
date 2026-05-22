@@ -8,8 +8,9 @@
 #     never built on the host. The local `build:` directive is reset.
 #   - Backend is only reachable over the compose network; no host port mapping.
 #   - Source-code volume mount dropped (no hot reload in prod).
-#   - Frontend container (caddy + Astro dist + PDFs + JSON, all baked in)
-#     terminates TLS on :80/:443 and reverse-proxies API routes to backend.
+#   - Frontend container (caddy + Next.js standalone server + PDFs + JSON,
+#     all baked in) terminates TLS on :80/:443. Caddy proxies API routes to
+#     `backend` and everything else to the Next process on localhost:3000.
 #   - Watchtower watches both labeled containers and pulls/restarts whenever
 #     a new image tag appears in ghcr.
 
@@ -40,6 +41,22 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    environment:
+      # Required by app/api/revalidate/route.ts. Without it the endpoint
+      # returns 401 for every request and the route's POST handler logs
+      # the misconfiguration. Source the value from the host shell (set
+      # in /etc/sepsisatlas/env or similar) — do NOT bake the token into
+      # git or the image.
+      #
+      # Status: the receiver is live, but the Python exporter that POSTs
+      # to /api/revalidate after writing public/data/*.json is not yet
+      # implemented (tracked as a deploy follow-up). Until that lands,
+      # ISR is fed only by the per-route `revalidate = 3600` stale-while-
+      # revalidate window. Setting the token to anything is fine for now;
+      # it will become load-bearing once the exporter is wired up.
+      REVALIDATE_TOKEN: ${REVALIDATE_TOKEN:?REVALIDATE_TOKEN must be set on the host}
+      # Next reads NODE_ENV=production from the Dockerfile already; the
+      # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.
     volumes:
       - caddy_data:/data
       - caddy_config:/config

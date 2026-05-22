@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { effectStr, fmtVal, viewerHrefFor } from "../lib/rank";
 import type { RankRow, SupportingRow } from "../lib/rank";

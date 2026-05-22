@@ -1,3 +1,5 @@
+"use client";
+
 // web/src/components/pdf/PdfViewer.tsx
 import { useEffect, useRef, useState } from "react";
 import { PdfController } from "./PdfController";
@@ -60,7 +62,7 @@ export default function PdfViewer({ stem, basePath }: Props) {
 
     let cancelled = false;
     (async () => {
-      const pdfjsLib = await import(/* @vite-ignore */ `${basePath}pdfjs/build/pdf.min.mjs`);
+      const pdfjsLib = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ `${basePath}pdfjs/build/pdf.min.mjs`);
       if (cancelled) return;
       pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}pdfjs/build/pdf.worker.min.mjs`;
       await controller.init(pdfjsLib);

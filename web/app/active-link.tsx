@@ -14,7 +14,13 @@ type Props = {
 
 export default function ActiveLink({ href, exact, children }: Props) {
   const pathname = usePathname() ?? "/";
-  const active = exact ? pathname === href : pathname === href || pathname.startsWith(href + (href.endsWith("/") ? "" : "/"));
+  // href="/" must be treated as exact, otherwise the prefix-match path below
+  // would mark it active on every route (since every path starts with "/").
+  // Auto-promote it so callers can't forget the `exact` prop.
+  const isExact = exact ?? href === "/";
+  const active = isExact
+    ? pathname === href
+    : pathname === href || pathname.startsWith(href + (href.endsWith("/") ? "" : "/"));
   return (
     <Link href={href} className={active ? "active" : ""} prefetch={false}>
       {children}

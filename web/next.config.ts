@@ -3,11 +3,6 @@ import type { NextConfig } from "next";
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
 const config: NextConfig = {
-  // ISR-friendly defaults. Per-route `revalidate` overrides are in each page.tsx.
-  experimental: {
-    // RSCs read JSON from disk; let Next emit them outside the .next/cache opaque blob
-    // so we keep the option to ship .next/ + public/ to the droplet.
-  },
   // Mirror the Astro/Vite dev proxy so /query and friends hit FastAPI in `next dev`.
   // In prod, nginx terminates these paths before they ever reach Node — these rules
   // exist so dev and prod use the same code path on the client side.

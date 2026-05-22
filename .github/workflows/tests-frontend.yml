@@ -2,13 +2,22 @@ name: frontend tests
 
 # Typecheck + vitest for the Next.js app under web/.
 #
-# Unlike the deploy workflow, we do NOT pass `--ignore-scripts` here. vitest
-# pulls in vite -> rollup, and rollup loads a platform-native package at
-# runtime (`@rollup/rollup-linux-x64-gnu` on this runner). bun.lock only pins
-# the optional dep for whichever OS the lockfile was generated on, so the
-# Linux variant is only fetched when the install's postinstall scripts run.
-# Blocking them surfaces as `Cannot find module '@rollup/rollup-linux-x64-gnu'`
-# the moment vitest boots.
+# Install strategy is intentionally different from the deploy workflow:
+#
+#  - We need postinstall scripts to RUN (vitest pulls vite -> rollup, and
+#    rollup loads `@rollup/rollup-linux-x64-gnu` at runtime). The deploy
+#    workflow's `--ignore-scripts` would block that and we'd see
+#    `Cannot find module '@rollup/rollup-linux-x64-gnu'` the moment vitest
+#    boots.
+#
+#  - We also can NOT use `--frozen-lockfile`. bun.lock was generated on
+#    macOS, so only the darwin optional-deps for esbuild@0.27.7 are pinned.
+#    On a Linux runner with the lock frozen, the top-level esbuild install
+#    falls back to the transitive 0.21.5 binary and the postinstall sanity
+#    check explodes with `Expected "0.27.7" but got "0.21.5"`. Dropping
+#    `--frozen-lockfile` lets bun resolve the Linux optional-deps. Test
+#    reproducibility is enforced by the lockfile being committed, not by
+#    refusing to update it during install.
 
 on:
   pull_request:
@@ -60,7 +69,7 @@ jobs:
             ${{ runner.os }}-bun-
 
       - name: install
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: typecheck
         run: bun run check

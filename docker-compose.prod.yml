@@ -68,7 +68,12 @@ services:
     networks: [sepsis]
 
   watchtower:
-    image: containrrr/watchtower:1.7.1
+    # nickfedor/watchtower is the actively-maintained fork of the dormant
+    # containrrr/watchtower. The upstream 1.7.1 image (last released
+    # 2023-11) ships an old Docker SDK that speaks API 1.25, which modern
+    # Docker daemons (29.x default MinAPIVersion = 1.40) reject with
+    # "client version 1.25 is too old". The fork ships a current SDK.
+    image: nickfedor/watchtower:1.17.1
     container_name: atlas-watchtower
     restart: unless-stopped
     volumes:

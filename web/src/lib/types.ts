@@ -46,7 +46,6 @@ export interface Paper {
   year: number | null;
   journal: string | null;
   parsed: boolean;
-  translated: boolean;
   n_rows: number;
   verdicts: PaperVerdicts;
   last_update: string | null;

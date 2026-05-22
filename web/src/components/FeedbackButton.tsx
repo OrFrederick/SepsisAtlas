@@ -10,7 +10,16 @@ export interface FeedbackButtonProps {
 }
 
 function encodeRow(v: unknown): string {
-  return Buffer.from(JSON.stringify(v), "utf8").toString("base64url");
+  const json = JSON.stringify(v);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  // btoa is available in Node 16+ and all modern browsers; convert standard
+  // base64 to URL-safe (base64url) form.
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 export function FeedbackButton(props: FeedbackButtonProps) {

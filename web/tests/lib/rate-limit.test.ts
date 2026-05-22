@@ -37,4 +37,19 @@ describe("RateLimiter", () => {
       vi.useRealTimers();
     }
   });
+
+  it("sweeps expired keys from the internal map periodically", () => {
+    vi.useFakeTimers();
+    try {
+      const r = new RateLimiter({ limit: 1, windowMs: 1_000 });
+      // Each unique key triggers one check; after 100 calls a sweep fires.
+      for (let i = 0; i < 99; i++) r.check(`k${i}`);
+      expect(r.size()).toBe(99);
+      vi.advanceTimersByTime(1_001);
+      r.check("trigger-sweep");
+      expect(r.size()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

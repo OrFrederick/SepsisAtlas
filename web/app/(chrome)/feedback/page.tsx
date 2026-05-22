@@ -30,7 +30,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
       </p>
       <FeedbackForm
         initialType={parseType(sp.type)}
-        initialPaper={sp.paper}
+        initialPaper={sp.paper || undefined}
         initialRowContext={parseRow(sp.row)}
       />
     </div>

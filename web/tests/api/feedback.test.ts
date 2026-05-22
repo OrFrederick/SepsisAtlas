@@ -129,4 +129,13 @@ describe("POST /api/feedback", () => {
     expect(res.status).toBe(400);
     expect(createIssueMock).not.toHaveBeenCalled();
   });
+
+  it("returns 400 when Content-Length exceeds the 16 KB cap", async () => {
+    const res = await callPost(
+      { origin: "http://localhost", "content-length": String(20_000) },
+      validBody(),
+    );
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
 });

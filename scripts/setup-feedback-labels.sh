@@ -24,7 +24,7 @@ create_label "from-website"         "cccccc" "Distinguishes from manually-filed 
 create_label "needs-triage"         "fbca04" "Awaiting maintainer review"
 create_label "feedback:bug"         "d73a4a" "Bug report submitted via feedback form"
 create_label "feedback:wrong-data"  "e99695" "Data correction submitted via feedback form"
-create_label "feedback:idea"        "0e8a16" "Feature request submitted via feedback form"
+create_label "feedback:idea"        "1d76db" "Feature request submitted via feedback form"
 create_label "feedback:other"       "ededed" "Other feedback submitted via feedback form"
 
 echo "Done. paper:* labels are created lazily by the API route."

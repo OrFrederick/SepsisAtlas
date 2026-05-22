@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 const limiter = new RateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
 const MIN_FILL_MS = 3_000;
+const MAX_BODY_BYTES = 16_384;
 
 function clientIp(req: Request): string {
   const xff = req.headers.get("x-forwarded-for");
@@ -40,6 +41,11 @@ export async function POST(req: Request): Promise<Response> {
   if (!token || !repo) {
     console.error("[feedback] GITHUB_FEEDBACK_TOKEN/REPO not set");
     return NextResponse.json({ ok: false, error: "upstream" }, { status: 502 });
+  }
+
+  const declaredLength = Number(req.headers.get("content-length") ?? 0);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
   let json: unknown;

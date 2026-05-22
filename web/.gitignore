@@ -2,7 +2,10 @@ node_modules/
 dist/
 .next
 next-env.d.ts
-.env*.local
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
 .astro/
 .DS_Store
 public/pdfjs/

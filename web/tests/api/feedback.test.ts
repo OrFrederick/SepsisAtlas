@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { signMount } from "../../src/lib/feedback-mount";
 
 const createIssueMock = vi.fn();
 vi.mock("../../src/lib/github", () => ({
@@ -16,13 +17,20 @@ async function callPost(headers: Record<string, string>, body: unknown) {
   }));
 }
 
+function signedMount(tsOffsetMs = -10_000) {
+  const ts = Date.now() + tsOffsetMs;
+  const tok = signMount(ts);
+  if (!tok) throw new Error("signMount returned null in test setup");
+  return tok;
+}
+
 function validBody(extra: Record<string, unknown> = {}) {
   return {
     type: "bug",
     title: "Form is broken",
     body: "When I click submit it doesn't do anything.",
     website: "",
-    formMountedAtMs: Date.now() - 10_000,
+    mount: signedMount(),
     ...extra,
   };
 }
@@ -35,6 +43,7 @@ describe("POST /api/feedback", () => {
     process.env.GITHUB_FEEDBACK_TOKEN = "tok";
     process.env.GITHUB_FEEDBACK_REPO = "o/r";
     process.env.FEEDBACK_ALLOWED_ORIGIN = "http://localhost";
+    process.env.FEEDBACK_MOUNT_SECRET = "test-feedback-mount-secret-32-bytes!!";
   });
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -69,9 +78,48 @@ describe("POST /api/feedback", () => {
   it("returns 400 when form filled in under 3 seconds", async () => {
     const res = await callPost(
       { origin: "http://localhost" },
-      validBody({ formMountedAtMs: Date.now() - 500 }),
+      validBody({ mount: signedMount(-500) }),
     );
     expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when mount token signature is invalid", async () => {
+    const good = signedMount();
+    const tampered = { ts: good.ts, sig: good.sig.replace(/^./, "f") };
+    const res = await callPost(
+      { origin: "http://localhost" },
+      validBody({ mount: tampered }),
+    );
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when mount token has been tampered (ts mismatch)", async () => {
+    const good = signedMount();
+    const res = await callPost(
+      { origin: "http://localhost" },
+      validBody({ mount: { ts: good.ts - 60_000, sig: good.sig } }),
+    );
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when mount token is older than 30 minutes", async () => {
+    const res = await callPost(
+      { origin: "http://localhost" },
+      validBody({ mount: signedMount(-31 * 60 * 1000) }),
+    );
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 in production when FEEDBACK_MOUNT_SECRET is unset", async () => {
+    const body = validBody(); // build the payload first while the secret is set
+    delete process.env.FEEDBACK_MOUNT_SECRET;
+    vi.stubEnv("NODE_ENV", "production");
+    const res = await callPost({ origin: "http://localhost" }, body);
+    expect(res.status).toBe(500);
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 
@@ -132,8 +180,8 @@ describe("POST /api/feedback", () => {
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 
-  it("rejects when formMountedAtMs is missing (anti-bot guard always runs)", async () => {
-    const { formMountedAtMs: _drop, ...rest } = validBody();
+  it("rejects when mount token is missing (anti-bot guard always runs)", async () => {
+    const { mount: _drop, ...rest } = validBody();
     const res = await callPost({ origin: "http://localhost" }, rest);
     expect(res.status).toBe(400);
     expect(createIssueMock).not.toHaveBeenCalled();

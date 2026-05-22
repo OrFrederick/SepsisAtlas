@@ -14,13 +14,22 @@
   gain.
 */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
 import PdfViewerPane from "./PdfViewerPane";
 import { rowsToCsv, downloadCsv } from "../lib/csv";
+import {
+  clampChatPct,
+  DEFAULT_CHAT_PCT,
+  KEYBOARD_STEP_PCT,
+  loadChatPct,
+  MAX_CHAT_PCT,
+  MIN_CHAT_PCT,
+  saveChatPct,
+} from "../lib/chatPct";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -200,13 +209,38 @@ export default function ChatShell() {
   const [pending, setPending] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [viewerUrl, setViewerUrl] = useState("");
+  const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
+  const [resizing, setResizing] = useState(false);
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const splitRef = useRef<HTMLElement | null>(null);
+  const draggingRef = useRef(false);
+  // Latest pct computed during a drag. Pointerup reads this when the
+  // final clientX falls outside the split rect and computePctFromClientX
+  // returns null — otherwise we'd commit the stale state value instead
+  // of the most recent pointermove result.
+  const latestPctRef = useRef<number>(DEFAULT_CHAT_PCT);
+  // Drag-start pct, captured on pointerdown. Pointercancel reverts to
+  // this (convention) — pointerup commits the final position.
+  const startPctRef = useRef<number>(DEFAULT_CHAT_PCT);
+  // rAF coalescing for pointermove. Multiple pointermove events per frame
+  // are common at high-Hz polling; one setState per frame is enough.
+  const moveRafRef = useRef<number | null>(null);
+  const lastMoveXRef = useRef<number>(0);
+  // True once any pointermove has fired during the current drag. A pure
+  // click on the divider (no movement) shouldn't commit anything.
+  const movedRef = useRef(false);
+  // Ref on the viewer-wrap so the reveal-completion effect can listen
+  // for transitionend instead of duplicating the CSS timing in JS.
+  const viewerWrapRef = useRef<HTMLElement | null>(null);
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
     setHistory(loadHistory());
+    const restoredPct = loadChatPct();
+    setChatPct(restoredPct);
+    latestPctRef.current = restoredPct;
     const last = loadViewerUrl();
     if (last) {
       try {
@@ -339,6 +373,173 @@ export default function ChatShell() {
     ta.style.height = `${Math.min(ta.scrollHeight, 132)}px`;
   }, [input]);
 
+  // ---- divider resize ----------------------------------------------------
+  // Pointer-capture on the divider keeps drag events flowing even when the
+  // cursor crosses into the PDF iframe (which would otherwise eat them).
+  const computePctFromClientX = (clientX: number): number | null => {
+    const split = splitRef.current;
+    if (!split) return null;
+    const rect = split.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    return clampChatPct(((clientX - rect.left) / rect.width) * 100);
+  };
+
+  const commitChatPct = (pct: number) => {
+    latestPctRef.current = pct;
+    setChatPct(pct);
+    saveChatPct(pct);
+  };
+
+  const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    // setPointerCapture can throw (e.g. pointerId already captured by
+    // another element). If it does, bail before flipping any drag state
+    // so we don't get stuck in `resizing`.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      return;
+    }
+    draggingRef.current = true;
+    startPctRef.current = latestPctRef.current;
+    movedRef.current = false;
+    setResizing(true);
+  };
+
+  const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    movedRef.current = true;
+    lastMoveXRef.current = e.clientX;
+    if (moveRafRef.current != null) return;
+    moveRafRef.current = requestAnimationFrame(() => {
+      moveRafRef.current = null;
+      const pct = computePctFromClientX(lastMoveXRef.current);
+      if (pct == null) return;
+      latestPctRef.current = pct;
+      setChatPct(pct);
+    });
+  };
+
+  // Shared cleanup for pointerup and pointercancel. Returns the post-drag
+  // pct the caller should commit (final position for up, original for cancel).
+  const finishDrag = (e: React.PointerEvent<HTMLDivElement>, revertToStart: boolean) => {
+    if (!draggingRef.current) return null;
+    draggingRef.current = false;
+    setResizing(false);
+    if (moveRafRef.current != null) {
+      cancelAnimationFrame(moveRafRef.current);
+      moveRafRef.current = null;
+    }
+    // releasePointerCapture is a no-op if not held, no need to guard.
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    return revertToStart
+      ? startPctRef.current
+      : computePctFromClientX(e.clientX) ?? latestPctRef.current;
+  };
+
+  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const moved = movedRef.current;
+    const pct = finishDrag(e, false);
+    // A click on the divider without any drag shouldn't trigger a
+    // localStorage write — the chatPct hasn't changed.
+    if (pct != null && moved) commitChatPct(pct);
+  };
+
+  const onDividerPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pct = finishDrag(e, true);
+    if (pct != null) commitChatPct(pct);
+  };
+
+  const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
+
+  // Viewer panel is revealed the moment the user submits the first query
+  // (pending) or once any turn lands in history. Clearing chat collapses
+  // back to the centered-chat landing state.
+  const showPdf = pending || history.length > 0;
+
+  // Drive grid-template-columns via a CSS custom property so React only
+  // touches the style object when chatPct changes. The actual track
+  // template lives in chat.css (.split / .split.active).
+  const splitStyle = useMemo(
+    () => ({ "--chat-pct": `${chatPct}%` }) as React.CSSProperties,
+    [chatPct],
+  );
+
+  // Pointer/focus stays disabled on the viewer pane until the slide-in
+  // finishes — prevents grabbing the divider mid-animation when its
+  // visual position is still mid-translate. Re-disabled instantly on
+  // the reverse (Clear chat → solo). We key off the actual transitionend
+  // on .viewer-wrap's transform so JS doesn't have to mirror the CSS
+  // duration — they stay in sync by construction.
+  const [viewerInteractive, setViewerInteractive] = useState(false);
+  useEffect(() => {
+    if (!showPdf) {
+      setViewerInteractive(false);
+      return;
+    }
+    const wrap = viewerWrapRef.current;
+    if (!wrap) return;
+    // Reduced-motion mode strips the transition entirely; no transitionend
+    // will ever fire, so settle immediately.
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setViewerInteractive(true);
+      return;
+    }
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target === wrap && e.propertyName === "transform") {
+        setViewerInteractive(true);
+      }
+    };
+    wrap.addEventListener("transitionend", onEnd);
+    return () => wrap.removeEventListener("transitionend", onEnd);
+  }, [showPdf]);
+
+  const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // 10% step with Shift held — faster keyboard nav across wide layouts.
+    const step = (e.shiftKey ? 5 : 1) * KEYBOARD_STEP_PCT;
+    let absolute: number | null = null;
+    let delta = 0;
+    switch (e.key) {
+      case "ArrowLeft":
+        delta = -step;
+        break;
+      case "ArrowRight":
+        delta = step;
+        break;
+      case "Home":
+        absolute = MIN_CHAT_PCT;
+        break;
+      case "End":
+        absolute = MAX_CHAT_PCT;
+        break;
+      case "Enter":
+        // Space is intentionally not bound — the ARIA separator pattern
+        // doesn't define it, and conflating it with reset is unusual.
+        absolute = DEFAULT_CHAT_PCT;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    if (delta !== 0) {
+      // Read the latest written pct from the ref rather than the closure
+      // chatPct — held-key repeats can fire several events before React
+      // commits a re-render. The ref is updated synchronously below so
+      // the next event in the burst sees the correct base. saveChatPct
+      // is kept out of the setState updater so StrictMode's dev-only
+      // double invocation doesn't double-write to localStorage.
+      const next = clampChatPct(latestPctRef.current + delta);
+      latestPctRef.current = next;
+      setChatPct(next);
+      saveChatPct(next);
+    } else if (absolute !== null) {
+      commitChatPct(absolute);
+    }
+  };
+
   return (
     <MotionConfig reducedMotion="user">
     <div className="chat-shell">
@@ -353,7 +554,11 @@ export default function ChatShell() {
         </button>
       </div>
 
-      <main className="split">
+      <main
+        className={`split${resizing ? " resizing" : ""}${showPdf ? " active" : ""}`}
+        ref={splitRef}
+        style={splitStyle}
+      >
         <section className="chat">
           <div ref={scrollbackRef} className="scrollback">
             {history.length === 0 && !pending ? (
@@ -482,14 +687,40 @@ export default function ChatShell() {
           </form>
         </section>
 
-        <div className="divider" />
-
-        <section className="viewer">
-          <PdfViewerPane
-            src={viewerUrl || null}
-            storageKey={VIEWER_KEY}
-            emptyHint="Click an evidence row to view the source PDF."
+        {/* `inert` while the slide-in is in flight gates focus and pointer
+            events on the divider too (it lives inside .viewer-wrap), which
+            is intentional — the divider has no meaningful position until
+            the reveal lands. Tabindex on the divider is therefore left at
+            the static `0`; `inert` wins when set. */}
+        <section
+          className="viewer-wrap"
+          ref={viewerWrapRef}
+          inert={!viewerInteractive}
+        >
+          <div
+            className="divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuemin={MIN_CHAT_PCT}
+            aria-valuemax={MAX_CHAT_PCT}
+            aria-valuenow={Math.round(chatPct)}
+            aria-valuetext={`${Math.round(chatPct)}%`}
+            aria-label="Resize chat pane (arrow keys; Shift+arrow for 10% steps; Home/End for min/max; Enter or double-click to reset)"
+            tabIndex={0}
+            onPointerDown={onDividerPointerDown}
+            onPointerMove={onDividerPointerMove}
+            onPointerUp={endDividerDrag}
+            onPointerCancel={onDividerPointerCancel}
+            onDoubleClick={onDividerDoubleClick}
+            onKeyDown={onDividerKeyDown}
           />
+          <div className="viewer">
+            <PdfViewerPane
+              src={viewerUrl || null}
+              storageKey={VIEWER_KEY}
+              emptyHint="Click an evidence row to view the source PDF."
+            />
+          </div>
         </section>
       </main>
     </div>

@@ -76,6 +76,22 @@ describe("PdfViewerPane", () => {
     expect(postSpy.mock.calls[0][1]).toBe("http://example.com");
   });
 
+  it("re-mounts with the fresh src after src goes back to null (same stem)", () => {
+    // Regression: when src goes non-null → null → non-null with the SAME stem,
+    // the iframe re-mounts but the effect takes the postMessage path instead of
+    // reassigning iframe.src — so a stale initialSrcRef would leave the iframe
+    // pointing at the original page forever.
+    const { rerender } = render(
+      <PdfViewerPane src="http://localhost/viewer/Ren_2022?page=1" />,
+    );
+    rerender(<PdfViewerPane src={null} />);
+    expect(screen.queryByTitle("PDF viewer")).not.toBeInTheDocument();
+    rerender(<PdfViewerPane src="http://localhost/viewer/Ren_2022?page=6" />);
+    const iframe = screen.getByTitle("PDF viewer") as HTMLIFrameElement;
+    expect(iframe.src).toContain("page=6");
+    expect(iframe.src).not.toContain("page=1");
+  });
+
   it("persists the latest src to localStorage", () => {
     const { rerender } = render(
       <PdfViewerPane

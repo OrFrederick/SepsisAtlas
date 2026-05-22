@@ -48,9 +48,16 @@ export default function PdfViewerPane({
   // updates iframe.src (stem swap) or postMessages a jump (same stem). The
   // initialSrc ref's value never re-renders the iframe after mount.
   const initialSrcRef = useRef<string | null>(null);
-  if (src && initialSrcRef.current === null) {
-    initialSrcRef.current = src;
-    currentStemRef.current = parseHref(src)?.stem ?? null;
+  if (src) {
+    if (initialSrcRef.current === null) {
+      initialSrcRef.current = src;
+      currentStemRef.current = parseHref(src)?.stem ?? null;
+    }
+  } else {
+    // src cleared → iframe will unmount. Reset so the next non-null src
+    // re-mounts with the fresh URL instead of the stale first one.
+    initialSrcRef.current = null;
+    currentStemRef.current = null;
   }
 
   useEffect(() => {

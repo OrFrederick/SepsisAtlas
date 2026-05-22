@@ -22,6 +22,7 @@ Make the entire stack ship from ghcr the same way the backend does today. After 
 - Pushing to `main` triggers CI image builds only — no SSH, no remote shell execution.
 - Watchtower on the VPS pulls and restarts both containers (backend + frontend) on its existing 5-minute poll.
 - The VPS has no host services beyond docker itself (no host `caddy`, no `/var/www/atlas-main` directory).
+- The VPS has no source checkout of the repo. Only the two compose YAML files, `.env`, the `data/` bind-mount directory, and the private caddy overrides live on the box.
 
 ## Non-goals
 
@@ -147,10 +148,52 @@ Secrets `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY` become unused. Th
 
 The `bootstrap.sh` header comment is updated to reflect the new responsibility set.
 
+### VPS filesystem layout
+
+After cutover, `/opt/sepsisatlas/` contains exactly:
+
+```
+/opt/sepsisatlas/
+├── docker-compose.yml         # fetched from raw.githubusercontent.com
+├── docker-compose.prod.yml    # fetched from raw.githubusercontent.com
+├── update-compose.sh          # fetched from raw.githubusercontent.com
+├── .env                       # user-managed, gitignored, never overwritten
+├── db.sqlite                  # bind-mounted into backend
+├── data/                      # bind-mounted into backend (PDFs, exports)
+├── static/                    # bind-mounted into backend (plots)
+├── runs/                      # bind-mounted into backend (run artifacts)
+└── logs/                      # bind-mounted into backend (logs)
+```
+
+The bind-mount targets must match `docker-compose.prod.yml`'s `volumes:` list under the backend service exactly. If a future change adds a volume, that volume's host path must also exist in `/opt/sepsisatlas/` before `up -d`.
+
+No git checkout. The old `/opt/sepsisatlas/main/` clone is removed during cutover.
+
+Updates to either compose file are pulled from `raw.githubusercontent.com` via a small wrapper script (`update-compose.sh`) committed to the repo. The script is intentionally tiny — it's the *only* on-VPS escape hatch left for changing infrastructure, and a manual `curl` is fine for how rarely the compose files change.
+
+The script's content (committed to the repo, fetched the same way as the compose files on first install):
+
+```sh
+#!/usr/bin/env bash
+# Refresh the compose files on the VPS from main and restart the stack.
+# Run from /opt/sepsisatlas as the deploy user (must be in the docker group).
+set -euo pipefail
+
+RAW="https://raw.githubusercontent.com/OrFrederick/SepsisAtlas/main"
+PROJECT="atlas-main"
+
+cd /opt/sepsisatlas
+curl -fsSL "$RAW/docker-compose.yml"      -o docker-compose.yml
+curl -fsSL "$RAW/docker-compose.prod.yml" -o docker-compose.prod.yml
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" up -d --remove-orphans
+```
+
 ### Deletions
 
 - `deploy/deploy-main.sh` — removed.
-- `/var/www/atlas-main` on the VPS — removed during cutover, no longer referenced.
+- `/var/www/atlas-main` on the VPS — removed during cutover.
+- `/opt/sepsisatlas/main/` on the VPS — removed during cutover (the clone is no longer needed).
 
 ## Data flow
 
@@ -168,17 +211,38 @@ Order matters; this is the runbook the implementation plan will follow.
    - `sudo systemctl disable --now caddy`
    - `sudo apt-get purge -y caddy`
    - `sudo mkdir -p /etc/sepsisatlas/caddy-conf.d && sudo mv /etc/caddy/conf.d/* /etc/sepsisatlas/caddy-conf.d/ 2>/dev/null || true`
-   - `cd /opt/sepsisatlas/main && git pull origin main` (picks up the new compose + Dockerfile + workflow files)
-   - `docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main pull`
-   - `docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d --remove-orphans`
+   - Move the bind-mounted directories and `.env` out of the soon-to-be-deleted clone into the new layout. The set must match the volumes in `docker-compose.prod.yml` (`./data`, `./db.sqlite`, `./static`, `./runs`, `./logs`):
+     ```sh
+     sudo mkdir -p /opt/sepsisatlas
+     for d in data static runs logs; do
+       [ -d "/opt/sepsisatlas/main/$d" ] && sudo mv "/opt/sepsisatlas/main/$d" "/opt/sepsisatlas/$d"
+     done
+     sudo mv /opt/sepsisatlas/main/db.sqlite /opt/sepsisatlas/db.sqlite
+     sudo mv /opt/sepsisatlas/main/.env     /opt/sepsisatlas/.env
+     sudo chown -R deploy:deploy /opt/sepsisatlas
+     ```
+   - Fetch the compose files and the update wrapper from raw.githubusercontent.com:
+     ```sh
+     RAW="https://raw.githubusercontent.com/OrFrederick/SepsisAtlas/main"
+     curl -fsSL "$RAW/docker-compose.yml"      -o /opt/sepsisatlas/docker-compose.yml
+     curl -fsSL "$RAW/docker-compose.prod.yml" -o /opt/sepsisatlas/docker-compose.prod.yml
+     curl -fsSL "$RAW/update-compose.sh"       -o /opt/sepsisatlas/update-compose.sh
+     chmod +x /opt/sepsisatlas/update-compose.sh
+     ```
+   - Bring up the new stack:
+     ```sh
+     cd /opt/sepsisatlas
+     docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main pull
+     docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d --remove-orphans
+     ```
 3. Watch `docker logs -f atlas-frontend` for the LE cert issuance (~30s).
 4. Verify:
    - `curl -fsS https://atlas.efferon.com/health` → 200.
    - Load `https://atlas.efferon.com/papers/<any-known-stem>` in a browser; PDF viewer renders.
    - `curl -fsS https://atlas.efferon.com/data/manifest.json` → 200, non-empty.
-5. After 24h of clean operation: `sudo rm -rf /var/www/atlas-main`.
+5. After 24h of clean operation: `sudo rm -rf /var/www/atlas-main /opt/sepsisatlas/main`.
 
-Rollback: `docker compose down`, re-install `caddy` (`apt-get install -y caddy`), put the old `Caddyfile` back, `systemctl enable --now caddy`, re-run the old `deploy-main.sh` (kept in git history). Backend is unaffected throughout.
+Rollback: `docker compose down`, re-clone the repo into `/opt/sepsisatlas/main` (the data/db.sqlite/.env will need to move back), re-install `caddy` (`apt-get install -y caddy`), restore the old `Caddyfile`, `systemctl enable --now caddy`, re-run the old `deploy-main.sh` (kept in git history). Backend is unaffected throughout.
 
 ## Risks
 

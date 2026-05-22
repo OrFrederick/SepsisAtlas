@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "../src/styles/global.css";
+import "../src/styles/tailwind.css";
 
 export const metadata: Metadata = {
   title: "Sepsis Atlas",

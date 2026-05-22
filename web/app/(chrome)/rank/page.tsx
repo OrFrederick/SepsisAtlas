@@ -1,5 +1,4 @@
 import RankPage from "@/components/RankPage";
-import "@/styles/tailwind.css";
 
 export const metadata = { title: "Sepsis Atlas — Rank predictors" };
 

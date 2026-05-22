@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+# ---- Stage 1: build the Astro site with PDFs included ----
+FROM oven/bun:1.3.13-alpine AS build
+
+WORKDIR /app
+
+# Install rsync (Alpine doesn't ship it by default; we use it to mirror the
+# PDF set into web/public/pdfs/ exactly the way deploy-main.sh did).
+RUN apk add --no-cache rsync
+
+# Cache deps on package.json + bun.lock only.
+COPY web/package.json web/bun.lock ./web/
+RUN cd web && bun install --frozen-lockfile
+
+# Web source.
+COPY web ./web
+
+# Raw PDFs go next to the source so the build can rsync them in. Doing the
+# rsync inside the image (rather than from the build context directly into
+# web/public/pdfs/) keeps the file layout obvious in case the build is
+# debugged later.
+COPY data/papers/raw ./data/papers/raw
+RUN mkdir -p web/public/pdfs && \
+    rsync -a --delete --include='*.pdf' --exclude='*' \
+      data/papers/raw/ web/public/pdfs/
+
+# Build the static site. PUBLIC_BACKEND_URL="" mirrors deploy-main.sh's
+# call — same-origin fetches via caddy.
+RUN cd web && PUBLIC_BACKEND_URL="" bun run build
+
+# ---- Stage 2: caddy serving the built dist ----
+FROM caddy:2-alpine
+
+# Pre-create the empty conf.d dir so `import /etc/caddy/conf.d/*.caddy` in
+# the Caddyfile doesn't fail when the host bind-mount is empty.
+RUN mkdir -p /etc/caddy/conf.d
+
+COPY --from=build /app/web/dist /srv
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80 443 443/udp

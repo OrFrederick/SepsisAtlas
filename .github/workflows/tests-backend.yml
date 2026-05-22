@@ -36,13 +36,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # setup-uv handles two of the three caches we want:
+      #   - ~/.cache/uv          (download/build cache, enable-cache: true)
+      #   - uv-managed Python    (pinned via python-version below)
+      # The third — the resolved .venv/ — we cache explicitly so a clean
+      # `uv sync` is a near-noop when uv.lock hasn't changed.
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+          python-version: "3.11"
 
-      - name: install python
-        run: uv python install 3.11
+      - name: cache .venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-uv-venv-py3.11-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-venv-py3.11-
 
       - name: sync deps (incl. dev)
         run: uv sync --extra dev

@@ -39,6 +39,20 @@ jobs:
         with:
           bun-version: 1.3.13
 
+      # setup-bun does not cache packages. Cache both the resolved
+      # node_modules tree and bun's global download cache. On a hit with
+      # an unchanged bun.lock, `bun install --frozen-lockfile` becomes
+      # effectively a no-op.
+      - name: cache bun deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            web/node_modules
+            ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('web/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: install
         run: bun install --frozen-lockfile --ignore-scripts
 

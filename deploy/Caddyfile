@@ -1,5 +1,10 @@
 # Sepsis Atlas — atlas.efferon.com
 #
+# This Caddyfile is baked into the frontend container image at
+# /etc/caddy/Caddyfile. The static site lives at /srv (Astro dist + PDFs +
+# data JSON, all built into the image). API routes reverse-proxy to the
+# `backend` compose service over the internal network.
+#
 # Path matchers below mirror src/api/main.py exactly. They are tight on
 # purpose — trailing `*` was hijacking sibling Astro pages (/papers/index
 # was being routed to the backend instead of being served as a static SPA).
@@ -11,7 +16,7 @@
 
 atlas.efferon.com {
 	encode zstd gzip
-	root * /var/www/atlas-main
+	root * /srv
 
 	# Server-side directives that shouldn't live in the public repo
 	# (basic-auth credential hash, IP allow-lists, etc.). Empty dir = no-op.
@@ -31,7 +36,7 @@ atlas.efferon.com {
 		path /static/*
 	}
 	handle @api {
-		reverse_proxy 127.0.0.1:8000
+		reverse_proxy backend:8000
 	}
 
 	# Static SPA fallback for everything else (including /papers/<stem>,
@@ -44,9 +49,5 @@ atlas.efferon.com {
 	handle {
 		try_files {path} {path}/index.html /index.html
 		file_server
-	}
-
-	log {
-		output file /var/log/caddy/atlas.efferon.com.access.log
 	}
 }

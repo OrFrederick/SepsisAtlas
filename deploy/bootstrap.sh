@@ -4,6 +4,13 @@
 # Run as root on the target machine:
 #   ssh root@<host> bash -s < deploy/bootstrap.sh
 #
+# After this script runs, the host has:
+#   - a `deploy` user with the ops team's SSH keys + docker group membership
+#   - docker engine + compose plugin
+#   - ufw allowing 22/80/443, fail2ban watching sshd, unattended-upgrades
+#   - /opt/sepsisatlas/ ready for the compose files (fetched separately)
+#   - /etc/sepsisatlas/caddy-conf.d/ ready for private caddy directives
+#
 # Idempotent — re-running on a configured host is safe.
 
 set -euo pipefail
@@ -21,16 +28,14 @@ create_deploy_user() {
     chown "$DEPLOY_USER:$DEPLOY_USER" "/home/$DEPLOY_USER/.ssh/authorized_keys"
     chmod 600 "/home/$DEPLOY_USER/.ssh/authorized_keys"
   fi
-  # NOTE: deliberately no broad NOPASSWD: ALL grant. prepare_dirs installs a
-  # narrow rule limited to the exact commands deploy-main.sh needs (rsync,
-  # install, chown, cp, systemctl reload caddy). If the deploy SSH key
-  # leaks, the attacker can re-trigger a deploy but cannot escalate to
-  # root or run arbitrary commands.
+  # NOTE: deliberately no broad NOPASSWD: ALL grant. The deploy user runs
+  # docker compose via docker-group membership (granted by install_docker),
+  # not via sudo. Any prior narrow sudoers rule from earlier bootstrap
+  # revisions is cleaned up in prepare_dirs.
   #
   # Clean up the broad grant a previous bootstrap revision wrote at
   # /etc/sudoers.d/$DEPLOY_USER. Without this, an earlier-provisioned host
-  # keeps the broad NOPASSWD: ALL alongside the new narrow rule, silently
-  # undoing the sudoers tightening.
+  # keeps the broad NOPASSWD: ALL grant indefinitely.
   rm -f "/etc/sudoers.d/$DEPLOY_USER"
 
   # Pre-create the docker creds file so the Watchtower bind-mount lands on
@@ -64,6 +69,7 @@ setup_firewall() {
   ufw allow 22/tcp comment 'ssh'
   ufw allow 80/tcp comment 'http'
   ufw allow 443/tcp comment 'https'
+  ufw allow 443/udp comment 'http3'
   ufw default deny incoming
   ufw default allow outgoing
   yes | ufw enable || true
@@ -106,47 +112,13 @@ install_docker() {
   usermod -aG docker "$DEPLOY_USER"
 }
 
-install_caddy() {
-  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-  if [[ ! -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg ]]; then
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  fi
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' >/etc/apt/sources.list.d/caddy-stable.list
-  apt-get update
-  apt-get install -y caddy
-  systemctl enable --now caddy
-}
-
-install_bun() {
-  mkdir -p /opt/bun
-  chown "$DEPLOY_USER:$DEPLOY_USER" /opt/bun
-  if [[ ! -x /opt/bun/bin/bun ]]; then
-    sudo -u "$DEPLOY_USER" bash -lc 'curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash'
-  fi
-  ln -sf /opt/bun/bin/bun /usr/local/bin/bun
-  ln -sf /opt/bun/bin/bunx /usr/local/bin/bunx
-}
-
 prepare_dirs() {
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /opt/sepsisatlas
-  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /var/www
-  install -d -o caddy -g caddy -m 755 /var/log/caddy
-  install -d -o caddy -g caddy -m 750 /etc/caddy/conf.d
-
-  # Narrow sudoers: exactly the commands deploy-main.sh runs, with literal
-  # paths so wildcards can't be abused to read/write other files. This is
-  # the ONLY sudo grant the deploy user has — there is no broad NOPASSWD
-  # rule elsewhere.
-  cat >/etc/sudoers.d/deploy-caddy <<'EOF'
-deploy ALL=(root) NOPASSWD: \
-    /usr/bin/install -d -o caddy -g caddy /var/www/atlas-main, \
-    /usr/bin/rsync -a --delete /opt/sepsisatlas/main/web/dist/ /var/www/atlas-main/, \
-    /usr/bin/chown -R caddy\:caddy /var/www/atlas-main, \
-    /usr/bin/cp /opt/sepsisatlas/main/deploy/Caddyfile /etc/caddy/Caddyfile, \
-    /usr/bin/systemctl reload caddy
-EOF
-  chmod 440 /etc/sudoers.d/deploy-caddy
-  visudo -cf /etc/sudoers.d/deploy-caddy >/dev/null
+  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 755 /etc/sepsisatlas/caddy-conf.d
+  # The deploy user no longer needs any narrow sudo rules — host caddy is gone,
+  # all infra changes go through docker compose, and the deploy user is in the
+  # docker group (granted by install_docker above).
+  rm -f /etc/sudoers.d/deploy-caddy
 }
 
 set_hostname_and_tz() {
@@ -163,8 +135,6 @@ main() {
   setup_fail2ban
   setup_unattended_upgrades
   install_docker
-  install_caddy
-  install_bun
   prepare_dirs
   set_hostname_and_tz
   # SSH hardening LAST so any earlier failure doesn't lock us out before

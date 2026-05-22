@@ -1,13 +1,12 @@
 name: deploy main
 
 # On every push to main (except docs-only):
-#   1. detect whether backend code changed
-#   2. if yes, build + push backend image to ghcr
-#   3. ssh to VPS and run deploy-main.sh (frontend rebuild + caddy reload)
+#   1. detect whether backend and/or frontend code changed
+#   2. build + push whichever images changed to ghcr
 #
 # Watchtower on the VPS polls ghcr every 5 minutes and restarts the
-# backend container when a new :main tag lands, so this workflow does
-# not need to trigger a backend restart explicitly.
+# matching container when a new :main tag lands, so this workflow does
+# not need to trigger anything on the VPS directly.
 
 on:
   push:
@@ -28,13 +27,15 @@ permissions:
 env:
   # Hardcoded lowercase — docker tags reject mixed-case (`OrFrederick`).
   # Keep in sync with `image:` in docker-compose.prod.yml.
-  IMAGE: ghcr.io/orfrederick/sepsis-atlas-backend
+  BACKEND_IMAGE: ghcr.io/orfrederick/sepsis-atlas-backend
+  FRONTEND_IMAGE: ghcr.io/orfrederick/sepsis-atlas-frontend
 
 jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -45,6 +46,12 @@ jobs:
               - 'src/**'
               - 'docker/Dockerfile.backend'
               - 'pyproject.toml'
+              - '.dockerignore'
+            frontend:
+              - 'web/**'
+              - 'docker/Dockerfile.frontend'
+              - 'deploy/Caddyfile'
+              - 'data/papers/raw/**'
               - '.dockerignore'
 
   build-backend:
@@ -62,33 +69,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: build + push
+      - name: build + push backend
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.backend
           push: true
           tags: |
-            ${{ env.IMAGE }}:main
-            ${{ env.IMAGE }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.BACKEND_IMAGE }}:main
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
-  deploy:
-    needs: [changes, build-backend]
-    # Run if backend build succeeded, OR if the build was skipped (no backend
-    # change). Skip deploy if the build was attempted and failed.
-    if: |
-      always() && needs.changes.result == 'success' &&
-      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped')
+  build-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: ssh deploy
-        uses: appleboy/ssh-action@v1.2.0
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
-          host: ${{ secrets.DEPLOY_SSH_HOST }}
-          username: ${{ secrets.DEPLOY_SSH_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: /opt/sepsisatlas/main/deploy/deploy-main.sh
-          script_stop: true
-          command_timeout: 10m
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build + push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:main
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

@@ -17,6 +17,7 @@ web/dist
 
 # Runtime state / data — never goes into the image
 data
+!data/papers/raw
 runs
 logs
 static/plots
@@ -34,6 +35,7 @@ db.sqlite-shm
 # Docs and misc
 docs
 deploy
+!deploy/Caddyfile
 .playwright-mcp
 *.log
 viewer-*.png

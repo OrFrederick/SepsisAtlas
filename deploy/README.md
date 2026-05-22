@@ -92,11 +92,6 @@ REST API. Required production env vars:
 - `FEEDBACK_ALLOWED_ORIGIN` — comma-separated list of allowed `Origin`/`Referer`
   prefixes for form submissions. In prod, set to the public hostname.
 
-Optional CAPTCHA (off by default):
-
-- `HCAPTCHA_SECRET` and `NEXT_PUBLIC_HCAPTCHA_SITE_KEY` — set both to enable
-  hCaptcha on the form.
-
 Run `scripts/setup-feedback-labels.sh` once after deploy to seed the
 required labels. Triage board: https://github.com/users/OrFrederick/projects/2
 

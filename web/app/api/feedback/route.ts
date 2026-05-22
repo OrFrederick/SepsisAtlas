@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateFeedback } from "../../../src/lib/feedback-schema";
 import { RateLimiter } from "../../../src/lib/rate-limit";
-import { verifyCaptcha } from "../../../src/lib/captcha";
 import { createFeedbackIssue } from "../../../src/lib/github";
 
 export const runtime = "nodejs";
@@ -70,10 +69,6 @@ export async function POST(req: Request): Promise<Response> {
       { ok: false, error: "rate-limited", retryAfterSec: rl.retryAfterSec },
       { status: 429, headers: { "retry-after": String(rl.retryAfterSec) } },
     );
-  }
-
-  if (!(await verifyCaptcha(v.value.captchaToken))) {
-    return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
   try {

@@ -5,11 +5,6 @@ vi.mock("../../src/lib/github", () => ({
   createFeedbackIssue: createIssueMock,
 }));
 
-const verifyCaptchaMock = vi.fn();
-vi.mock("../../src/lib/captcha", () => ({
-  verifyCaptcha: verifyCaptchaMock,
-}));
-
 const ORIGINAL_ENV = { ...process.env };
 
 async function callPost(headers: Record<string, string>, body: unknown) {
@@ -36,13 +31,10 @@ describe("POST /api/feedback", () => {
   beforeEach(() => {
     createIssueMock.mockReset();
     createIssueMock.mockResolvedValue({ issueUrl: "https://github.com/o/r/issues/1" });
-    verifyCaptchaMock.mockReset();
-    verifyCaptchaMock.mockResolvedValue(true);
     vi.resetModules();
     process.env.GITHUB_FEEDBACK_TOKEN = "tok";
     process.env.GITHUB_FEEDBACK_REPO = "o/r";
     process.env.FEEDBACK_ALLOWED_ORIGIN = "http://localhost";
-    delete process.env.HCAPTCHA_SECRET;
   });
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -120,13 +112,6 @@ describe("POST /api/feedback", () => {
     vi.stubEnv("NODE_ENV", "production");
     const res = await callPost({ origin: "http://anywhere" }, validBody());
     expect(res.status).toBe(403);
-    expect(createIssueMock).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 when verifyCaptcha returns false", async () => {
-    verifyCaptchaMock.mockResolvedValueOnce(false);
-    const res = await callPost({ origin: "http://localhost" }, validBody());
-    expect(res.status).toBe(400);
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 

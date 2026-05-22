@@ -9,7 +9,6 @@ export interface FeedbackPayload {
   rowContext?: unknown;
   contact?: string;
   website: string; // honeypot, must be ""
-  captchaToken?: string;
   formMountedAtMs?: number;
 }
 
@@ -55,9 +54,6 @@ export function validateFeedback(input: unknown): ValidationResult {
   if (o.rowContext !== undefined && !isJsonSerializable(o.rowContext)) {
     return { ok: false, error: "bad-row-context" };
   }
-  if (o.captchaToken !== undefined && typeof o.captchaToken !== "string") {
-    return { ok: false, error: "bad-captcha" };
-  }
   if (o.formMountedAtMs !== undefined && typeof o.formMountedAtMs !== "number") {
     return { ok: false, error: "bad-mount-time" };
   }
@@ -72,7 +68,6 @@ export function validateFeedback(input: unknown): ValidationResult {
       rowContext: o.rowContext,
       contact: o.contact as string | undefined,
       website: "",
-      captchaToken: o.captchaToken as string | undefined,
       formMountedAtMs: o.formMountedAtMs as number | undefined,
     },
   };

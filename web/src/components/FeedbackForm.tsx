@@ -83,7 +83,6 @@ export function FeedbackForm(props: FeedbackFormProps) {
         <select
           value={type}
           onChange={(e) => setType(e.target.value as FeedbackType)}
-          aria-label="Type"
         >
           {FEEDBACK_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -115,7 +114,6 @@ export function FeedbackForm(props: FeedbackFormProps) {
           minLength={5}
           maxLength={120}
           required
-          aria-label="Title"
         />
       </label>
 
@@ -128,7 +126,6 @@ export function FeedbackForm(props: FeedbackFormProps) {
           maxLength={5000}
           required
           rows={8}
-          aria-label="Details"
         />
       </label>
 
@@ -138,21 +135,23 @@ export function FeedbackForm(props: FeedbackFormProps) {
           type="email"
           value={contact}
           onChange={(e) => setContact(e.target.value)}
-          aria-label="Email"
         />
       </label>
 
-      {/* Honeypot — hidden from humans, bots tend to fill it in. */}
-      <label aria-hidden="true" style={{ position: "absolute", left: "-9999px" }}>
-        Website
-        <input
-          type="text"
-          tabIndex={-1}
-          autoComplete="off"
-          value={website}
-          onChange={(e) => setWebsite(e.target.value)}
-        />
-      </label>
+      {/* Honeypot — hidden from humans and assistive tech, bots fill it. */}
+      <div aria-hidden="true" style={{ position: "absolute", left: "-9999px" }}>
+        <label>
+          Website
+          <input
+            type="text"
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+          />
+        </label>
+      </div>
 
       <button type="submit" disabled={status.kind === "submitting"}>
         {status.kind === "submitting" ? "Submitting…" : "Submit"}

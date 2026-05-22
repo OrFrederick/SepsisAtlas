@@ -14,7 +14,10 @@
   --color-bg: #FCFCFC;
   --color-panel: #FFFFFF;
   --color-panel-2: #F2F6FB;
-  --color-panel-3: #E8F3FB;
+  /* Neutral cool gray — kept distinct from --color-accent-soft so a hover that
+     walks panel → panel-2 → panel-3 doesn't accidentally read as an accent
+     state. */
+  --color-panel-3: #E8ECEF;
   --color-border: #D8E0EC;
   --color-border-strong: #B8CCEA;
   --color-fg: #1A1F2C;
@@ -101,9 +104,17 @@
     color: inherit;
   }
 
-  /* Split-pane shells (chat, paper detail) need <main> to span edge-to-edge. */
+  /* Split-pane shells (chat, paper detail) need <main> to span edge-to-edge.
+     .split-shell renders inside the global <main>, so this override has the
+     same specificity as the base `main { max-width; padding; margin }` rule
+     above. Without !important, source order wins and the base rule clobbers
+     this one. The .chat-shell main {} variant doesn't need !important because
+     position: fixed lifts it out of the flow entirely; if a future refactor
+     gives split-shell the same treatment, the !important here can go too. */
   body:has(.split-shell) main {
-    @apply m-0 max-w-none p-0;
+    margin: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
   }
   body:has(.chat-shell) {
     @apply overflow-hidden;
@@ -491,13 +502,27 @@
 
   /* --- Chat shell ----------------------------------------------- */
   .chat-shell {
-    @apply grid fixed left-0 right-0 bottom-0 bg-bg;
+    /* Topbar sits at z-index: 20. Pin the shell below it so any future
+       ancestor that creates a stacking context (transform, opacity<1,
+       will-change, isolation) can't let the topbar paint over the shell. */
+    @apply grid fixed left-0 right-0 bottom-0 z-10 bg-bg;
     grid-template-rows: 44px 1fr;
     top: 49px;
   }
   .controls {
     @apply flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg;
     border-bottom: 1px solid var(--color-border);
+  }
+  /* Narrow viewports: the fixed shell can't grow page scroll to absorb a tall
+     controls row, so allow it to wrap and tighten side padding instead. */
+  @media (max-width: 480px) {
+    .controls {
+      @apply flex-wrap justify-start gap-2 py-2 px-3;
+    }
+    .mode-hint {
+      flex: 1 1 100%;
+      order: -1;
+    }
   }
   .backend-toggle {
     @apply inline-flex border border-border rounded-full overflow-hidden bg-panel;
@@ -558,7 +583,11 @@
     @apply flex flex-col bg-bg overflow-hidden;
   }
   .scrollback {
+    /* Prevent iOS Safari momentum scroll from leaking into the body and
+       shifting the fixed .chat-shell. body:has(.chat-shell) { overflow:hidden }
+       alone isn't enough on mobile Safari. */
     @apply flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px];
+    overscroll-behavior: contain;
   }
   .scrollback::-webkit-scrollbar {
     width: 8px;

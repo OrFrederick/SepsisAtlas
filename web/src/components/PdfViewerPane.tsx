@@ -67,7 +67,11 @@ export default function PdfViewerPane({
     if (!iframe) return;
     const sameStem = parsed && currentStemRef.current === parsed.stem;
     if (sameStem && iframe.contentWindow) {
-      const origin = targetOrigin ?? window.location.origin;
+      // Default targetOrigin from the URL itself — the iframe loads from
+      // exactly this origin, so postMessage must match it. Consumers can
+      // override explicitly if they need a different origin guard.
+      const origin =
+        targetOrigin ?? new URL(src, window.location.origin).origin;
       iframe.contentWindow.postMessage(
         {
           type: "sepsis-atlas:jump",

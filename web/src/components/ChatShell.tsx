@@ -489,7 +489,6 @@ export default function ChatShell() {
           <PdfViewerPane
             src={viewerUrl || null}
             storageKey={VIEWER_KEY}
-            targetOrigin={BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : undefined)}
             emptyHint="Click an evidence row to view the source PDF."
           />
         </section>

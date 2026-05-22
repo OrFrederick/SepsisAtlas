@@ -45,7 +45,7 @@ describe("PdfViewerPane", () => {
       bbox: [1, 2, 3, 4],
       origin: "tl",
     });
-    expect(targetOrigin).toBe(window.location.origin);
+    expect(targetOrigin).toBe("http://localhost");
   });
 
   it("swaps src when the stem changes", () => {
@@ -55,6 +55,25 @@ describe("PdfViewerPane", () => {
     rerender(<PdfViewerPane src="http://localhost/viewer/Seymour_2016?page=2" />);
     const iframe = screen.getByTitle("PDF viewer") as HTMLIFrameElement;
     expect(iframe.src).toContain("/viewer/Seymour_2016");
+  });
+
+  it("derives targetOrigin from the src URL when not passed explicitly", () => {
+    const { rerender } = render(
+      <PdfViewerPane src="http://example.com/viewer/Ren_2022?page=1" />,
+    );
+    const iframe = screen.getByTitle("PDF viewer") as HTMLIFrameElement;
+    const postSpy = vi.fn();
+    Object.defineProperty(iframe, "contentWindow", {
+      configurable: true,
+      get: () => ({ postMessage: postSpy }),
+    });
+
+    rerender(
+      <PdfViewerPane src="http://example.com/viewer/Ren_2022?page=3" />,
+    );
+
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy.mock.calls[0][1]).toBe("http://example.com");
   });
 
   it("persists the latest src to localStorage", () => {

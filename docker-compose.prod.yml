@@ -6,10 +6,12 @@
 # Differences from dev compose:
 #   - Backend is pulled from ghcr.io (built by .github/workflows/deploy.yml),
 #     never built on the host. The local `build:` directive is reset.
-#   - Backend bound to loopback only (Caddy proxies in front)
-#   - Source-code volume mount dropped (no hot reload in prod)
-#   - Watchtower watches the backend container and pulls/restarts whenever a
-#     new image tag appears in ghcr.
+#   - Backend is only reachable over the compose network; no host port mapping.
+#   - Source-code volume mount dropped (no hot reload in prod).
+#   - Frontend container (caddy + Astro dist + PDFs + JSON, all baked in)
+#     terminates TLS on :80/:443 and reverse-proxies API routes to backend.
+#   - Watchtower watches both labeled containers and pulls/restarts whenever
+#     a new image tag appears in ghcr.
 
 services:
   backend:
@@ -27,8 +29,26 @@ services:
       - ./static:/app/static
       - ./runs:/app/runs
       - ./logs:/app/logs
-    ports: !override
-      - "127.0.0.1:8000:8000"
+    ports: !reset null
+
+  frontend:
+    image: ghcr.io/orfrederick/sepsis-atlas-frontend:main
+    pull_policy: missing
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - /etc/sepsisatlas/caddy-conf.d:/etc/caddy/conf.d:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [sepsis]
 
   watchtower:
     image: containrrr/watchtower:1.7.1
@@ -46,3 +66,7 @@ services:
       WATCHTOWER_POLL_INTERVAL: "300"   # 5 minutes
       WATCHTOWER_INCLUDE_RESTARTING: "true"
     networks: [sepsis]
+
+volumes:
+  caddy_data:
+  caddy_config:

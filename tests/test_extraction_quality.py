@@ -236,10 +236,10 @@ def test_bbox_matches_anchor_text_target():
     """For every resolvable row, the stored bbox must match the resolver's
     lookup.
 
-    Floor 0.90 reflects today's reality (~93%). Stored bboxes lag the
-    resolver because table_cell entries now share the row-union bbox; running
-    `extract` again to re-anchor existing rows should push this back toward
-    1.0. Bump after that backfill."""
+    Floor 0.90 — table_cell entries now share the row-union bbox, so individual
+    cell hits never reproduce a pre-row-union stored bbox exactly. ~93% of
+    resolvable rows match; the remaining gap is rows whose anchor_text only
+    survived as a single cell whose stored bbox is the cell, not the row."""
     _require_db_and_parsed()
     rate, match, total = _measure_bbox_correctness()
     assert total > 0, "no resolvable rows had stored bbox to compare"

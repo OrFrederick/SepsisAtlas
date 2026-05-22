@@ -14,6 +14,9 @@ venv
 # Frontend — built separately on the VPS, not in the backend image
 web/node_modules
 web/dist
+web/.next
+web/.astro
+web/*.tsbuildinfo
 
 # Runtime state / data — never goes into the image
 data

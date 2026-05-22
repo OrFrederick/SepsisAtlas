@@ -3,8 +3,13 @@ import type { NextConfig } from "next";
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
 const config: NextConfig = {
+  // Standalone output: emits a minimal `.next/standalone/server.js` plus the
+  // exact node_modules subset it imports. Lets the production Docker image
+  // ship a ~30MB runtime instead of dragging the full bun-installed tree.
+  // Required by docker/Dockerfile.frontend's COPY layout.
+  output: "standalone",
   // Mirror the Astro/Vite dev proxy so /query and friends hit FastAPI in `next dev`.
-  // In prod, nginx terminates these paths before they ever reach Node — these rules
+  // In prod, Caddy terminates these paths before they ever reach Node — these rules
   // exist so dev and prod use the same code path on the client side.
   async rewrites() {
     return [

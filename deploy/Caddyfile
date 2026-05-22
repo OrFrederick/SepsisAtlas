@@ -1,14 +1,18 @@
 # Sepsis Atlas — atlas.efferon.com
 #
 # This Caddyfile is baked into the frontend container image at
-# /etc/caddy/Caddyfile. The static site lives at /srv (Astro dist + PDFs +
-# data JSON, all built into the image). API routes reverse-proxy to the
-# `backend` compose service over the internal network.
+# /etc/caddy/Caddyfile. Caddy terminates TLS on :80/:443 and reverse-
+# proxies every request that isn't a FastAPI route to the Next.js server
+# running alongside it on localhost:3000 (see docker/Dockerfile.frontend).
+# API routes go to the `backend` compose service over the internal network.
 #
-# Path matchers below mirror src/api/main.py exactly. They are tight on
-# purpose — trailing `*` was hijacking sibling Astro pages (/papers/index
-# was being routed to the backend instead of being served as a static SPA).
-# Any new FastAPI route must be added here as well.
+# Path matchers below mirror src/api/main.py exactly. Tight on purpose:
+# trailing `*` was hijacking sibling Next routes — /papers/<stem> is a
+# Next page, /papers/<stem>/pdf is the FastAPI raw-PDF endpoint, and
+# whoever shadows the other wins. /viewer/* used to belong to FastAPI
+# (the static viewer.html shim) but is now a Next App Router route; the
+# matcher no longer includes it. Any new FastAPI route must be added
+# here AND the Next config's rewrites() block.
 
 {
 	email ops@efferon.com
@@ -16,17 +20,16 @@
 
 atlas.efferon.com {
 	encode zstd gzip
-	root * /srv
 
 	# Server-side directives that shouldn't live in the public repo
 	# (basic-auth credential hash, IP allow-lists, etc.). Empty dir = no-op.
 	import /etc/caddy/conf.d/*.caddy
 
-	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py.
+	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py
+	# and the rewrites() block in web/next.config.ts.
 	@api {
 		path /query
 		path /rank_predictors
-		path /viewer/*
 		path /papers/*/pdf
 		path /ingest_pubmed
 		path /health
@@ -39,15 +42,19 @@ atlas.efferon.com {
 		reverse_proxy backend:8000
 	}
 
-	# Static SPA fallback for everything else (including /papers/<stem>,
-	# /graph, /rank Astro pages — Astro emits these as <route>/index.html,
-	# so try_files probes the directory's index before falling back to the
-	# root SPA shell. Without {path}/index.html every subroute was 200ing
-	# with the homepage instead of its own page. /viewer/<stem> is
-	# currently shadowed by the backend matcher above, kept that way
-	# pending a separate decision about which viewer is canonical.
+	# Lock down Next's ISR-flush endpoint. Only the Python exporter on the
+	# compose network should reach it (via the backend service hitting
+	# localhost:3000 directly inside the frontend container, bypassing
+	# Caddy entirely). External traffic gets a 404.
+	@revalidate path /api/revalidate
+	handle @revalidate {
+		respond 404
+	}
+
+	# Everything else (chrome routes, /papers/<stem>, /viewer/<stem>,
+	# /_next/* asset chunks, items in public/) is served by Next. Next
+	# emits its own cache-control headers; let it answer.
 	handle {
-		try_files {path} {path}/index.html /index.html
-		file_server
+		reverse_proxy localhost:3000
 	}
 }

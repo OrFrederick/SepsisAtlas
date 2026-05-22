@@ -25,7 +25,7 @@ export type ValidationResult =
 
 const STEM_RE = /^[A-Za-z0-9_-]+$/;
 // GitHub's web UI rejects label names longer than 50 chars. The route
-// derives a label as `paper:<stem>` (7-char prefix), so cap the stem at
+// derives a label as `paper:<stem>` (6-char prefix), so cap the stem at
 // 40 to keep the resulting label safely under that limit.
 const STEM_MAX_LEN = 40;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

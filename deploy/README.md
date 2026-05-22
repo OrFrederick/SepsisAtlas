@@ -81,6 +81,25 @@ gh workflow run "deploy main" -R OrFrederick/SepsisAtlas
 ssh efferon-deploy 'cd /opt/sepsisatlas && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main restart backend'
 ```
 
+## Feedback feature
+
+The feedback form (`/feedback`) creates labeled GitHub issues via the GitHub
+REST API. Required production env vars:
+
+- `GITHUB_FEEDBACK_TOKEN` — fine-grained PAT, scoped to `Issues: read & write`
+  on `OrFrederick/SepsisAtlas` only. Set 1-year expiry; rotate annually.
+- `GITHUB_FEEDBACK_REPO` — usually `OrFrederick/SepsisAtlas`.
+- `FEEDBACK_ALLOWED_ORIGIN` — comma-separated list of allowed `Origin`/`Referer`
+  prefixes for form submissions. In prod, set to the public hostname.
+
+Optional CAPTCHA (off by default):
+
+- `HCAPTCHA_SECRET` and `NEXT_PUBLIC_HCAPTCHA_SITE_KEY` — set both to enable
+  hCaptcha on the form.
+
+Run `scripts/setup-feedback-labels.sh` once after deploy to seed the
+required labels. Triage board: https://github.com/users/OrFrederick/projects/2
+
 ## Private caddy directives
 
 If you need basic-auth, IP allow-lists, or any other server-side-only caddy snippets that can't go in the public image, drop `.caddy` files into `/etc/sepsisatlas/caddy-conf.d/` on the VPS. The frontend container bind-mounts that dir as read-only at `/etc/caddy/conf.d/`, and the baked Caddyfile imports everything in it. Restart the frontend container to pick up changes.

@@ -11,7 +11,6 @@ type SortKey =
   | "weak"
   | "fail"
   | "parsed"
-  | "translated"
   | "last_update";
 
 type Col = { key: SortKey; label: string; type: "str" | "num" | "bool" };
@@ -25,7 +24,6 @@ const COLS: Col[] = [
   { key: "weak", label: "~ weak", type: "num" },
   { key: "fail", label: "✗ fail", type: "num" },
   { key: "parsed", label: "Parsed", type: "bool" },
-  { key: "translated", label: "Translated", type: "bool" },
   { key: "last_update", label: "Last update", type: "str" },
 ];
 
@@ -47,8 +45,6 @@ function cellValue(p: Paper, key: SortKey): string | number | boolean {
       return p.verdicts?.fail ?? 0;
     case "parsed":
       return p.parsed;
-    case "translated":
-      return p.translated;
     case "last_update":
       return p.last_update ?? "";
   }
@@ -129,9 +125,6 @@ export default function PapersTable({ papers, basePath }: Props) {
               <td className="col-fail">{p.verdicts?.fail ?? 0}</td>
               <td className={`col-flag ${p.parsed ? "yes" : "no"}`}>
                 {p.parsed ? "yes" : "no"}
-              </td>
-              <td className={`col-flag ${p.translated ? "yes" : "no"}`}>
-                {p.translated ? "yes" : "no"}
               </td>
               <td>{p.last_update ?? ""}</td>
             </tr>

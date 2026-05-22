@@ -10,7 +10,6 @@ const paper: Paper = {
   year: 2022,
   journal: "JAMA",
   parsed: true,
-  translated: false,
   n_rows: 2,
   verdicts: { ok: 1, weak: 1, fail: 0, unverified: 0 },
   last_update: "2024-05-01",

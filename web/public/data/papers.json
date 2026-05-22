@@ -1,0 +1,482 @@
+[
+  {
+    "file_name": "Baloch_2022",
+    "title": "Comparison of Pediatric Sequential Organ Failure Assessment and Pediatric Risk of Mortality III Score as Mortality Prediction in Pediatric Intensive Care Unit",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 12,
+    "verdicts": {
+      "ok": 10,
+      "weak": 0,
+      "fail": 2,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 21:54:54.114928"
+  },
+  {
+    "file_name": "Besen_2016",
+    "title": "Sepsis-3 definitions predict ICU mortality in a low-middle-income country",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 500,
+    "verdicts": {
+      "ok": 476,
+      "weak": 9,
+      "fail": 15,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:06:31.750311"
+  },
+  {
+    "file_name": "Bidart_2024",
+    "title": "Mortality predictors in patients with suspected sepsis in the emergency department of a tertiary care hospital: a retrospective cohort study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 62,
+    "verdicts": {
+      "ok": 61,
+      "weak": 1,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 07:44:09.519767"
+  },
+  {
+    "file_name": "Cao_2021",
+    "title": "Epidemiology and Mortality of Sepsis in Intensive Care Units in Prefecture-Level Cities in Sichuan, China: A Prospective Multicenter Study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 66,
+    "verdicts": {
+      "ok": 66,
+      "weak": 0,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 05:56:28.349567"
+  },
+  {
+    "file_name": "Chen_2021",
+    "title": "Association between serum phosphate and mortality in critically ill patients: a large retrospective cohort study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 420,
+    "verdicts": {
+      "ok": 94,
+      "weak": 172,
+      "fail": 154,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 08:16:38.376903"
+  },
+  {
+    "file_name": "Cilloniz_2019",
+    "title": "Risk and Prognostic Factors in Very Old Patients with Sepsis Secondary to Community-Acquired Pneumonia",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 34,
+    "verdicts": {
+      "ok": 33,
+      "weak": 1,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 22:54:05.457076"
+  },
+  {
+    "file_name": "Gai_2022",
+    "title": "Risk factors for the prognosis of patients with sepsis in intensive care units",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 16,
+    "verdicts": {
+      "ok": 16,
+      "weak": 0,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:40:16.983660"
+  },
+  {
+    "file_name": "Holanda_2020",
+    "title": "Risk factors for death in patients with sepsis admitted to an obstetric intensive care unit",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 25,
+    "verdicts": {
+      "ok": 21,
+      "weak": 4,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 22:48:09.128068"
+  },
+  {
+    "file_name": "Kochkin_2021",
+    "title": "Предикторы летального исхода у пациентов с рефрактерным септическим шоком",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 18,
+    "verdicts": {
+      "ok": 18,
+      "weak": 0,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 22:43:26.594441"
+  },
+  {
+    "file_name": "Koozi_2023",
+    "title": "A simple mortality prediction model for sepsis patients in intensive care",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 37,
+    "verdicts": {
+      "ok": 37,
+      "weak": 0,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 22:57:51.746562"
+  },
+  {
+    "file_name": "Kozlov_2022",
+    "title": "INTENSIVE CARE IN SEPSIS",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 12,
+    "verdicts": {
+      "ok": 10,
+      "weak": 2,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 22:57:35.659770"
+  },
+  {
+    "file_name": "Li_2020",
+    "title": "A risk score based on pediatric sequential organ failure assessment predicts 90-day mortality in children with Klebsiella pneumoniae bloodstream infection",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 30,
+    "verdicts": {
+      "ok": 8,
+      "weak": 22,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 23:03:12.596346"
+  },
+  {
+    "file_name": "Li_2024",
+    "title": "Persistent high sepsis-induced coagulopathy and sequential organ failure assessment scores can predict the 28-day mortality of patients with sepsis: A prospective study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 44,
+    "verdicts": {
+      "ok": 0,
+      "weak": 44,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 23:04:36.879304"
+  },
+  {
+    "file_name": "Liu_2019",
+    "title": "Prognostic accuracy of the serum lactate level, the SOFA score and the qSOFA score for mortality among adults with Sepsis",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 51,
+    "verdicts": {
+      "ok": 7,
+      "weak": 44,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-07 23:06:19.131209"
+  },
+  {
+    "file_name": "Luo_2022",
+    "title": "Association between hematocrit and the 30day mortality of patients with sepsis: A retrospective analysis based on the largescale clinical database MIMIC-IV",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 134,
+    "verdicts": {
+      "ok": 112,
+      "weak": 16,
+      "fail": 6,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 07:52:41.909916"
+  },
+  {
+    "file_name": "Park_2022",
+    "title": "Clinical outcomes and prognostic factors of patients with sepsis caused by intra-abdominal infection in the intensive care unit: a post-hoc analysis of a prospective cohort study in Korea",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 58,
+    "verdicts": {
+      "ok": 50,
+      "weak": 6,
+      "fail": 2,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 05:57:31.414811"
+  },
+  {
+    "file_name": "Ren_2022",
+    "title": "Risk factor analysis and nomogram for predicting in-hospital mortality in ICU patients with sepsis and lung infection",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 125,
+    "verdicts": {
+      "ok": 125,
+      "weak": 0,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 05:59:33.826547"
+  },
+  {
+    "file_name": "Roh_2019",
+    "title": "Factors predicting long-term survival of patients with sepsis on arrival at the emergency department",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 36,
+    "verdicts": {
+      "ok": 35,
+      "weak": 1,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 05:59:46.413571"
+  },
+  {
+    "file_name": "Schlapbach_2018",
+    "title": "Prognostic accuracy of age-adapted SOFA, SIRS, PELOD-2, and qSOFA for in-hospital mortality among children with suspected infection admitted to the intensive care unit",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 68,
+    "verdicts": {
+      "ok": 57,
+      "weak": 10,
+      "fail": 1,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:03:46.330496"
+  },
+  {
+    "file_name": "Seymour_2016",
+    "title": "Assessment of Clinical Criteria for Sepsis For the Third International Consensus Definitions for Sepsis and Septic Shock (Sepsis-3)",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 65,
+    "verdicts": {
+      "ok": 45,
+      "weak": 13,
+      "fail": 7,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:29:47.889113"
+  },
+  {
+    "file_name": "Suttapanit_2022",
+    "title": "Western Journal of Emergency Medicine: Integrating Emergency Care with Population Health",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 66,
+    "verdicts": {
+      "ok": 32,
+      "weak": 26,
+      "fail": 8,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:24:29.382807"
+  },
+  {
+    "file_name": "Tang_2025",
+    "title": "Association of mean corpuscular volume with 28-day mortality in sepsis patients: A retrospective cohort study using eICU data",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 111,
+    "verdicts": {
+      "ok": 21,
+      "weak": 68,
+      "fail": 22,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:12:49.362741"
+  },
+  {
+    "file_name": "Tartaglia_2021",
+    "title": "Predictive factors of mortality in open abdomen for abdominal sepsis: a retrospective cohort study on 113 patients",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 39,
+    "verdicts": {
+      "ok": 36,
+      "weak": 3,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:05:06.405682"
+  },
+  {
+    "file_name": "Todi_2024",
+    "title": "A multicentre prospective registry of one thousand sepsis patients admitted in Indian ICUs: (SEPSIS INDIA) study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 205,
+    "verdicts": {
+      "ok": 196,
+      "weak": 9,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:12:55.139999"
+  },
+  {
+    "file_name": "Varga_2024",
+    "title": "Predicting Mortality in Sepsis: The Role of Dynamic Biomarker Changes and Clinical Scores-A Retrospective Cohort Study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 25,
+    "verdicts": {
+      "ok": 18,
+      "weak": 7,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:07:39.426434"
+  },
+  {
+    "file_name": "Wang_2020",
+    "title": "The Prevalence, Risk Factors, and Outcomes of Sepsis in Critically Ill Patients in China: A Multicenter Prospective Cohort Study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 138,
+    "verdicts": {
+      "ok": 86,
+      "weak": 31,
+      "fail": 21,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:16:28.537353"
+  },
+  {
+    "file_name": "Wang_2023",
+    "title": "One-year mortality prediction for patients with sepsis: a nomogram integrating lactic dehydrogenase and clinical characteristics",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 46,
+    "verdicts": {
+      "ok": 42,
+      "weak": 4,
+      "fail": 0,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:27:29.607359"
+  },
+  {
+    "file_name": "Wen_2019",
+    "title": "Presepsin level in predicting patients ' in-hospital mortality from sepsis under sepsis-3 criteria",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 75,
+    "verdicts": {
+      "ok": 73,
+      "weak": 1,
+      "fail": 1,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:12:08.072009"
+  },
+  {
+    "file_name": "Zhang_2019",
+    "title": "Systemic inflammatory response syndrome in Sepsis-3: a retrospective study",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 82,
+    "verdicts": {
+      "ok": 63,
+      "weak": 14,
+      "fail": 5,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:17:46.443971"
+  },
+  {
+    "file_name": "Zhang_2021",
+    "title": "Development and Validation of a Sepsis Mortality Risk Score for Sepsis-3 Patients in Intensive Care Unit",
+    "year": null,
+    "journal": null,
+    "parsed": true,
+    "translated": false,
+    "n_rows": 42,
+    "verdicts": {
+      "ok": 18,
+      "weak": 12,
+      "fail": 12,
+      "unverified": 0
+    },
+    "last_update": "2026-05-08 06:26:55.918636"
+  }
+]

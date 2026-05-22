@@ -25,8 +25,7 @@ export default function RankPage({ backendUrl }: Props) {
   const [state, setState] = useState<State>({ kind: "idle" });
 
   const backendOrigin =
-    (backendUrl || "").replace(/\/$/, "") ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+    backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
 
   const submit = async () => {
     setState({ kind: "loading" });

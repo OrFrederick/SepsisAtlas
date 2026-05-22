@@ -94,10 +94,27 @@ Every existing `.tsx` component from PR #41 keeps (or gets) a `"use client"` dir
 Current state: `atlas.efferon.com` on a DO droplet, FastAPI behind nginx, Astro served as static files.
 
 Changes required:
-- **nginx**: replace the static-root location block for the frontend with `proxy_pass http://127.0.0.1:3000;`. Existing FastAPI nginx rules stay and fire first for `/query`, `/rank_predictors`, etc.; Next's `rewrites()` covers the same paths but only matters in `next dev` (no nginx). The redundancy is intentional — dev and prod use the same code path.
-- **systemd**: new `sepsis-atlas-web.service` running `next start -p 3000` from `/var/www/sepsis-atlas/web`. `Restart=on-failure`. `EnvironmentFile=` holds `API_URL` and `REVALIDATE_TOKEN`.
+- **nginx**: replace the static-root location block for the frontend with `proxy_pass http://127.0.0.1:3000;`. Add an explicit deny rule for the revalidation endpoint:
+  ```nginx
+  location = /api/revalidate {
+    deny all;
+    return 404;
+  }
+  ```
+  Without this rule the endpoint is reachable from the public internet — the token guards correctness but should not be the only barrier. The Python exporter calls the endpoint via `http://127.0.0.1:3000/api/revalidate` directly, bypassing nginx.
+  Existing FastAPI nginx rules stay and fire first for `/query`, `/rank_predictors`, etc.; Next's `rewrites()` covers the same paths but only matters in `next dev` (no nginx). The redundancy is intentional — dev and prod use the same code path.
+- **systemd**: new `sepsis-atlas-web.service` running `next start -p 3000` from `/var/www/sepsis-atlas/web`. Pin `WorkingDirectory=/var/www/sepsis-atlas/web` — `loadPapers()` defaults to `process.cwd()` and missing data on prod will trace back to a wrong working directory if this is forgotten. `Restart=on-failure`. `EnvironmentFile=` holds `API_URL` and `REVALIDATE_TOKEN`.
 - **Build artifact**: deploy ships `.next/`, `public/`, `package.json`, `node_modules/` (or runs `bun install && next build` on the host).
 - **Env vars on the host**: `API_URL=http://127.0.0.1:8000`, `REVALIDATE_TOKEN=<random secret>`. Token also configured in the Python exporter.
+
+**Sequencing for first deploy:**
+1. Run the corpus exporter on the build host so `public/data/papers.json` has the real list (not the seed `[]`). Otherwise `generateStaticParams` prerenders **zero** paper pages and every visit falls through to ISR-on-demand.
+2. Build artifact: `bun install && next build`.
+3. Start the new systemd unit; confirm `next start` is serving on port 3000.
+4. Hit `/api/revalidate` with the changed-stems list as a smoke test.
+5. Flip the nginx config and `nginx -s reload`.
+
+**Until the infra swap ships, keep the Astro build deployable.** If the migration PR merges to `dev` → `main` while the droplet still runs the Astro service, the host will be missing the deps Astro needs (since this PR drops them from `package.json`). Either keep the Astro service running off a pinned tag until the swap, or stage Next behind a subdomain first.
 
 **Open question (resolve during implementation plan, not blocking design):** is the current Astro deploy CI-driven (GitHub Actions → droplet) or manual `scp`/`rsync`? Determines whether step "build artifact" is a CI workflow edit or a one-shot host config change. Both paths are straightforward; deferred.
 

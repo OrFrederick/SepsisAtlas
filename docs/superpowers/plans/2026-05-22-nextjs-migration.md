@@ -55,7 +55,7 @@
 
 ## Conventions
 
-- **Working directory:** All commands run from `/Users/eugene/coding/SepsisAtlas` unless noted. Vitest/Next commands run from `web/`.
+- **Working directory:** All commands run from the repository root unless noted (referred to as `<repo>` below). Vitest/Next commands run from `<repo>/web/`.
 - **Package manager:** Bun (`bun add`, `bun run`).
 - **Path alias:** `@/*` → `web/src/*`. RSCs use the alias; existing components keep their relative imports (no churn).
 - **Commit message style:** Conventional Commits, no Claude attribution (per `CLAUDE.md`). Free-form body emphasizing *why*.
@@ -71,7 +71,7 @@
 - [ ] **Step 1: Confirm PR #41 has merged to `dev`**
 
 ```bash
-cd /Users/eugene/coding/SepsisAtlas
+cd <repo>
 git fetch origin
 git log origin/dev --oneline -10
 ```
@@ -308,9 +308,17 @@ git commit -m "chore(web): add postcss config for tailwind v4"
 **Files:**
 - Modify: `web/src/components/ChatShell.tsx`, `EvidenceTable.tsx`, `PaperDetailPage.tsx`, `PapersPage.tsx`, `PapersTable.tsx`, `PdfViewerPane.tsx`, `RankPage.tsx`, `RankTable.tsx`, `RankForm.tsx`, `ResultCard.tsx`, `SplitLayout.tsx`, `pdf/PdfViewer.tsx`
 
-- [ ] **Step 1: Prepend the directive to each file**
+- [ ] **Step 1: Sanity-check the file list against the working tree**
 
-For each file in the list, add `"use client";` as the first line (before any existing comment block or import). `RankForm.tsx`, `ResultCard.tsx`, and `SplitLayout.tsx` don't use hooks themselves but are imported by client parents — they MUST also be marked client because Next's RSC boundary is the import graph, not just hook usage. Mark all 12 files.
+```bash
+cd web && ls src/components/*.tsx src/components/pdf/*.tsx
+```
+
+Expected: 12 files matching the list below. If the count differs, reconcile before continuing — components may have been added or renamed since this plan was written.
+
+- [ ] **Step 2: Prepend the directive to each file**
+
+For each `.tsx` file from the listing above, add `"use client";` as the first line (before any existing comment block or import). Files that don't use hooks themselves but are imported by client parents (`RankForm.tsx`, `ResultCard.tsx`, `SplitLayout.tsx`) MUST also be marked client — Next's RSC boundary is the import graph, not just hook usage.
 
 Example for `web/src/components/ChatShell.tsx` — the current first line is `/*`. Change to:
 
@@ -327,23 +335,23 @@ Example for `web/src/components/ChatShell.tsx` — the current first line is `/*
 
 Apply identically to the other 11 files.
 
-- [ ] **Step 2: Verify with grep**
+- [ ] **Step 3: Verify with grep**
 
 ```bash
 cd web && grep -l '^"use client"' src/components/*.tsx src/components/pdf/PdfViewer.tsx | wc -l
 ```
 
-Expected: `12`.
+Expected: matches the count from Step 1.
 
-- [ ] **Step 3: Run vitest to confirm components still mount**
+- [ ] **Step 4: Run vitest to confirm components still mount**
 
 ```bash
 cd web && bun x vitest run 2>&1 | tail -10
 ```
 
-Expected: 35 tests pass. The `"use client"` directive is inert in test environment.
+Expected: all existing tests pass. The `"use client"` directive is inert in test environment.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add web/src/components/*.tsx web/src/components/pdf/PdfViewer.tsx
@@ -504,6 +512,7 @@ so the loader is decoupled from the real public/data/ contents."
 ```tsx
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -519,12 +528,14 @@ export default function ActiveLink({ href, exact, children }: Props) {
   const pathname = usePathname() ?? "/";
   const active = exact ? pathname === href : pathname === href || pathname.startsWith(href + (href.endsWith("/") ? "" : "/"));
   return (
-    <a href={href} className={active ? "active" : ""}>
+    <Link href={href} className={active ? "active" : ""} prefetch={false}>
       {children}
-    </a>
+    </Link>
   );
 }
 ```
+
+`prefetch={false}` is deliberate — the topbar links are visible on every page, and prefetching `/papers` (which can be a sizable initial RSC payload) on every chat-page render is wasted bandwidth. Drop the prop if metrics show navigation feels slow.
 
 - [ ] **Step 2: Commit**
 
@@ -570,26 +581,36 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 2: Write the chrome layout (topbar + main wrapper)**
+- [ ] **Step 2: Move the split-shell override from inline `<style>` into `global.css`**
+
+The current `Base.astro` carries an inline `<style is:global>` block that strips main-element padding when the page has `.split-shell` content. Moving it into `global.css` keeps all global CSS in one place. Append to `web/src/styles/global.css`:
+
+```css
+/* App-wide override: split-pane shells (chat, paper detail) need the main
+   element to span edge-to-edge instead of inheriting the centered max-width
+   used on chrome pages. Selector is body-level so it applies wherever a
+   split-shell renders. */
+body:has(.split-shell) main {
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+```
+
+- [ ] **Step 3: Write the chrome layout (topbar + main wrapper)**
 
 `web/app/(chrome)/layout.tsx`:
 
 ```tsx
 import type { ReactNode } from "react";
+import Link from "next/link";
 import ActiveLink from "../active-link";
 
 export default function ChromeLayout({ children }: { children: ReactNode }) {
   return (
     <>
-      <style>{`
-        body:has(.split-shell) main {
-          max-width: none !important;
-          padding: 0 !important;
-          margin: 0 !important;
-        }
-      `}</style>
       <header className="topbar">
-        <a href="/" className="brand">◆ Sepsis Atlas</a>
+        <Link href="/" className="brand" prefetch={false}>◆ Sepsis Atlas</Link>
         <nav>
           <ActiveLink href="/" exact>Chat</ActiveLink>
           <ActiveLink href="/papers">Papers</ActiveLink>
@@ -601,15 +622,17 @@ export default function ChromeLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add web/app/layout.tsx 'web/app/(chrome)/layout.tsx'
+git add web/app/layout.tsx 'web/app/(chrome)/layout.tsx' web/src/styles/global.css
 git commit -m "feat(web): split root layout from chrome layout via route group
 
 Root stays minimal (html/body + global CSS) so the viewer iframe page can
 inherit it without a topbar. Chrome routes (chat, papers, rank) live under
-app/(chrome)/ and pick up the topbar + nav from the group layout."
+app/(chrome)/ and pick up the topbar + nav from the group layout. The
+split-shell main-padding override moves from an inline <style> block into
+global.css so all global rules live in one place."
 ```
 
 ---
@@ -682,6 +705,7 @@ git commit -m "feat(web): add papers list route"
 
 **Files:**
 - Create: `web/app/(chrome)/papers/[stem]/page.tsx`
+- Create: `web/app/(chrome)/papers/[stem]/loading.tsx`
 
 - [ ] **Step 1: Write the page**
 
@@ -728,11 +752,32 @@ export default async function PaperDetail({ params }: { params: Promise<{ stem: 
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Write the loading skeleton (shown during ISR on-demand renders)**
+
+`web/app/(chrome)/papers/[stem]/loading.tsx`:
+
+```tsx
+export default function Loading() {
+  // Shown while RSC fetches papers.json + rows.json for a stem that wasn't
+  // in the build-time generateStaticParams set (i.e. a paper added since
+  // the last build). Roughly mirrors the eventual layout so the page
+  // doesn't shift on first paint.
+  return (
+    <div className="split-shell" style={{ padding: 12 }}>
+      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>Loading paper…</div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add 'web/app/(chrome)/papers/[stem]/page.tsx'
-git commit -m "feat(web): add paper detail route with ISR + generateStaticParams"
+git add 'web/app/(chrome)/papers/[stem]/page.tsx' 'web/app/(chrome)/papers/[stem]/loading.tsx'
+git commit -m "feat(web): add paper detail route with ISR + generateStaticParams
+
+Includes a loading.tsx skeleton so first-hit ISR renders for unprerendered
+stems don't show a blank page during the ~1-2s RSC fetch."
 ```
 
 ---
@@ -769,6 +814,7 @@ git commit -m "feat(web): add rank route"
 
 **Files:**
 - Create: `web/app/viewer/[stem]/page.tsx`
+- Create: `web/app/viewer/[stem]/loading.tsx`
 
 Because this page lives at `app/viewer/...` (outside `(chrome)`), it inherits only the minimal root layout from Task 9 — no topbar. No separate layout file is needed.
 
@@ -801,15 +847,33 @@ export default async function ViewerPage({ params }: { params: Promise<{ stem: s
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Write the loading skeleton**
+
+`web/app/viewer/[stem]/loading.tsx`:
+
+```tsx
+export default function Loading() {
+  // Iframe target — host shell renders an empty page while the React PDF
+  // viewer hydrates. Don't add a topbar or chrome here; this page is shown
+  // inside an iframe in chat / paper-detail shells.
+  return (
+    <div style={{ height: "100vh", display: "grid", placeItems: "center", color: "var(--fg-muted)" }}>
+      Loading PDF…
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add web/app/viewer/[stem]/page.tsx
-git commit -m "feat(web): add viewer iframe host route
+git add web/app/viewer/[stem]/page.tsx web/app/viewer/[stem]/loading.tsx
+git commit -m "feat(web): add viewer iframe host route with loading skeleton
 
 Lives outside app/(chrome)/ so it picks up only the bare root layout
 (html/body + global CSS) — no topbar, matching the current bare-HTML
-Astro page behavior."
+Astro page behavior. Loading skeleton shown while the PDF viewer
+hydrates on ISR cold renders."
 ```
 
 ---
@@ -946,16 +1010,13 @@ function isBody(v: unknown): v is Body {
 }
 
 function tokenMatches(provided: string, expected: string): boolean {
-  // timingSafeEqual requires equal-length buffers; pad provided to expected
-  // length first so length mismatches don't short-circuit and leak timing info.
+  // timingSafeEqual requires equal-length buffers. The token length is fixed
+  // server-side, so revealing a length mismatch via an early-return doesn't
+  // help an attacker — they already know the expected length once they see
+  // the configured token format. Equal-length compares run in constant time.
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
-  if (a.length !== b.length) {
-    // Still do a constant-time compare on equal-length padding to keep the
-    // codepath uniform.
-    timingSafeEqual(b, b);
-    return false;
-  }
+  if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
 
@@ -1106,7 +1167,7 @@ git commit -m "chore(web): gitignore .next build output"
 cd web && bun x vitest run 2>&1 | tail -20
 ```
 
-Expected output (count): `Test Files  8 passed (8)` (was 6 — added `tests/lib/data.test.ts` and `tests/api/revalidate.test.ts`). `Tests  45 passed (45)` (was 35 — added 4 data loader + 6 revalidate + 0 component changes = 45 total).
+Expected output (count): `Test Files  9 passed (9)` (was 7 on `origin/dev` — adding `tests/lib/data.test.ts` and `tests/api/revalidate.test.ts`). `Tests  54 passed (54)` (was 44 on `origin/dev` — adding 4 data loader + 6 revalidate). If the actual baseline differs, re-derive: run vitest before any of the changes in this plan land, record the file/test counts, and validate `baseline + 2 files / +10 tests` at this step.
 
 If the count differs, investigate before continuing. Do NOT modify a test to make it pass without first understanding why it fails.
 
@@ -1217,7 +1278,7 @@ Design spec: `docs/superpowers/specs/2026-05-22-nextjs-migration-design.md`.
 
 ## Test plan
 
-- [ ] vitest suite passes (8 files / 45 tests)
+- [ ] vitest suite passes (9 files / 54 tests)
 - [ ] `bun run build` succeeds, prerenders ≥70 pages
 - [ ] Every route returns 200 from `next start`
 - [ ] Manual smoke checklist (chat, papers list, paper detail, rank, viewer iframe) green
@@ -1227,9 +1288,12 @@ Design spec: `docs/superpowers/specs/2026-05-22-nextjs-migration-design.md`.
 ## Deployment follow-ups (not in this PR)
 
 - nginx: swap static-root for `proxy_pass http://127.0.0.1:3000;`
-- systemd: new `sepsis-atlas-web.service` running `next start -p 3000`
+- nginx: add `location = /api/revalidate { deny all; return 404; }` so the endpoint isn't internet-reachable
+- systemd: new `sepsis-atlas-web.service` running `next start -p 3000` with `WorkingDirectory=/var/www/sepsis-atlas/web` (loadPapers() defaults to process.cwd())
 - env vars on host: `API_URL`, `REVALIDATE_TOKEN`
-- Python exporter: POST to `/api/revalidate` after writing JSONs (token configured)
+- Python exporter: POST to `/api/revalidate` via 127.0.0.1 (not through nginx) after writing JSONs
+- First deploy: run the corpus exporter BEFORE the build, otherwise generateStaticParams prerenders zero pages and every paper visit falls through to on-demand ISR
+- Until the infra swap actually ships, keep the Astro service deployable or stage Next behind a subdomain — this PR removes the Astro deps from package.json, so the host can't serve the old build once the artifact ships
 
 These ship in a follow-up infra commit once the PR is merged.
 

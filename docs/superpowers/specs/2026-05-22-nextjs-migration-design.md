@@ -36,7 +36,7 @@ Rejected: pure static export (forces full rebuild per paper, same scaling story 
 
 ### Migration path: replace `web/` in one PR
 
-A single PR rips out Astro files and replaces them with Next equivalents in the same directory. PR #41 lands on `main` first; this work branches off `main` after that.
+A single PR rips out Astro files and replaces them with Next equivalents in the same directory. PR #41 lands on `dev` first; this work branches off `dev` after that.
 
 Rejected: parallel `web-next/` directory (cleaner rollback but means two frontends coexisting during the transition, harder for a small team).
 

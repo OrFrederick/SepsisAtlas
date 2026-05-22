@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 15, React 19, TypeScript 5.6, Tailwind v4 (PostCSS plugin), vitest 2 + @vitejs/plugin-react, Bun as package manager, PDF.js 4.10.
 
-**Reference:** Design spec at `docs/superpowers/specs/2026-05-22-nextjs-migration-design.md`. Preceding PR (#41) must be merged to `main` before this branch is cut.
+**Reference:** Design spec at `docs/superpowers/specs/2026-05-22-nextjs-migration-design.md`. Preceding PR (#41) must be merged to `dev` before this branch is cut.
 
 ---
 
@@ -63,17 +63,17 @@
 
 ---
 
-## Task 1: Branch off main + scope guard
+## Task 1: Branch off dev + scope guard
 
 **Files:**
 - No code changes; branch + sanity checks.
 
-- [ ] **Step 1: Confirm PR #41 has merged to `main`**
+- [ ] **Step 1: Confirm PR #41 has merged to `dev`**
 
 ```bash
 cd /Users/eugene/coding/SepsisAtlas
 git fetch origin
-git log origin/main --oneline -10
+git log origin/dev --oneline -10
 ```
 
 Expected: see PR #41's merge commit. If not, stop and merge #41 first.
@@ -81,7 +81,7 @@ Expected: see PR #41's merge commit. If not, stop and merge #41 first.
 - [ ] **Step 2: Create the migration branch**
 
 ```bash
-git checkout main
+git checkout dev
 git pull --ff-only
 git checkout -b feat/nextjs-migration
 ```
@@ -1198,10 +1198,10 @@ Expected: `{"revalidated":1}`. Missing/wrong token → 401.
 git push -u origin feat/nextjs-migration
 ```
 
-- [ ] **Step 2: Open the PR**
+- [ ] **Step 2: Open the PR (target branch: dev)**
 
 ```bash
-gh pr create --title "feat(web): migrate from Astro to Next.js App Router" --body "$(cat <<'EOF'
+gh pr create --base dev --title "feat(web): migrate from Astro to Next.js App Router" --body "$(cat <<'EOF'
 ## Summary
 
 Replaces the Astro frontend in `web/` with a Next.js 15 (App Router) app, preserving every route and React component from PR #41 and the JSON-seed data pipeline. Adds `/api/revalidate` for the Python exporter to flush ISR after writing updated paper data.

@@ -103,8 +103,14 @@ EXPOSE 80 443 443/udp
 # Caddy's auto-HTTPS redirect counts as healthy. Compose's
 # `restart: unless-stopped` combined with a failing healthcheck plus
 # Watchtower's poll loop is what eventually recreates the container.
+#
+# The Host header is required: the Caddyfile only has a site block for
+# atlas.efferon.com, so a request with `Host: localhost` (wget's default)
+# gets rejected by Caddy and wget returns exit 4 (network failure). With
+# the right Host the probe hits the configured server block and gets a
+# 308 from the auto-HTTPS redirect, which wget --spider accepts.
 HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -q --spider http://localhost:80/ \
+  CMD wget -q --spider --header="Host: atlas.efferon.com" http://localhost:80/ \
       && wget -q --spider http://localhost:3000/
 
 # Run-both wrapper: trap SIGCHLD so the container exits the moment

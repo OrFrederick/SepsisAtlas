@@ -18,6 +18,12 @@
 	email ops@efferon.com
 }
 
+# NOTE: the container HEALTHCHECK in docker/Dockerfile.frontend probes
+# `http://localhost:80/` with `Host: atlas.efferon.com`, relying on this
+# hostname matching the site block below. If you rename the host or split
+# this block, update the HEALTHCHECK Host header too — otherwise Caddy
+# rejects the probe (no matching site = wget exit 4) and the container
+# stays `unhealthy` forever even though external traffic still works.
 atlas.efferon.com {
 	encode zstd gzip
 

@@ -24,8 +24,12 @@ export default function RankPage({ backendUrl }: Props) {
   const [filters, setFilters] = useState<RankFilters>(INITIAL);
   const [state, setState] = useState<State>({ kind: "idle" });
 
-  const backendOrigin =
-    backendUrl || (typeof window !== "undefined" ? window.location.origin : "");
+  // Pass the prop through unchanged. The previous `window.location.origin`
+  // fallback was a hydration hazard: server render returned "" (no `window`),
+  // client render returned the document origin, producing different anchor
+  // hrefs on the same row. Empty string is already correct for same-host
+  // deploys — the browser resolves `/viewer/...` against the current document.
+  const backendOrigin = backendUrl;
 
   const submit = async () => {
     setState({ kind: "loading" });

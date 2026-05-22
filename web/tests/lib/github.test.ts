@@ -8,7 +8,7 @@ const base: FeedbackPayload = {
   body: "Reported 65, paper says 67.",
   paperStem: "Seymour_2016",
   website: "",
-  formMountedAtMs: 1_700_000_000_000,
+  mount: { ts: 1_700_000_000_000, sig: "a".repeat(64) },
 };
 
 function jsonResponse(status: number, body: unknown) {

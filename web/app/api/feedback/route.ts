@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateFeedback } from "../../../src/lib/feedback-schema";
+import { verifyMount } from "../../../src/lib/feedback-mount";
 import { RateLimiter } from "../../../src/lib/rate-limit";
 import { createFeedbackIssue } from "../../../src/lib/github";
 
@@ -7,7 +8,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const limiter = new RateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
-const MIN_FILL_MS = 3_000;
 const MAX_BODY_BYTES = 16_384;
 
 // Caddy (deploy/Caddyfile) overwrites X-Real-IP and X-Forwarded-For with
@@ -15,6 +15,12 @@ const MAX_BODY_BYTES = 16_384;
 // the *rightmost* entry — the one Caddy or any other final proxy added —
 // rather than the leftmost, which is attacker-controlled when XFF is
 // appended rather than replaced.
+//
+// This assumes Caddy is the edge. If a CDN/L7 LB (e.g. Cloudflare) is ever
+// placed in front of Caddy, `remote_ip` becomes the upstream proxy and
+// every legitimate user collapses onto a single rate-limit bucket. Update
+// the Caddyfile to use `trusted_proxies` and forward the original XFF
+// before relying on this function in that topology.
 function clientIp(req: Request): string | null {
   const real = req.headers.get("x-real-ip");
   if (real) {
@@ -95,9 +101,14 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
-  // formMountedAtMs is required by the schema, so this always runs.
-  const elapsed = Date.now() - v.value.formMountedAtMs;
-  if (elapsed < MIN_FILL_MS) {
+  // HMAC-verify the server-issued mount token. Without this the elapsed
+  // check below is a no-op — the client could just send `Date.now() - 4000`.
+  const mv = verifyMount(v.value.mount);
+  if (!mv.ok) {
+    if (mv.error === "no-secret") {
+      console.error("[feedback] FEEDBACK_MOUNT_SECRET missing in production");
+      return NextResponse.json({ ok: false, error: "misconfigured" }, { status: 500 });
+    }
     return NextResponse.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 

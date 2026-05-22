@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { FEEDBACK_TYPES, type FeedbackType } from "../lib/feedback-schema";
+import { useEffect, useMemo, useState } from "react";
+import { FEEDBACK_TYPES, type FeedbackType, type MountTokenInput } from "../lib/feedback-schema";
 
 export interface FeedbackFormProps {
   initialType?: FeedbackType;
@@ -24,13 +24,34 @@ const TYPE_LABELS: Record<FeedbackType, string> = {
 };
 
 export function FeedbackForm(props: FeedbackFormProps) {
-  const mountedAtMs = useRef(Date.now()).current;
+  const [mount, setMount] = useState<MountTokenInput | null>(null);
   const [type, setType] = useState<FeedbackType>(props.initialType ?? "bug");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [contact, setContact] = useState("");
   const [website, setWebsite] = useState(""); // honeypot
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+
+  // Fetch a server-signed mount token. The POST route verifies its HMAC
+  // before accepting the submission, so the client cannot fabricate the
+  // 3 s minimum-fill timestamp.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/feedback/mount", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && data.ok && data.mount) {
+          setMount(data.mount as MountTokenInput);
+        }
+      } catch {
+        /* leave mount null; submit will surface the error */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rowContextPreview = useMemo(
     () =>
@@ -42,6 +63,10 @@ export function FeedbackForm(props: FeedbackFormProps) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!mount) {
+      setStatus({ kind: "error", message: "no-mount-token" });
+      return;
+    }
     setStatus({ kind: "submitting" });
     try {
       const res = await fetch("/api/feedback", {
@@ -55,7 +80,7 @@ export function FeedbackForm(props: FeedbackFormProps) {
           paperStem: props.initialPaper,
           rowContext: props.initialRowContext,
           website,
-          formMountedAtMs: mountedAtMs,
+          mount,
         }),
       });
       const data = await res.json().catch(() => ({}));

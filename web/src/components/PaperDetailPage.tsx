@@ -6,6 +6,7 @@ import { buildViewerUrl } from "../lib/viewerUrl";
 import SplitLayout from "./SplitLayout";
 import PdfViewerPane from "./PdfViewerPane";
 import ResultCard from "./ResultCard";
+import { FeedbackButton } from "./FeedbackButton";
 
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 
@@ -59,6 +60,14 @@ export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUr
                   <span className="badge fail">fail {paper.verdicts.fail ?? 0}</span>
                 </>
               )}
+            </p>
+            <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+              <FeedbackButton
+                type="wrong-data"
+                paper={paper.file_name}
+                label="Report issue with this paper"
+                className="text-fg-muted underline hover:text-fg-soft"
+              />
             </p>
           </header>
           <div className="paper-rows" style={{ display: "flex", flexDirection: "column", gap: 10 }}>

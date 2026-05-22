@@ -10,6 +10,7 @@
 */
 
 import { useState } from "react";
+import { FeedbackButton } from "./FeedbackButton";
 
 export type EvidenceRow = {
   paper_ref?: string;
@@ -272,6 +273,7 @@ export default function EvidenceTable({
               </th>
             );
           })}
+          <th scope="col">Report</th>
         </tr>
       </thead>
       <tbody>
@@ -310,6 +312,15 @@ export default function EvidenceTable({
               <td className="num">{nOf(row)}</td>
               <td className="num">{pageOf(row)}</td>
               <td className="effect">{effect}</td>
+              <td>
+                <FeedbackButton
+                  type="wrong-data"
+                  paper={row.file_name || row.paper_ref || row.study || ""}
+                  rowContext={row}
+                  label="Report"
+                  className="text-fg-muted underline hover:text-fg-soft"
+                />
+              </td>
             </tr>
           );
         })}

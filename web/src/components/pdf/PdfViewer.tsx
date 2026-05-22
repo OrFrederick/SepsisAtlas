@@ -87,13 +87,14 @@ export default function PdfViewer({ stem, basePath }: Props) {
 
   // ---- listen for parent jump messages ----
   useEffect(() => {
+    // The shell may live at a different origin than the viewer (the
+    // PUBLIC_BACKEND_URL cross-origin deploy: static frontend on one host,
+    // viewer served from the FastAPI host). The iframe can't know the
+    // shell's origin a priori from inside its own bundle, so we rely on
+    // window.parent identity instead of pinning e.origin. The actions the
+    // jump message drives (page/bbox navigation within an already-loaded
+    // PDF) are non-sensitive, so source identity is sufficient hardening.
     function onMessage(e: MessageEvent) {
-      // Only accept jump messages from the parent frame at our own origin.
-      // The viewer is always loaded as an iframe inside the Astro app, so
-      // anything else is either a misconfiguration or a third party
-      // attempting to drive the viewer (e.g. an unrelated site embedding
-      // /viewer/<stem>/). Drop both.
-      if (e.origin !== window.location.origin) return;
       if (e.source !== window.parent) return;
       const data = e.data as { type?: string; page?: number; bbox?: number[] | string | null; origin?: string };
       if (!data || data.type !== "sepsis-atlas:jump") return;

@@ -272,3 +272,13 @@ dialog.settings input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.10);
 }
+
+/* App-wide override: split-pane shells (chat, paper detail) need the main
+   element to span edge-to-edge instead of inheriting the centered max-width
+   used on chrome pages. Selector is body-level so it applies wherever a
+   split-shell renders. */
+body:has(.split-shell) main {
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}

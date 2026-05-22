@@ -93,16 +93,85 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 
 .split {
   display: grid;
-  grid-template-columns: 1fr 6px 1fr;
+  /* Two fr-based tracks so the solo→split reveal can interpolate cleanly.
+     Inline style provides the actual fr ratio per state; the divider is
+     absolutely positioned inside .viewer-wrap, straddling the boundary. */
+  grid-template-columns: 1fr 0fr;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  transition: grid-template-columns 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.split.resizing {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+.split.resizing .viewer iframe { pointer-events: none; }
+
+/* Landing → split chat width animation. Solo mode caps the chat at a
+   readable column centered in the viewport; once the viewer panel is
+   revealed the chat fills its grid track. */
+.split .chat {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+  transition: max-width 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.split.active .chat {
+  max-width: none;
+  margin: 0;
+}
+
+/* Landing-state alignment: welcome card and composer share the same
+   inner column so their left/right edges line up. The thin top border
+   on the composer is dropped in solo mode since there is nothing
+   above it to separate. */
+.split:not(.active) .welcome {
+  max-width: none;
+  width: 100%;
+}
+.split:not(.active) .scrollback {
+  padding: 28px 36px 12px;
+}
+.split:not(.active) .composer {
+  padding: 14px 36px 32px;
+  border-top: none;
+}
+
+.viewer-wrap {
+  position: relative;
   height: 100%;
   overflow: hidden;
+  opacity: 0;
+  transform: translateX(28px);
+  transition:
+    opacity 360ms cubic-bezier(0.2, 0.7, 0.2, 1) 80ms,
+    transform 520ms cubic-bezier(0.2, 0.7, 0.2, 1) 80ms;
+  pointer-events: none;
 }
-.split.resizing { cursor: col-resize; user-select: none; }
-.split.resizing .viewer iframe { pointer-events: none; }
+.split.active .viewer-wrap {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .split,
+  .split .chat,
+  .viewer-wrap {
+    transition: none;
+  }
+  .viewer-wrap { transform: none; }
+}
+
 .divider {
-  position: relative;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 2;
   background: transparent;
-  height: 100%;
   cursor: col-resize;
   touch-action: none;
   outline: none;

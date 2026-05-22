@@ -413,6 +413,11 @@ export default function ChatShell() {
 
   const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
 
+  // Viewer panel is revealed the moment the user submits the first query
+  // (pending) or once any turn lands in history. Clearing chat collapses
+  // back to the centered-chat landing state.
+  const showPdf = pending || history.length > 0;
+
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     let next: number | null = null;
     switch (e.key) {
@@ -453,9 +458,13 @@ export default function ChatShell() {
       </div>
 
       <main
-        className={`split${resizing ? " resizing" : ""}`}
+        className={`split${resizing ? " resizing" : ""}${showPdf ? " active" : ""}`}
         ref={splitRef}
-        style={{ gridTemplateColumns: `${chatPct}% 6px 1fr` }}
+        style={{
+          gridTemplateColumns: showPdf
+            ? `${chatPct}fr ${100 - chatPct}fr`
+            : "1fr 0fr",
+        }}
       >
         <section className="chat">
           <div ref={scrollbackRef} className="scrollback">
@@ -585,30 +594,31 @@ export default function ChatShell() {
           </form>
         </section>
 
-        <div
-          className="divider"
-          role="separator"
-          aria-orientation="vertical"
-          aria-valuemin={MIN_CHAT_PCT}
-          aria-valuemax={MAX_CHAT_PCT}
-          aria-valuenow={Math.round(chatPct)}
-          aria-valuetext={`${Math.round(chatPct)}%`}
-          aria-label="Resize chat pane (use arrow keys, double-click to reset)"
-          tabIndex={0}
-          onPointerDown={onDividerPointerDown}
-          onPointerMove={onDividerPointerMove}
-          onPointerUp={endDividerDrag}
-          onPointerCancel={endDividerDrag}
-          onDoubleClick={onDividerDoubleClick}
-          onKeyDown={onDividerKeyDown}
-        />
-
-        <section className="viewer">
-          <PdfViewerPane
-            src={viewerUrl || null}
-            storageKey={VIEWER_KEY}
-            emptyHint="Click an evidence row to view the source PDF."
+        <section className="viewer-wrap" aria-hidden={!showPdf}>
+          <div
+            className="divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuemin={MIN_CHAT_PCT}
+            aria-valuemax={MAX_CHAT_PCT}
+            aria-valuenow={Math.round(chatPct)}
+            aria-valuetext={`${Math.round(chatPct)}%`}
+            aria-label="Resize chat pane (use arrow keys, double-click to reset)"
+            tabIndex={showPdf ? 0 : -1}
+            onPointerDown={onDividerPointerDown}
+            onPointerMove={onDividerPointerMove}
+            onPointerUp={endDividerDrag}
+            onPointerCancel={endDividerDrag}
+            onDoubleClick={onDividerDoubleClick}
+            onKeyDown={onDividerKeyDown}
           />
+          <div className="viewer">
+            <PdfViewerPane
+              src={viewerUrl || null}
+              storageKey={VIEWER_KEY}
+              emptyHint="Click an evidence row to view the source PDF."
+            />
+          </div>
         </section>
       </main>
     </div>

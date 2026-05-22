@@ -14,7 +14,7 @@ export function buildViewerUrl(
   const stemEnc = encodeURIComponent(stem);
   let url = `${b}viewer/${stemEnc}?page=${p}`;
   if (bbox) {
-    url += `&bbox=${encodeURIComponent(bbox)}&origin=${encodeURIComponent(origin || "tl")}`;
+    url += `&bbox=${bbox}&origin=${origin || "tl"}`;
   }
   return url;
 }

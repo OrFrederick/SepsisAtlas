@@ -11,12 +11,15 @@
   --muted: #6B6258;
   --faint: #8E8576;
   --accent: #0F4C5C;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui,
+          "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--panel-3);
   color: var(--fg);
+  font-family: var(--sans);
 }
 .pdf-viewer__toolbar {
   position: sticky; top: 0; z-index: 10;
@@ -24,9 +27,16 @@
   padding: 5px 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  font-family: var(--sans);
   font-size: 12px;
   height: 36px;
   box-sizing: border-box;
+  /* Narrow chat-right pane: let the toolbar scroll horizontally instead
+     of overflowing into the page area. The filename link (right-aligned)
+     stays clickable by shrinking with ellipsis (see .pdf-viewer__open). */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .pdf-viewer__toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
 .pdf-viewer__toolbar button {
@@ -70,12 +80,42 @@
   font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
-.pdf-viewer__filename {
-  color: var(--muted); margin-left: auto;
-  font-family: var(--mono); font-size: 12px;
-  flex-shrink: 0;
+.pdf-viewer__open {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 240px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--fg-soft);
+  font: inherit; font-size: 12px; line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
-.pdf-viewer__status { color: var(--muted); font-style: italic; flex-shrink: 0; }
+.pdf-viewer__open:hover {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.pdf-viewer__open-name {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pdf-viewer__open-arrow { color: var(--muted); flex-shrink: 0; }
+.pdf-viewer__status {
+  color: var(--muted); font-style: italic;
+  flex-shrink: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pdf-viewer__stage {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column; align-items: center;

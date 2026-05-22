@@ -3,7 +3,7 @@ import "../styles/global.css";
 
 interface Props {
   title: string;
-  route?: "chat" | "papers" | "viewer";
+  route?: "chat" | "papers" | "viewer" | "rank";
 }
 
 const { title, route } = Astro.props;
@@ -16,6 +16,13 @@ const b = base.endsWith("/") ? base : base + "/";
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{title}</title>
+    <style is:global>
+      body:has(.split-shell) main {
+        max-width: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+    </style>
   </head>
   <body>
     <header class="topbar">

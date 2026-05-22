@@ -45,31 +45,38 @@ Make the entire stack ship from ghcr the same way the backend does today. After 
                      ▼ (Watchtower polls ghcr every 5 min)
    ┌──────────────── VPS (atlas.efferon.com) ─────────────────┐
    │  docker compose -f docker-compose.yml -f .prod.yml       │
-   │  ┌───────────────────┐    ┌────────────────────────────┐ │
-   │  │ frontend          │    │ backend                    │ │
-   │  │ caddy:2 + dist/   │───►│ FastAPI                    │ │
-   │  │ :80 :443 :443/udp │    │ /query /viewer /pdfs /data │ │
-   │  │ /etc/caddy/conf.d │    │ /papers/*/pdf etc.         │ │
-   │  │   ← host mount    │    │ volumes: ./data db.sqlite  │ │
-   │  └───────────────────┘    └────────────────────────────┘ │
+   │  ┌──────────────────────┐  ┌────────────────────────────┐│
+   │  │ frontend             │  │ backend                    ││
+   │  │ caddy:2 +            │  │ FastAPI                    ││
+   │  │   dist/  (HTML/JS)   │  │ /query /viewer/* /health   ││
+   │  │   pdfs/  (baked in)  │  │ /papers/*/pdf /phenotypes  ││
+   │  │   data/  (baked in)  │  │ /static/*                  ││
+   │  │   API → backend:8000 │◄─┤ volumes: ./data db.sqlite  ││
+   │  │ :80 :443 :443/udp    │  │                            ││
+   │  │ /etc/caddy/conf.d/   │  │                            ││
+   │  │   ← host mount       │  │                            ││
+   │  └──────────────────────┘  └────────────────────────────┘│
    │  watchtower (polls ghcr, restarts both via label)        │
    └──────────────────────────────────────────────────────────┘
 ```
 
 ## Key design choices
 
-### Backend serves all dynamic data
+### Data is committed to the repo; CI bakes it into the frontend image
 
-The frontend baked static files into its build today: `data/papers/raw/*.pdf` rsynced into `web/public/pdfs/`, and `web/public/data/{rows,papers,manifest}.json` written by the extraction exporter. Those files live only on the VPS (gitignored), so a CI build can't include them.
+This is the load-bearing design call. The Astro pages use `getStaticPaths()` to emit one HTML page per paper, and that step has to read `web/public/data/{papers,rows}.json` *at build time* — there's no way to defer it to runtime without dropping SSG, which PR #41 explicitly preserves.
 
-The clean answer: the backend already owns the `data/` volume; have it serve those files over HTTP. The frontend image then ships *only* static HTML/JS/CSS and is fully portable.
+Implication: the JSON exports have to be present in the CI build context. The cleanest way to do that is to commit them to the repo, matching the existing convention for PDFs (which are already git-tracked in `data/papers/raw/`, despite stale wording in CLAUDE.md). The model becomes uniform: paper data and paper PDFs live in the repo, the user commits new ones after each pipeline run, CI rebuilds with fresh data.
 
-Two new FastAPI routes:
+Concretely:
 
-- `GET /pdfs/{stem}.pdf` — streams `data/papers/raw/{stem}.pdf`. The frontend viewer already references this URL today (it was served by host caddy from the static dir); the URL surface doesn't change, only what's behind it.
-- `GET /data/{name}.json` — whitelist of `rows`, `papers`, `manifest`. Streams from wherever the exporter writes today (likely `data/web-exports/` or similar — confirm path during implementation; do not invent a path). 404 if missing.
+- `data/papers/raw/*.pdf` stays committed (already the case).
+- `web/public/data/{rows,papers,manifest}.json` starts being committed. One-time bootstrap step in the cutover: scp the current contents off the VPS, `git add`, commit.
+- The frontend Dockerfile's build stage runs the existing `bun run build`, which already calls `seed-data.mjs` (stubs only if missing — won't overwrite committed real data) and `vendor-pdfjs.mjs`, then `astro build`. Plus a `rsync data/papers/raw/ web/public/pdfs/` step before `bun run build`, replicating what `deploy-main.sh` does on the VPS today.
 
-Both routes use `fastapi.responses.FileResponse`, no in-memory load. Stem validation: reject anything that isn't `[A-Za-z0-9_-]+` to prevent path traversal.
+After this change, the frontend image is fully self-contained: it ships HTML, JS, CSS, PDFs, and JSON. The backend stops serving any static assets. No new FastAPI routes are needed for this work.
+
+Trade-off: every pipeline run that produces new JSON exports now requires a commit + push to ship the data to prod. Same model PDFs already follow. The user is OK with this.
 
 ### Combined caddy + Astro image
 
@@ -80,7 +87,7 @@ Rejected alternative: two separate images (caddy + static sidecar). More moving 
 The Caddyfile changes:
 
 - `reverse_proxy 127.0.0.1:8000` → `reverse_proxy backend:8000` (compose service DNS).
-- Add `path /pdfs/*` and `path /data/*` to the `@api` matcher so those routes also reverse-proxy to backend.
+- `@api` matcher is unchanged. PDFs and JSON ship inside the frontend image, served by caddy's `file_server`. The matcher only catches backend routes (`/query`, `/viewer/*`, `/papers/*/pdf`, `/health`, `/phenotypes`, `/static/*`, etc.) and reverse-proxies them.
 - Drop the `log { output file ... }` directive. Caddy logs to stdout; `docker logs atlas-frontend` (or `compose logs`) captures it; docker's `json-file` driver handles rotation.
 - `root * /var/www/atlas-main` → `root * /srv` (the COPY target in the image).
 - Keep `import /etc/caddy/conf.d/*.caddy`. The container bind-mounts `/etc/sepsisatlas/caddy-conf.d/` from the host as `:ro`. Empty by default; this is where private basic-auth / IP-allowlist directives go if needed. The Dockerfile pre-creates `/etc/caddy/conf.d/` so the import doesn't fail when the host dir is empty.
@@ -198,14 +205,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml -p "$PROJECT" up
 ## Data flow
 
 1. Browser requests `https://atlas.efferon.com/papers/Smith2020`.
-2. Caddy container terminates TLS. URL doesn't match the `@api` matcher, falls through to `try_files {path} {path}/index.html /index.html`, serves `dist/papers/Smith2020/index.html` from `/srv`.
-3. JS on that page fetches `/pdfs/Smith2020.pdf` and `/data/manifest.json`.
-4. Both URLs match `@api`, caddy reverse-proxies to `backend:8000`. Backend streams the file from its `./data` volume.
+2. Caddy container terminates TLS. URL doesn't match the `@api` matcher, falls through to `try_files {path} {path}/index.html /index.html`, serves `dist/papers/Smith2020/index.html` from `/srv` (pre-rendered at CI build time from committed `papers.json` + `rows.json`).
+3. JS on that page requests `/pdfs/Smith2020.pdf`. URL doesn't match `@api`, served as a static file from `/srv/pdfs/Smith2020.pdf` (baked into the image at build time from `data/papers/raw/`).
+4. JS makes a backend call, e.g. `POST /query`. URL matches `@api`, caddy reverse-proxies to `backend:8000`.
 
 ## Cutover plan (one-time, on prod VPS)
 
 Order matters; this is the runbook the implementation plan will follow.
 
+0. **Before merging:** scp the current contents of `/opt/sepsisatlas/main/web/public/data/{rows,papers,manifest}.json` off the VPS, place them at `web/public/data/` in the working branch, `git add web/public/data/*.json`, commit. This is the one-time data bootstrap. Without it, the first CI build will emit a frontend image with stub-empty data.
 1. CI run completes on `main`, both `:main` tags exist on ghcr (`backend` and `frontend`).
 2. On the VPS, as the `deploy` user:
    - `sudo systemctl disable --now caddy`
@@ -246,10 +254,10 @@ Rollback: `docker compose down`, re-clone the repo into `/opt/sepsisatlas/main` 
 
 ## Risks
 
-- **Astro pages that bake JSON data at build time, not runtime.** If any page imports `papers.json` or similar at SSG time, the published image will contain stub-empty data (the CI build only has `seed-data.mjs`'s empty placeholders). Mitigation: implementation step explicitly inspects the built `dist/` for non-stub data, and grep'd Astro source for build-time imports of the JSON files. If any are found, those pages must move to client-side fetch before this change ships.
+- **Frontend builds out-of-date data into the image.** Now that `web/public/data/*.json` is committed, "shipping fresh data to prod" requires a commit + push, not just a pipeline run. If a teammate forgets, prod serves stale data until the next CI build. Mitigation: extraction pipeline writes to `web/public/data/`; the project's existing "commit your changes" muscle memory should catch this. A future improvement could add an `extract.py`-side `git status` warning when uncommitted JSON exports exist.
 - **`/etc/caddy/conf.d/` content on the VPS.** If basic-auth or IP-allowlist directives are currently in use, the path move (`/etc/caddy/conf.d/` → `/etc/sepsisatlas/caddy-conf.d/`) must preserve them. The cutover step explicitly moves the directory; verify with `ls /etc/sepsisatlas/caddy-conf.d/` before bringing the container up.
 - **Watchtower pulling a broken frontend image.** Same risk as the backend has today. Mitigation: same as backend — push to a feature branch, manually pull on the VPS before merging if uncertain.
-- **PDF served-by-backend latency.** The backend will now stream PDFs through Python. PDFs are static files (up to a few MB each). `FileResponse` uses `sendfile(2)` where supported, so this should be effectively as fast as caddy serving them directly. If latency turns out to be a problem in practice, a follow-up can move `/pdfs/*` to a caddy `file_server` from a shared volume.
+- **Image size growth.** Baking 30+ PDFs (~50-200 MB total) plus JSON into the frontend image is a one-time bloat. Acceptable: image build runs in CI on cached layers, `docker pull` only fetches the PDF layer when it changes (it'll only invalidate when a new PDF lands). If image size becomes a real problem later (say > 1 GB), the follow-up is to split PDFs into their own image or a shared volume.
 
 ## Verification (post-cutover)
 
@@ -263,6 +271,5 @@ Rollback: `docker compose down`, re-clone the repo into `/opt/sepsisatlas/main` 
 
 These are resolved at implementation time, not in this spec:
 
-- Exact filesystem path the extraction exporter writes the `rows.json`/`papers.json`/`manifest.json` to today. The new backend route reads from that same path; do not invent one.
-- Whether any Astro page imports those JSON files at build time (see Risks).
 - Whether the `bun.lock` checked into `web/` is up to date relative to `package.json` (it has to be, for `--frozen-lockfile` to succeed in CI).
+- Whether the extraction pipeline already writes to `web/public/data/` (so committing is a no-op for the dev workflow), or writes elsewhere and we need to point it at `web/public/data/`.

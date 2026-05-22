@@ -9,7 +9,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 .chat-shell {
   display: grid;
   grid-template-rows: 44px 1fr;
-  height: calc(100vh - 49px); /* below Base.astro topbar */
+  height: calc(100vh - 49px); /* below RootLayout topbar */
   width: 100vw;
   background: var(--bg);
 }

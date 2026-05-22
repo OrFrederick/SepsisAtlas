@@ -12,9 +12,9 @@ export function buildViewerUrl(
   const b = base.endsWith("/") ? base : base + "/";
   const p = Math.max(1, Math.floor(page ?? 1));
   const stemEnc = encodeURIComponent(stem);
-  let url = `${b}viewer/${stemEnc}/?page=${p}`;
+  let url = `${b}viewer/${stemEnc}?page=${p}`;
   if (bbox) {
-    url += `&bbox=${encodeURIComponent(bbox)}&origin=${encodeURIComponent(origin || "tl")}`;
+    url += `&bbox=${bbox}&origin=${origin || "tl"}`;
   }
   return url;
 }

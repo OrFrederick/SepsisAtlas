@@ -6,10 +6,13 @@
 # Differences from dev compose:
 #   - Backend is pulled from ghcr.io (built by .github/workflows/deploy.yml),
 #     never built on the host. The local `build:` directive is reset.
-#   - Backend bound to loopback only (Caddy proxies in front)
-#   - Source-code volume mount dropped (no hot reload in prod)
-#   - Watchtower watches the backend container and pulls/restarts whenever a
-#     new image tag appears in ghcr.
+#   - Backend is only reachable over the compose network; no host port mapping.
+#   - Source-code volume mount dropped (no hot reload in prod).
+#   - Frontend container (caddy + Next.js standalone server + PDFs + JSON,
+#     all baked in) terminates TLS on :80/:443. Caddy proxies API routes to
+#     `backend` and everything else to the Next process on localhost:3000.
+#   - Watchtower watches both labeled containers and pulls/restarts whenever
+#     a new image tag appears in ghcr.
 
 services:
   backend:
@@ -27,8 +30,42 @@ services:
       - ./static:/app/static
       - ./runs:/app/runs
       - ./logs:/app/logs
-    ports: !override
-      - "127.0.0.1:8000:8000"
+    ports: !reset null
+
+  frontend:
+    image: ghcr.io/orfrederick/sepsis-atlas-frontend:main
+    pull_policy: missing
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Required by app/api/revalidate/route.ts. Without it the endpoint
+      # returns 401 for every request and the route's POST handler logs
+      # the misconfiguration. Source the value from the host shell (set
+      # in /etc/sepsisatlas/env or similar) — do NOT bake the token into
+      # git or the image.
+      #
+      # Status: the receiver is live, but the Python exporter that POSTs
+      # to /api/revalidate after writing public/data/*.json is not yet
+      # implemented (tracked as a deploy follow-up). Until that lands,
+      # ISR is fed only by the per-route `revalidate = 3600` stale-while-
+      # revalidate window. Setting the token to anything is fine for now;
+      # it will become load-bearing once the exporter is wired up.
+      REVALIDATE_TOKEN: ${REVALIDATE_TOKEN:?REVALIDATE_TOKEN must be set on the host}
+      # Next reads NODE_ENV=production from the Dockerfile already; the
+      # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - /etc/sepsisatlas/caddy-conf.d:/etc/caddy/conf.d:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [sepsis]
 
   watchtower:
     image: containrrr/watchtower:1.7.1
@@ -46,3 +83,7 @@ services:
       WATCHTOWER_POLL_INTERVAL: "300"   # 5 minutes
       WATCHTOWER_INCLUDE_RESTARTING: "true"
     networks: [sepsis]
+
+volumes:
+  caddy_data:
+  caddy_config:

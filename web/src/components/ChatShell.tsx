@@ -1,3 +1,5 @@
+"use client";
+
 /*
   Chat shell — React port of the original `static/app.html` vanilla-JS chat,
   living inside an Astro island.
@@ -17,6 +19,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
+import PdfViewerPane from "./PdfViewerPane";
 import { rowsToCsv, downloadCsv } from "../lib/csv";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
@@ -36,10 +39,7 @@ const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 const HISTORY_MAX = 50;
 
-const BACKEND_URL = ((import.meta.env.PUBLIC_BACKEND_URL as string | undefined) || "").replace(
-  /\/$/,
-  "",
-);
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",
@@ -112,15 +112,6 @@ function loadViewerUrl(): string {
     return localStorage.getItem(VIEWER_KEY) || "";
   } catch {
     return "";
-  }
-}
-
-function saveViewerUrl(u: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(VIEWER_KEY, u);
-  } catch {
-    /* ignore */
   }
 }
 
@@ -223,7 +214,9 @@ export default function ChatShell() {
         const okOrigin = BACKEND_URL
           ? u.origin === new URL(BACKEND_URL).origin
           : u.origin === window.location.origin;
-        if (okOrigin) setViewerUrl(last);
+        if (okOrigin) {
+          setViewerUrl(last);
+        }
       } catch {
         /* drop malformed urls silently */
       }
@@ -238,12 +231,14 @@ export default function ChatShell() {
   }, [history.length, pending]);
 
   // ---- row click → update viewer ----------------------------------------
+  // PdfViewerPane handles same-paper jumps via postMessage internally; we
+  // just hand it the latest URL and let it decide between in-place jump
+  // and a full iframe reload.
   const activateRow = useCallback((turnIdx: number, rowIdx: number, row: EvidenceRow) => {
     const url = buildViewerUrl(row);
     if (!url) return;
     setActiveRowKey(`${turnIdx}:${rowIdx}`);
     setViewerUrl(url);
-    saveViewerUrl(url);
   }, []);
 
   // ---- submit ------------------------------------------------------------
@@ -490,11 +485,11 @@ export default function ChatShell() {
         <div className="divider" />
 
         <section className="viewer">
-          {viewerUrl ? (
-            <iframe src={viewerUrl} title="PDF viewer" />
-          ) : (
-            <div className="viewer-empty">Click an evidence row to view the source PDF.</div>
-          )}
+          <PdfViewerPane
+            src={viewerUrl || null}
+            storageKey={VIEWER_KEY}
+            emptyHint="Click an evidence row to view the source PDF."
+          />
         </section>
       </main>
     </div>

@@ -126,7 +126,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 
 #results { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
 
-/* Card style used by ResultCard.astro on /papers */
+/* Card style used by ResultCard on /papers */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -140,6 +140,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
   outline: none;
   transform: translateY(-1px);
   box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(0,0,0,0.04);
+}
+.card.active {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-strong);
 }
 
 .card-head {
@@ -238,8 +242,10 @@ table.papers th {
 }
 table.papers th.sort-asc::after  { content: " ▲"; color: var(--accent); }
 table.papers th.sort-desc::after { content: " ▼"; color: var(--accent); }
-table.papers tbody tr { cursor: pointer; transition: background 120ms ease; }
+table.papers tbody tr { transition: background 120ms ease; }
 table.papers tbody tr:hover { background: var(--panel-2); }
+table.papers tbody td a { color: inherit; text-decoration: none; }
+table.papers tbody td a:hover { text-decoration: underline; }
 .col-ok   { color: var(--ok);   font-feature-settings: "tnum"; }
 .col-weak { color: var(--warn); font-feature-settings: "tnum"; }
 .col-fail { color: var(--fail); font-feature-settings: "tnum"; }
@@ -265,4 +271,14 @@ dialog.settings input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.10);
+}
+
+/* App-wide override: split-pane shells (chat, paper detail) need the main
+   element to span edge-to-edge instead of inheriting the centered max-width
+   used on chrome pages. Selector is body-level so it applies wherever a
+   split-shell renders. */
+body:has(.split-shell) main {
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
 }

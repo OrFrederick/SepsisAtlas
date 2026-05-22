@@ -27,6 +27,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from sepsis_atlas.config import PAPERS_RAW, PAPERS_PARSED, DATA_DIR, PIPELINE_VERSION
 from sepsis_atlas.db import Paper, get_engine, init_db
+from sepsis_atlas.naming import year_from_stem
 
 
 PARSER_VERSION_FAILED = "failed"
@@ -145,6 +146,7 @@ def _upsert_paper(
         file_name=file_name,
         doi=doi,
         title=title,
+        year=year_from_stem(file_name),
         pdf_hash=pdf_hash,
         parser_version=parser_version,
         source="provided",
@@ -155,6 +157,7 @@ def _upsert_paper(
     update_cols = {
         "doi": stmt.excluded.doi,
         "title": stmt.excluded.title,
+        "year": stmt.excluded.year,
         "pdf_hash": stmt.excluded.pdf_hash,
         "parser_version": stmt.excluded.parser_version,
         "source": stmt.excluded.source,

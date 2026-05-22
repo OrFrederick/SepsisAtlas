@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Paper, Row } from "../lib/types";
 import { buildViewerUrl } from "../lib/viewerUrl";
+import { yearFromFileName } from "../lib/paperYear";
 import SplitLayout from "./SplitLayout";
 import PdfViewerPane from "./PdfViewerPane";
 import ResultCard from "./ResultCard";
@@ -30,7 +31,8 @@ function hrefFor(row: Row, basePath: string): string {
 export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUrl }: Props) {
   const [viewerUrl, setViewerUrl] = useState<string>(defaultViewerUrl);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
-  const subtitle = [paper.year, paper.journal].filter(Boolean).join(" · ");
+  const year = paper.year ?? yearFromFileName(paper.file_name);
+  const subtitle = [year, paper.journal].filter(Boolean).join(" · ");
   const b = basePath.endsWith("/") ? basePath : basePath + "/";
 
   return (

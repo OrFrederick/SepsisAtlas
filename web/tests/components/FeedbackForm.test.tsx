@@ -57,7 +57,7 @@ describe("FeedbackForm", () => {
   });
 
   it("sends honeypot field as empty string", async () => {
-    const fetchMock = vi.fn(async () => new Response(
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
       JSON.stringify({ ok: true, issueUrl: "x" }),
       { status: 200 },
     ));
@@ -68,7 +68,8 @@ describe("FeedbackForm", () => {
     await user.type(screen.getByLabelText(/details|body/i), "Long enough body text.");
     await user.click(screen.getByRole("button", { name: /submit/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(init?.body));
     expect(body.website).toBe("");
     expect(typeof body.formMountedAtMs).toBe("number");
   });

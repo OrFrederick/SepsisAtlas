@@ -53,8 +53,10 @@ export async function POST(req: Request): Promise<Response> {
     revalidatePath(`/papers/${stem}`);
     revalidatePath(`/viewer/${stem}`);
   }
-  if (body.stems.length > 0) {
-    revalidatePath("/papers");
-  }
+  // Always invalidate the papers list — even when stems is empty, the caller
+  // may have changed paper metadata (added/removed/renamed) without telling us
+  // exactly which stems are affected. Cheap to invalidate; not cheap to debug
+  // a stale list page.
+  revalidatePath("/papers");
   return NextResponse.json({ revalidated: body.stems.length });
 }

@@ -67,13 +67,14 @@ describe("POST /api/revalidate", () => {
     expect(revalidatePathMock).toHaveBeenCalledTimes(5);
   });
 
-  it("does not call /papers revalidation when stems is empty", async () => {
+  it("revalidates /papers even when stems is empty (metadata-only refresh)", async () => {
     const res = await callPost(
       { "content-type": "application/json", "x-revalidate-token": "secret-token-123" },
       { stems: [] },
     );
     expect(res.status).toBe(200);
-    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/papers");
+    expect(revalidatePathMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns 500 when REVALIDATE_TOKEN is unset", async () => {

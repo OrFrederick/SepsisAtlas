@@ -10,6 +10,7 @@ export default function ChromeLayout({ children }: { children: ReactNode }) {
         <nav>
           <ActiveLink href="/" exact>Chat</ActiveLink>
           <ActiveLink href="/papers">Papers</ActiveLink>
+          <ActiveLink href="/methodology">Methodology</ActiveLink>
         </nav>
       </header>
       <main>{children}</main>

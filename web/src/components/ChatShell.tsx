@@ -228,6 +228,9 @@ export default function ChatShell() {
   // are common at high-Hz polling; one setState per frame is enough.
   const moveRafRef = useRef<number | null>(null);
   const lastMoveXRef = useRef<number>(0);
+  // True once any pointermove has fired during the current drag. A pure
+  // click on the divider (no movement) shouldn't commit anything.
+  const movedRef = useRef(false);
   // Ref on the viewer-wrap so the reveal-completion effect can listen
   // for transitionend instead of duplicating the CSS timing in JS.
   const viewerWrapRef = useRef<HTMLElement | null>(null);
@@ -389,14 +392,23 @@ export default function ChatShell() {
 
   const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    // setPointerCapture can throw (e.g. pointerId already captured by
+    // another element). If it does, bail before flipping any drag state
+    // so we don't get stuck in `resizing`.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      return;
+    }
     draggingRef.current = true;
     startPctRef.current = latestPctRef.current;
+    movedRef.current = false;
     setResizing(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
+    movedRef.current = true;
     lastMoveXRef.current = e.clientX;
     if (moveRafRef.current != null) return;
     moveRafRef.current = requestAnimationFrame(() => {
@@ -426,8 +438,11 @@ export default function ChatShell() {
   };
 
   const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const moved = movedRef.current;
     const pct = finishDrag(e, false);
-    if (pct != null) commitChatPct(pct);
+    // A click on the divider without any drag shouldn't trigger a
+    // localStorage write — the chatPct hasn't changed.
+    if (pct != null && moved) commitChatPct(pct);
   };
 
   const onDividerPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -501,7 +516,8 @@ export default function ChatShell() {
         absolute = MAX_CHAT_PCT;
         break;
       case "Enter":
-      case " ":
+        // Space is intentionally not bound — the ARIA separator pattern
+        // doesn't define it, and conflating it with reset is unusual.
         absolute = DEFAULT_CHAT_PCT;
         break;
       default:
@@ -509,14 +525,16 @@ export default function ChatShell() {
     }
     e.preventDefault();
     if (delta !== 0) {
-      // Functional update — held-key repeats can fire multiple events
-      // per render, and reading `chatPct` from closure would lose steps.
-      setChatPct((prev) => {
-        const next = clampChatPct(prev + delta);
-        latestPctRef.current = next;
-        saveChatPct(next);
-        return next;
-      });
+      // Read the latest written pct from the ref rather than the closure
+      // chatPct — held-key repeats can fire several events before React
+      // commits a re-render. The ref is updated synchronously below so
+      // the next event in the burst sees the correct base. saveChatPct
+      // is kept out of the setState updater so StrictMode's dev-only
+      // double invocation doesn't double-write to localStorage.
+      const next = clampChatPct(latestPctRef.current + delta);
+      latestPctRef.current = next;
+      setChatPct(next);
+      saveChatPct(next);
     } else if (absolute !== null) {
       commitChatPct(absolute);
     }
@@ -676,7 +694,7 @@ export default function ChatShell() {
             the static `0`; `inert` wins when set. */}
         <section
           className="viewer-wrap"
-          ref={viewerWrapRef as React.RefObject<HTMLElement>}
+          ref={viewerWrapRef}
           inert={!viewerInteractive}
         >
           <div

@@ -40,6 +40,14 @@ beforeEach(() => {
       dispatchEvent: () => false,
     })),
   });
+  // jsdom doesn't implement pointer capture; production code wraps it
+  // in try/catch and bails on throw, so without these stubs the drag
+  // tests would never enter the dragging state.
+  if (!HTMLElement.prototype.setPointerCapture) {
+    HTMLElement.prototype.setPointerCapture = () => {};
+    HTMLElement.prototype.releasePointerCapture = () => {};
+    HTMLElement.prototype.hasPointerCapture = () => false;
+  }
   seedHistory();
 });
 
@@ -112,7 +120,7 @@ describe("ChatShell — divider keyboard nudge", () => {
     expect(sep.getAttribute("aria-valuenow")).toBe("73");
   });
 
-  it("ignores held-key step loss across multiple ArrowRights", async () => {
+  it("ArrowRight ×10 accumulates without dropping steps", async () => {
     render(<ChatShell />);
     const sep = await focusedDivider();
     const u = userEvent.setup();
@@ -122,5 +130,107 @@ describe("ChatShell — divider keyboard nudge", () => {
     // 50 + 10*2 = 70 — would not hold with the previous closure-read bug.
     expect(sep.getAttribute("aria-valuenow")).toBe("70");
     expect(localStorage.getItem(CHAT_WIDTH_KEY)).toBe("70");
+  });
+
+  it("Space is not bound (no chatPct change)", async () => {
+    render(<ChatShell />);
+    const sep = await focusedDivider();
+    const u = userEvent.setup();
+    await u.keyboard("{ }");
+    expect(sep.getAttribute("aria-valuenow")).toBe(String(DEFAULT_CHAT_PCT));
+  });
+});
+
+describe("ChatShell — divider pointer drag", () => {
+  function mockSplitRect(sep: Element, width = 1000) {
+    const split = sep.closest(".split") as HTMLElement;
+    Object.defineProperty(split, "getBoundingClientRect", {
+      configurable: true,
+      value: () =>
+        ({
+          left: 0,
+          top: 0,
+          width,
+          height: 800,
+          right: width,
+          bottom: 800,
+          x: 0,
+          y: 0,
+          toJSON() {},
+        }) as DOMRect,
+    });
+    return split;
+  }
+
+  function dispatchPointer(
+    target: Element,
+    type: string,
+    clientX: number,
+    extras: Partial<PointerEventInit> = {},
+  ) {
+    target.dispatchEvent(
+      new PointerEvent(type, {
+        pointerId: 1,
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY: 400,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 1,
+        ...extras,
+      }),
+    );
+  }
+
+  it("pointerdown → pointermove → pointerup commits the final clientX-derived pct", async () => {
+    render(<ChatShell />);
+    const sep = await focusedDivider();
+    mockSplitRect(sep);
+
+    dispatchPointer(sep, "pointerdown", 500);
+    // Move toward x=350 → expect 35% on a 1000px container.
+    for (let x = 500; x >= 350; x -= 25) dispatchPointer(sep, "pointermove", x);
+    // Flush the coalescing rAF.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    dispatchPointer(sep, "pointerup", 350);
+    await act(async () => {});
+
+    expect(sep.getAttribute("aria-valuenow")).toBe("35");
+    expect(localStorage.getItem(CHAT_WIDTH_KEY)).toBe("35");
+  });
+
+  it("pointercancel reverts to the drag-start pct", async () => {
+    render(<ChatShell />);
+    const sep = await focusedDivider();
+    mockSplitRect(sep);
+
+    dispatchPointer(sep, "pointerdown", 500);
+    dispatchPointer(sep, "pointermove", 350);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // Mid-drag we should see the moved pct briefly; the cancel must undo it.
+    dispatchPointer(sep, "pointercancel", 350);
+    await act(async () => {});
+
+    expect(sep.getAttribute("aria-valuenow")).toBe(String(DEFAULT_CHAT_PCT));
+    expect(localStorage.getItem(CHAT_WIDTH_KEY)).toBe(String(DEFAULT_CHAT_PCT));
+  });
+
+  it("pointerup without any pointermove does not write localStorage", async () => {
+    render(<ChatShell />);
+    const sep = await focusedDivider();
+    mockSplitRect(sep);
+
+    dispatchPointer(sep, "pointerdown", 500);
+    dispatchPointer(sep, "pointerup", 500);
+    await act(async () => {});
+
+    // No drag took place; aria-valuenow stays at the default and nothing was persisted.
+    expect(sep.getAttribute("aria-valuenow")).toBe(String(DEFAULT_CHAT_PCT));
+    expect(localStorage.getItem(CHAT_WIDTH_KEY)).toBeNull();
   });
 });

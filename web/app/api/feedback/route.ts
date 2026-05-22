@@ -17,9 +17,15 @@ function clientIp(req: Request): string {
 }
 
 function originAllowed(req: Request): boolean {
-  const allowed = (process.env.FEEDBACK_ALLOWED_ORIGIN ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
-  if (allowed.length === 0) return true; // dev fallback; prod always sets one
+  const raw = process.env.FEEDBACK_ALLOWED_ORIGIN ?? "";
+  const allowed = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowed.length === 0) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("[feedback] FEEDBACK_ALLOWED_ORIGIN unset in production; denying request");
+      return false;
+    }
+    return true; // dev fallback
+  }
   const origin = req.headers.get("origin") ?? req.headers.get("referer") ?? "";
   return allowed.some((a) => origin === a || origin.startsWith(a + "/"));
 }

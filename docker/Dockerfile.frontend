@@ -57,12 +57,21 @@ RUN mkdir -p web/public/pdfs && \
 RUN cd web && NEXT_PUBLIC_BACKEND_URL="" bun run build
 
 # ---- Stage 2: runtime — Node + Caddy in the same container ----
+#
+# Copy the Caddy binary out of the official `caddy:2-alpine` image
+# rather than `apk add --no-cache caddy`. Alpine's community repo
+# floats the major version (today 2.11, tomorrow could be 3.x with
+# breaking Caddyfile syntax). `caddy:2-alpine` is the upstream-
+# maintained tag that tracks the 2.x series specifically.
+FROM caddy:2-alpine AS caddy-source
+
 FROM node:20-alpine
 
-# Install Caddy from the Alpine community repo. The image stays small
-# (~50MB base + ~30MB Caddy) and we keep TLS termination on this single
-# container.
-RUN apk add --no-cache caddy ca-certificates
+# ca-certificates lets Caddy reach Let's Encrypt; wget powers the
+# HEALTHCHECK below.
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=caddy-source /usr/bin/caddy /usr/bin/caddy
 
 WORKDIR /app
 
@@ -72,9 +81,6 @@ WORKDIR /app
 COPY --from=build /app/web/.next/standalone ./
 COPY --from=build /app/web/.next/static ./.next/static
 COPY --from=build /app/web/public ./public
-
-# wget is needed by the healthcheck below. Install once with the rest.
-RUN apk add --no-cache wget
 
 # Caddy config (baked in; conf.d allows per-deploy overrides via the
 # host bind-mount declared in docker-compose.prod.yml).

@@ -1,3 +1,5 @@
+"use client";
+
 // web/src/components/pdf/PdfViewer.tsx
 import { useEffect, useRef, useState } from "react";
 import { PdfController } from "./PdfController";

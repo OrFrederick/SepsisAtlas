@@ -1,3 +1,5 @@
+"use client";
+
 import PapersTable from "./PapersTable";
 import type { Paper } from "../lib/types";
 

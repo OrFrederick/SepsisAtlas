@@ -1,3 +1,5 @@
+"use client";
+
 /*
   EvidenceTable — sortable table view of an assistant turn's evidence
   rows. Mirrors the per-row data that EvidenceCard surfaces, laid out

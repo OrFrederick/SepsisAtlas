@@ -1,3 +1,5 @@
+"use client";
+
 /*
   Chat shell — React port of the original `static/app.html` vanilla-JS chat,
   living inside an Astro island.

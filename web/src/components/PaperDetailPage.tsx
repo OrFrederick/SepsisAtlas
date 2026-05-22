@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import type { Paper, Row } from "../lib/types";
 import { buildViewerUrl } from "../lib/viewerUrl";

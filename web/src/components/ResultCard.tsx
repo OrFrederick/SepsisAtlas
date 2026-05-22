@@ -1,3 +1,5 @@
+"use client";
+
 import type { Row } from "../lib/types";
 
 type Props = {

@@ -1,16 +1,26 @@
 /* Chat shell — Editorial Clinical direction.
-   Off-white ground, serif display + body, deep teal accent (#0F4C5C),
+   Off-white ground, serif display + body, efferon blue accent (#3F68B2),
    hairline borders over shadows, restrained motion handled by Framer
    Motion in ChatShell.tsx. */
 
-body { overflow: hidden; }
-main { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+body:has(.chat-shell) { overflow: hidden; }
+
+/* Inner <main class="split"> nested inside chat-shell must escape the global
+   main { max-width: 1100px; padding: 22px 28px 60px } rule. */
+.chat-shell main {
+  padding: 0;
+  max-width: none;
+  margin: 0;
+}
 
 .chat-shell {
   display: grid;
   grid-template-rows: 44px 1fr;
-  height: calc(100vh - 49px); /* below RootLayout topbar */
-  width: 100vw;
+  position: fixed;
+  top: 49px; /* below RootLayout topbar (48px + 1px border) */
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--bg);
 }
 
@@ -225,7 +235,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 }
 .card:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.12);
+  box-shadow: 0 0 0 3px rgba(63, 104, 178, 0.12);
 }
 .card.active { border-color: var(--accent); }
 .card.tap { transform: scale(0.99); }
@@ -320,7 +330,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 .composer textarea::placeholder { color: var(--fg-faint); font-style: italic; }
 .composer textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.10);
+  box-shadow: 0 0 0 3px rgba(63, 104, 178, 0.10);
 }
 .send-btn {
   background: var(--accent);
@@ -333,7 +343,7 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   transition: background 180ms ease, transform 150ms ease;
 }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.send-btn:not(:disabled):hover { background: #0c3d4b; transform: translateY(-1px); }
+.send-btn:not(:disabled):hover { background: #2F4F8A; transform: translateY(-1px); }
 
 .viewer {
   height: 100%;

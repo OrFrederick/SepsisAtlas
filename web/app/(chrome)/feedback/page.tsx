@@ -22,7 +22,7 @@ function parseRow(v: string | undefined): unknown {
 export default async function FeedbackPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   return (
-    <main className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl p-6">
       <h1>Send feedback</h1>
       <p>
         Submissions are filed as labeled GitHub issues. No account required;
@@ -33,6 +33,6 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
         initialPaper={sp.paper}
         initialRowContext={parseRow(sp.row)}
       />
-    </main>
+    </div>
   );
 }

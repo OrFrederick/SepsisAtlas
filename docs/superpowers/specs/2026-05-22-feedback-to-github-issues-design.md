@@ -185,6 +185,26 @@ All server-side errors logged with a request id; tokens never logged.
 
 These are listed in the PR description and `deploy/README.md`, not done by the code at runtime.
 
+## Triage workflow — GitHub Project board
+
+Issues created by the form are triaged on a single free GitHub Projects v2 board: **"SepsisAtlas Feedback"** (user-owned, linked to this repo).
+
+**Columns (Status field):** Inbox → Triaged → In progress → In review → Done · Wontfix
+
+**Fields:** `Status`, `Type` (mirrors `feedback:*` label), `Priority` (P0–P3)
+
+**Built-in workflows enabled in the web UI:**
+- Auto-add filter: `label:feedback is:issue is:open` → adds new submissions to Inbox
+- Item closed → Status = Done
+- Item closed as not planned → Status = Wontfix
+- Pull request merged → Status = Done
+
+**Backfill:** all currently-open repo issues (8 at spec time) are added to the board as part of setup so triage happens in one place.
+
+**Closes by this PR:** issues #26 ("Add Feedback button") and #27 ("Add ability to report/flag results") — both describe exactly this feature.
+
+Setup is automated by `scripts/setup-feedback-board.sh` (creates project, fields, links repo, backfills issues). The four built-in workflow toggles still need ~30s in the web UI because `gh project` does not wrap `updateProjectV2Workflow`.
+
 ## Observability (prod)
 
 - Server logs one structured line per request: `{requestId, type, ok, status, durationMs, gh_status?}`. No IP, no email, no body content.

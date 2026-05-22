@@ -172,11 +172,12 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   position: absolute;
   top: 0;
   bottom: 0;
-  /* 10px hit area centered on the column boundary (visual hairline is
-     the 1px ::before pseudo-element below). Wide enough for touch and
-     imprecise trackpad gestures without showing a thicker handle. */
-  left: -5px;
-  width: 10px;
+  /* 8px hit area pinned to the left edge of .viewer-wrap (i.e. the
+     column boundary). Kept on the viewer side only so it doesn't
+     overlap the chat's vertical scrollbar gutter. Visual hairline is
+     the 1px ::before below, at the boundary itself. */
+  left: 0;
+  width: 8px;
   z-index: 2;
   background: transparent;
   cursor: col-resize;
@@ -187,10 +188,9 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   content: "";
   position: absolute;
   top: 0; bottom: 0;
-  left: 50%;
+  left: 0;
   width: 1px;
   background: var(--border);
-  transform: translateX(-50%);
   transition: background 160ms ease, width 160ms ease;
 }
 .divider:hover::before,

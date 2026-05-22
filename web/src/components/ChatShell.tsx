@@ -240,10 +240,16 @@ export default function ChatShell() {
   // returns null — otherwise we'd commit the stale state value instead
   // of the most recent pointermove result.
   const latestPctRef = useRef<number>(DEFAULT_CHAT_PCT);
+  // Drag-start pct, captured on pointerdown. Pointercancel reverts to
+  // this (convention) — pointerup commits the final position.
+  const startPctRef = useRef<number>(DEFAULT_CHAT_PCT);
   // rAF coalescing for pointermove. Multiple pointermove events per frame
   // are common at high-Hz polling; one setState per frame is enough.
   const moveRafRef = useRef<number | null>(null);
   const lastMoveXRef = useRef<number>(0);
+  // Ref on the viewer-wrap so the reveal-completion effect can listen
+  // for transitionend instead of duplicating the CSS timing in JS.
+  const viewerWrapRef = useRef<HTMLElement | null>(null);
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
@@ -403,6 +409,7 @@ export default function ChatShell() {
   const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     draggingRef.current = true;
+    startPctRef.current = latestPctRef.current;
     setResizing(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -420,18 +427,31 @@ export default function ChatShell() {
     });
   };
 
-  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current) return;
+  // Shared cleanup for pointerup and pointercancel. Returns the post-drag
+  // pct the caller should commit (final position for up, original for cancel).
+  const finishDrag = (e: React.PointerEvent<HTMLDivElement>, revertToStart: boolean) => {
+    if (!draggingRef.current) return null;
     draggingRef.current = false;
     setResizing(false);
     if (moveRafRef.current != null) {
       cancelAnimationFrame(moveRafRef.current);
       moveRafRef.current = null;
     }
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-    commitChatPct(computePctFromClientX(e.clientX) ?? latestPctRef.current);
+    // releasePointerCapture is a no-op if not held, no need to guard.
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    return revertToStart
+      ? startPctRef.current
+      : computePctFromClientX(e.clientX) ?? latestPctRef.current;
+  };
+
+  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pct = finishDrag(e, false);
+    if (pct != null) commitChatPct(pct);
+  };
+
+  const onDividerPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pct = finishDrag(e, true);
+    if (pct != null) commitChatPct(pct);
   };
 
   const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
@@ -452,19 +472,33 @@ export default function ChatShell() {
   // Pointer/focus stays disabled on the viewer pane until the slide-in
   // finishes — prevents grabbing the divider mid-animation when its
   // visual position is still mid-translate. Re-disabled instantly on
-  // the reverse (Clear chat → solo).
-  // Must be ≥ the .viewer-wrap reveal in chat.css:
-  //   opacity 360ms + 80ms delay = 440ms, transform 520ms + 80ms delay = 600ms.
-  // Update both in lockstep if you change either.
-  const VIEWER_REVEAL_MS = 600;
+  // the reverse (Clear chat → solo). We key off the actual transitionend
+  // on .viewer-wrap's transform so JS doesn't have to mirror the CSS
+  // duration — they stay in sync by construction.
   const [viewerInteractive, setViewerInteractive] = useState(false);
   useEffect(() => {
     if (!showPdf) {
       setViewerInteractive(false);
       return;
     }
-    const id = window.setTimeout(() => setViewerInteractive(true), VIEWER_REVEAL_MS);
-    return () => window.clearTimeout(id);
+    const wrap = viewerWrapRef.current;
+    if (!wrap) return;
+    // Reduced-motion mode strips the transition entirely; no transitionend
+    // will ever fire, so settle immediately.
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setViewerInteractive(true);
+      return;
+    }
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target === wrap && e.propertyName === "transform") {
+        setViewerInteractive(true);
+      }
+    };
+    wrap.addEventListener("transitionend", onEnd);
+    return () => wrap.removeEventListener("transitionend", onEnd);
   }, [showPdf]);
 
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -654,7 +688,16 @@ export default function ChatShell() {
           </form>
         </section>
 
-        <section className="viewer-wrap" inert={!viewerInteractive}>
+        {/* `inert` while the slide-in is in flight gates focus and pointer
+            events on the divider too (it lives inside .viewer-wrap), which
+            is intentional — the divider has no meaningful position until
+            the reveal lands. Tabindex on the divider is therefore left at
+            the static `0`; `inert` wins when set. */}
+        <section
+          className="viewer-wrap"
+          ref={viewerWrapRef as React.RefObject<HTMLElement>}
+          inert={!viewerInteractive}
+        >
           <div
             className="divider"
             role="separator"
@@ -663,12 +706,12 @@ export default function ChatShell() {
             aria-valuemax={MAX_CHAT_PCT}
             aria-valuenow={Math.round(chatPct)}
             aria-valuetext={`${Math.round(chatPct)}%`}
-            aria-label="Resize chat pane (use arrow keys, double-click to reset)"
-            tabIndex={viewerInteractive ? 0 : -1}
+            aria-label="Resize chat pane (arrow keys; Shift+arrow for 10% steps; Home/End for min/max; Enter or double-click to reset)"
+            tabIndex={0}
             onPointerDown={onDividerPointerDown}
             onPointerMove={onDividerPointerMove}
             onPointerUp={endDividerDrag}
-            onPointerCancel={endDividerDrag}
+            onPointerCancel={onDividerPointerCancel}
             onDoubleClick={onDividerDoubleClick}
             onKeyDown={onDividerKeyDown}
           />

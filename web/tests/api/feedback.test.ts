@@ -115,12 +115,68 @@ describe("POST /api/feedback", () => {
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when Content-Length exceeds the 16 KB cap", async () => {
+  it("rejects payloads past the 16 KB cap even when Content-Length is omitted (stream-read guard)", async () => {
+    const oversized = validBody({ body: "x".repeat(20_000) });
+    const res = await callPost({ origin: "http://localhost" }, oversized);
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects payloads past the 16 KB cap when client lies about Content-Length", async () => {
+    const oversized = validBody({ body: "x".repeat(20_000) });
     const res = await callPost(
-      { origin: "http://localhost", "content-length": String(20_000) },
-      validBody(),
+      { origin: "http://localhost", "content-length": "10" },
+      oversized,
     );
     expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects when formMountedAtMs is missing (anti-bot guard always runs)", async () => {
+    const { formMountedAtMs: _drop, ...rest } = validBody();
+    const res = await callPost({ origin: "http://localhost" }, rest);
+    expect(res.status).toBe(400);
+    expect(createIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("prefers X-Real-IP over X-Forwarded-For for the rate-limit key", async () => {
+    // Burn the bucket for the real client's IP via X-Real-IP.
+    for (let i = 0; i < 5; i++) {
+      await callPost(
+        { origin: "http://localhost", "x-real-ip": "8.8.8.8" },
+        validBody(),
+      );
+    }
+    // An attacker-spoofed XFF on the same request should not let them
+    // through, because X-Real-IP (the trusted header) still keys the bucket.
+    const res = await callPost(
+      { origin: "http://localhost", "x-real-ip": "8.8.8.8", "x-forwarded-for": "1.2.3.4" },
+      validBody(),
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("rate-limits on the rightmost X-Forwarded-For entry, not the leftmost (XFF spoof guard)", async () => {
+    // 5 submissions with what the upstream proxy appended (entry on the right).
+    for (let i = 0; i < 5; i++) {
+      await callPost(
+        { origin: "http://localhost", "x-forwarded-for": "spoof, 7.7.7.7" },
+        validBody(),
+      );
+    }
+    // Same real upstream-appended IP, but the attacker changes the leftmost
+    // entry hoping to dodge the bucket. Should still 429.
+    const res = await callPost(
+      { origin: "http://localhost", "x-forwarded-for": "different-spoof, 7.7.7.7" },
+      validBody(),
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("refuses in production when no client IP header is present", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const res = await callPost({ origin: "http://localhost" }, validBody());
+    expect(res.status).toBe(403);
     expect(createIssueMock).not.toHaveBeenCalled();
   });
 });

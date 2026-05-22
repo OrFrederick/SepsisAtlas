@@ -14,14 +14,32 @@ function labelsFor(payload: FeedbackPayload): string[] {
   return labels;
 }
 
+function longestBacktickRun(s: string): number {
+  let max = 0;
+  for (const m of s.matchAll(/`+/g)) {
+    if (m[0].length > max) max = m[0].length;
+  }
+  return max;
+}
+
 function bodyFor(payload: FeedbackPayload): string {
   const rowSerialized = payload.rowContext !== undefined
     ? JSON.stringify(payload.rowContext, null, 2)
     : "n/a";
-  // Pick a fence longer than any backtick run inside the content so user
-  // input can't break out. Min 3, then bump by one per matched run.
-  const longest = [...rowSerialized.matchAll(/`+/g)].reduce((m, x) => Math.max(m, x[0].length), 0);
+  // One fence sized to escape both the row JSON and the user's body so the
+  // same delimiter can wrap both. Min 3, then bump by one past the longest
+  // run seen in either input.
+  const longest = Math.max(
+    longestBacktickRun(rowSerialized),
+    longestBacktickRun(payload.body),
+  );
   const fence = "`".repeat(Math.max(3, longest + 1));
+
+  // Contact is rendered inline as code so `@mentions`, image syntax, and
+  // bold/italic markers cannot fire from the email's local-part.
+  const contactDisplay = payload.contact
+    ? "`" + payload.contact.replace(/`/g, "") + "`"
+    : "anon";
 
   const lines = [
     `**Type:** ${payload.type}`,
@@ -30,12 +48,18 @@ function bodyFor(payload: FeedbackPayload): string {
     `${fence}json`,
     rowSerialized,
     fence,
-    `**Contact:** ${payload.contact ?? "anon"}`,
+    `**Contact:** ${contactDisplay}`,
     `**Submitted:** ${new Date().toISOString()}`,
     "",
     "---",
+    "**Message:**",
     "",
+    // The user's body is wrapped in a code fence so @mentions,
+    // cross-repo issue references, and image-tag pixel-exfil cannot
+    // fire from arbitrary submitted text.
+    fence,
     payload.body,
+    fence,
     "",
     "---",
     "*Submitted via SepsisAtlas feedback form. No IP or user-agent stored.*",

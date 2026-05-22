@@ -55,7 +55,15 @@ atlas.efferon.com {
 	# Everything else (chrome routes, /papers/<stem>, /viewer/<stem>,
 	# /_next/* asset chunks, items in public/) is served by Next. Next
 	# emits its own cache-control headers; let it answer.
+	#
+	# X-Real-IP and X-Forwarded-For are *overwritten* (not appended to)
+	# with the actual TCP peer. Without this Caddy would forward whatever
+	# XFF the client sent in, letting attackers spoof their rate-limit
+	# key — see web/app/api/feedback/route.ts:clientIp.
 	handle {
-		reverse_proxy localhost:3000
+		reverse_proxy localhost:3000 {
+			header_up X-Real-IP {remote_ip}
+			header_up X-Forwarded-For {remote_ip}
+		}
 	}
 }

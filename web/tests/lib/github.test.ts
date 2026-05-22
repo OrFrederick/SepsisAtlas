@@ -8,6 +8,7 @@ const base: FeedbackPayload = {
   body: "Reported 65, paper says 67.",
   paperStem: "Seymour_2016",
   website: "",
+  formMountedAtMs: 1_700_000_000_000,
 };
 
 function jsonResponse(status: number, body: unknown) {
@@ -131,5 +132,45 @@ describe("createFeedbackIssue", () => {
     expect(payload.body).toContain("user@example.com");
     expect(payload.body).toContain('"age": 65');
     expect(payload.body).toMatch(/\*\*Submitted:\*\* \d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("wraps the user body in a code fence so markdown in submissions cannot fire", async () => {
+    await createFeedbackIssue({
+      ...base,
+      body: "@github please look, see OrFrederick/SepsisAtlas#1 and ![x](https://attacker/track.gif)",
+    }, { fetch: fetchMock, repo: "o/r", token: "t" });
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/issues"))!;
+    const payload = JSON.parse(String((call[1] as RequestInit).body));
+    // Count line-leading fence delimiters. We expect at least four:
+    // row-context open/close + body open/close.
+    const fenceLines = String(payload.body).split("\n").filter((l) => /^`{3,}/.test(l));
+    expect(fenceLines.length).toBeGreaterThanOrEqual(4);
+    expect(payload.body).toContain("@github please look");
+  });
+
+  it("sizes the body fence past the longest backtick run in the user's body", async () => {
+    await createFeedbackIssue({
+      ...base,
+      body: "tricky ```` user content ```` still inside",
+    }, { fetch: fetchMock, repo: "o/r", token: "t" });
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/issues"))!;
+    const payload = JSON.parse(String((call[1] as RequestInit).body));
+    const fences = String(payload.body)
+      .split("\n")
+      .map((l) => l.match(/^(`{3,})/)?.[1])
+      .filter((f): f is string => Boolean(f));
+    expect(fences.length).toBeGreaterThanOrEqual(2);
+    // Every fence must be longer than the 4-backtick run in the body.
+    for (const f of fences) expect(f.length).toBeGreaterThan(4);
+  });
+
+  it("wraps contact in backticks so email-local-part markdown cannot fire", async () => {
+    await createFeedbackIssue({
+      ...base,
+      contact: "user+**bold**@example.com",
+    }, { fetch: fetchMock, repo: "o/r", token: "t" });
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/issues"))!;
+    const payload = JSON.parse(String((call[1] as RequestInit).body));
+    expect(payload.body).toContain("**Contact:** `user+**bold**@example.com`");
   });
 });

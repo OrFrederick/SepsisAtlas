@@ -6,6 +6,7 @@ const base = {
   title: "Form blank on Safari",
   body: "When I open /papers on Safari 17, the table is empty.",
   website: "",
+  formMountedAtMs: 1_700_000_000_000,
 };
 
 describe("validateFeedback", () => {
@@ -79,5 +80,28 @@ describe("validateFeedback", () => {
   it("rejects non-object input", () => {
     expect(validateFeedback("nope").ok).toBe(false);
     expect(validateFeedback(null).ok).toBe(false);
+  });
+
+  it("rejects when formMountedAtMs is missing (anti-bot guard cannot be opt-out)", () => {
+    const { formMountedAtMs: _drop, ...rest } = base;
+    expect(validateFeedback(rest).ok).toBe(false);
+  });
+
+  it("rejects when formMountedAtMs is not a finite number", () => {
+    expect(validateFeedback({ ...base, formMountedAtMs: "1700000000000" }).ok).toBe(false);
+    expect(validateFeedback({ ...base, formMountedAtMs: Number.NaN }).ok).toBe(false);
+    expect(validateFeedback({ ...base, formMountedAtMs: Number.POSITIVE_INFINITY }).ok).toBe(false);
+  });
+
+  it("strips control characters from the title before length-checking", () => {
+    const dirty = "Hello" + "\n\r\t" + "world!";
+    const r = validateFeedback({ ...base, title: dirty });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.title).toBe("Helloworld!");
+  });
+
+  it("rejects a paperStem longer than 64 chars (label-namespace + GH label cap)", () => {
+    expect(validateFeedback({ ...base, paperStem: "a".repeat(65) }).ok).toBe(false);
+    expect(validateFeedback({ ...base, paperStem: "a".repeat(64) }).ok).toBe(true);
   });
 });

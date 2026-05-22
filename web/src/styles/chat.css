@@ -157,11 +157,10 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 }
 @media (prefers-reduced-motion: reduce) {
   .split,
-  .split .chat,
-  .viewer-wrap {
+  .split .chat {
     transition: none;
   }
-  .viewer-wrap { transform: none; }
+  .viewer-wrap { transition: none; transform: none; }
 }
 
 .divider {

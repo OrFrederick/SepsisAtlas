@@ -17,11 +17,15 @@ export type ValidationResult =
   | { ok: false; error: string };
 
 const STEM_RE = /^[A-Za-z0-9_-]+$/;
-const STEM_MAX_LEN = 64;
+// GitHub's web UI rejects label names longer than 50 chars. The route
+// derives a label as `paper:<stem>` (7-char prefix), so cap the stem at
+// 40 to keep the resulting label safely under that limit.
+const STEM_MAX_LEN = 40;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// Control characters: C0 + DEL. Stripped from title so a newline can't
+// Control characters: C0 + DEL, plus U+2028 (line separator) and
+// U+2029 (paragraph separator). Stripped from title so a newline can't
 // split the rendered issue title or smuggle markdown into the next line.
-const CONTROL_RE = /[\x00-\x1F\x7F]/g;
+const CONTROL_RE = /[\x00-\x1F\x7F\u2028\u2029]/g;
 
 function isJsonSerializable(v: unknown): boolean {
   try { JSON.stringify(v); return true; } catch { return false; }

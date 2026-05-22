@@ -15,6 +15,12 @@ const MAX_BODY_BYTES = 16_384;
 // the *rightmost* entry — the one Caddy or any other final proxy added —
 // rather than the leftmost, which is attacker-controlled when XFF is
 // appended rather than replaced.
+//
+// This assumes Caddy is the edge. If a CDN/L7 LB (e.g. Cloudflare) is ever
+// placed in front of Caddy, `remote_ip` becomes the upstream proxy and
+// every legitimate user collapses onto a single rate-limit bucket. Update
+// the Caddyfile to use `trusted_proxies` and forward the original XFF
+// before relying on this function in that topology.
 function clientIp(req: Request): string | null {
   const real = req.headers.get("x-real-ip");
   if (real) {

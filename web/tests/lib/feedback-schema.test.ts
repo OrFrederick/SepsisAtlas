@@ -100,8 +100,15 @@ describe("validateFeedback", () => {
     if (r.ok) expect(r.value.title).toBe("Helloworld!");
   });
 
-  it("rejects a paperStem longer than 64 chars (label-namespace + GH label cap)", () => {
-    expect(validateFeedback({ ...base, paperStem: "a".repeat(65) }).ok).toBe(false);
-    expect(validateFeedback({ ...base, paperStem: "a".repeat(64) }).ok).toBe(true);
+  it("strips U+2028 / U+2029 line/paragraph separators from the title", () => {
+    const dirty = "Hello\u2028world\u2029!";
+    const r = validateFeedback({ ...base, title: dirty });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.title).toBe("Helloworld!");
+  });
+
+  it("rejects a paperStem longer than 40 chars (GitHub label name cap, with `paper:` prefix)", () => {
+    expect(validateFeedback({ ...base, paperStem: "a".repeat(41) }).ok).toBe(false);
+    expect(validateFeedback({ ...base, paperStem: "a".repeat(40) }).ok).toBe(true);
   });
 });

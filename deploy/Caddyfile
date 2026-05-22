@@ -66,6 +66,15 @@ atlas.efferon.com {
 	# with the actual TCP peer. Without this Caddy would forward whatever
 	# XFF the client sent in, letting attackers spoof their rate-limit
 	# key — see web/app/api/feedback/route.ts:clientIp.
+	#
+	# ASSUMPTION: Caddy is the edge — i.e. {remote_ip} here IS the real
+	# client. If anything (Cloudflare, an L7 LB, another reverse proxy)
+	# is ever placed in front of Caddy, this overwrite will replace the
+	# real client IP with the upstream proxy's egress IP, and every
+	# legitimate request will collapse onto a single rate-limit bucket.
+	# In that case: enable `servers { trusted_proxies static <cidr> }`
+	# at the global level and read the rightmost untrusted entry from
+	# the *incoming* X-Forwarded-For instead of using {remote_ip}.
 	handle {
 		reverse_proxy localhost:3000 {
 			header_up X-Real-IP {remote_ip}

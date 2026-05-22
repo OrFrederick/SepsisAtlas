@@ -69,6 +69,7 @@ setup_firewall() {
   ufw allow 22/tcp comment 'ssh'
   ufw allow 80/tcp comment 'http'
   ufw allow 443/tcp comment 'https'
+  ufw allow 443/udp comment 'http3'
   ufw default deny incoming
   ufw default allow outgoing
   yes | ufw enable || true

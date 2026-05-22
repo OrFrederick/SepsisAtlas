@@ -37,7 +37,35 @@ const SLIDE_IN_RIGHT = {
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
+const CHAT_WIDTH_KEY = "sepsis_atlas.chat_width.v1";
 const HISTORY_MAX = 50;
+const MIN_CHAT_PCT = 20;
+const MAX_CHAT_PCT = 80;
+const DEFAULT_CHAT_PCT = 50;
+const KEYBOARD_STEP_PCT = 2;
+
+function clampChatPct(n: number): number {
+  return Math.min(MAX_CHAT_PCT, Math.max(MIN_CHAT_PCT, n));
+}
+
+function loadChatPct(): number {
+  if (typeof window === "undefined") return DEFAULT_CHAT_PCT;
+  try {
+    const n = parseFloat(localStorage.getItem(CHAT_WIDTH_KEY) || "");
+    return Number.isFinite(n) ? clampChatPct(n) : DEFAULT_CHAT_PCT;
+  } catch {
+    return DEFAULT_CHAT_PCT;
+  }
+}
+
+function saveChatPct(pct: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CHAT_WIDTH_KEY, String(pct));
+  } catch {
+    /* quota errors are non-fatal */
+  }
+}
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
@@ -200,13 +228,18 @@ export default function ChatShell() {
   const [pending, setPending] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [viewerUrl, setViewerUrl] = useState("");
+  const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
+  const [resizing, setResizing] = useState(false);
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const splitRef = useRef<HTMLElement | null>(null);
+  const draggingRef = useRef(false);
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
     setHistory(loadHistory());
+    setChatPct(loadChatPct());
     const last = loadViewerUrl();
     if (last) {
       try {
@@ -339,6 +372,72 @@ export default function ChatShell() {
     ta.style.height = `${Math.min(ta.scrollHeight, 132)}px`;
   }, [input]);
 
+  // ---- divider resize ----------------------------------------------------
+  // Pointer-capture on the divider keeps drag events flowing even when the
+  // cursor crosses into the PDF iframe (which would otherwise eat them).
+  const computePctFromClientX = (clientX: number): number | null => {
+    const split = splitRef.current;
+    if (!split) return null;
+    const rect = split.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    return clampChatPct(((clientX - rect.left) / rect.width) * 100);
+  };
+
+  const commitChatPct = (pct: number) => {
+    setChatPct(pct);
+    saveChatPct(pct);
+  };
+
+  const onDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    setResizing(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onDividerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const pct = computePctFromClientX(e.clientX);
+    if (pct != null) setChatPct(pct);
+  };
+
+  const endDividerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setResizing(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    commitChatPct(computePctFromClientX(e.clientX) ?? chatPct);
+  };
+
+  const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
+
+  const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowLeft":
+        next = clampChatPct(chatPct - KEYBOARD_STEP_PCT);
+        break;
+      case "ArrowRight":
+        next = clampChatPct(chatPct + KEYBOARD_STEP_PCT);
+        break;
+      case "Home":
+        next = MIN_CHAT_PCT;
+        break;
+      case "End":
+        next = MAX_CHAT_PCT;
+        break;
+      case "Enter":
+      case " ":
+        next = DEFAULT_CHAT_PCT;
+        break;
+    }
+    if (next == null) return;
+    e.preventDefault();
+    commitChatPct(next);
+  };
+
   return (
     <MotionConfig reducedMotion="user">
     <div className="chat-shell">
@@ -353,7 +452,11 @@ export default function ChatShell() {
         </button>
       </div>
 
-      <main className="split">
+      <main
+        className={`split${resizing ? " resizing" : ""}`}
+        ref={splitRef}
+        style={{ gridTemplateColumns: `${chatPct}% 6px 1fr` }}
+      >
         <section className="chat">
           <div ref={scrollbackRef} className="scrollback">
             {history.length === 0 && !pending ? (
@@ -482,7 +585,23 @@ export default function ChatShell() {
           </form>
         </section>
 
-        <div className="divider" />
+        <div
+          className="divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_CHAT_PCT}
+          aria-valuemax={MAX_CHAT_PCT}
+          aria-valuenow={Math.round(chatPct)}
+          aria-valuetext={`${Math.round(chatPct)}%`}
+          aria-label="Resize chat pane (use arrow keys, double-click to reset)"
+          tabIndex={0}
+          onPointerDown={onDividerPointerDown}
+          onPointerMove={onDividerPointerMove}
+          onPointerUp={endDividerDrag}
+          onPointerCancel={endDividerDrag}
+          onDoubleClick={onDividerDoubleClick}
+          onKeyDown={onDividerKeyDown}
+        />
 
         <section className="viewer">
           <PdfViewerPane

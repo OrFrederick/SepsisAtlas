@@ -7,14 +7,35 @@ function setup(props: Partial<React.ComponentProps<typeof FeedbackForm>> = {}) {
   return render(<FeedbackForm {...props} />);
 }
 
+const MOUNT_RESPONSE = {
+  ok: true,
+  mount: { ts: 1_700_000_000_000, sig: "a".repeat(64) },
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+// Routes mount-token GETs to a fixed token and POSTs to `postBody`. Tests
+// that need richer behaviour stub fetch themselves.
+function stubFetch(postResponse: Response): ReturnType<typeof vi.fn> {
+  const fn = vi.fn<typeof fetch>(async (input) => {
+    const url = typeof input === "string" ? input : (input as Request).url ?? String(input);
+    if (url.includes("/api/feedback/mount")) return jsonResponse(MOUNT_RESPONSE);
+    return postResponse.clone();
+  });
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
 afterEach(cleanup);
 
 describe("FeedbackForm", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ ok: true, issueUrl: "https://github.com/o/r/issues/9" }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    stubFetch(jsonResponse({ ok: true, issueUrl: "https://github.com/o/r/issues/9" }));
   });
 
   it("renders type select, title, body, optional email", () => {
@@ -43,10 +64,7 @@ describe("FeedbackForm", () => {
   });
 
   it("shows error state on 4xx/5xx and keeps form contents", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ ok: false, error: "invalid" }),
-      { status: 400, headers: { "content-type": "application/json" } },
-    )));
+    stubFetch(jsonResponse({ ok: false, error: "invalid" }, 400));
     const user = userEvent.setup();
     setup();
     await user.type(screen.getByLabelText(/title/i), "Title here");
@@ -56,21 +74,27 @@ describe("FeedbackForm", () => {
     expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe("Title here");
   });
 
-  it("sends honeypot field as empty string", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
-      JSON.stringify({ ok: true, issueUrl: "x" }),
-      { status: 200 },
-    ));
-    vi.stubGlobal("fetch", fetchMock);
+  it("sends honeypot empty string and the server-issued mount token in the POST body", async () => {
+    const fetchMock = stubFetch(jsonResponse({ ok: true, issueUrl: "x" }));
     const user = userEvent.setup();
     setup();
     await user.type(screen.getByLabelText(/title/i), "Title here");
     await user.type(screen.getByLabelText(/details|body/i), "Long enough body text.");
     await user.click(screen.getByRole("button", { name: /send feedback/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    await waitFor(() => {
+      const postCalls = fetchMock.mock.calls.filter((c) => {
+        const url = typeof c[0] === "string" ? c[0] : (c[0] as Request).url;
+        return url === "/api/feedback";
+      });
+      expect(postCalls.length).toBeGreaterThan(0);
+    });
+    const postCall = fetchMock.mock.calls.find((c) => {
+      const url = typeof c[0] === "string" ? c[0] : (c[0] as Request).url;
+      return url === "/api/feedback";
+    });
+    const init = postCall?.[1] as RequestInit | undefined;
     const body = JSON.parse(String(init?.body));
     expect(body.website).toBe("");
-    expect(typeof body.formMountedAtMs).toBe("number");
+    expect(body.mount).toEqual(MOUNT_RESPONSE.mount);
   });
 });

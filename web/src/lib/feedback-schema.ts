@@ -1,6 +1,13 @@
 export const FEEDBACK_TYPES = ["bug", "wrong-data", "idea", "other"] as const;
 export type FeedbackType = typeof FEEDBACK_TYPES[number];
 
+// HMAC-signed mount-time token issued by GET /api/feedback/mount.
+// See web/src/lib/feedback-mount.ts.
+export interface MountTokenInput {
+  ts: number;
+  sig: string;
+}
+
 export interface FeedbackPayload {
   type: FeedbackType;
   title: string;
@@ -9,7 +16,7 @@ export interface FeedbackPayload {
   rowContext?: unknown;
   contact?: string;
   website: string; // honeypot, must be ""
-  formMountedAtMs: number;
+  mount: MountTokenInput;
 }
 
 export type ValidationResult =
@@ -67,8 +74,16 @@ export function validateFeedback(input: unknown): ValidationResult {
     return { ok: false, error: "bad-row-context" };
   }
   // Required: the spam guard cannot be opt-out by omitting the field.
-  if (typeof o.formMountedAtMs !== "number" || !Number.isFinite(o.formMountedAtMs)) {
-    return { ok: false, error: "bad-mount-time" };
+  // Shape only — HMAC + timing verification happens in the POST route.
+  if (!o.mount || typeof o.mount !== "object") {
+    return { ok: false, error: "bad-mount-token" };
+  }
+  const m = o.mount as { ts?: unknown; sig?: unknown };
+  if (typeof m.ts !== "number" || !Number.isFinite(m.ts)) {
+    return { ok: false, error: "bad-mount-token" };
+  }
+  if (typeof m.sig !== "string" || !/^[0-9a-f]{64}$/.test(m.sig)) {
+    return { ok: false, error: "bad-mount-token" };
   }
 
   return {
@@ -81,7 +96,7 @@ export function validateFeedback(input: unknown): ValidationResult {
       rowContext: o.rowContext,
       contact: o.contact as string | undefined,
       website: "",
-      formMountedAtMs: o.formMountedAtMs as number,
+      mount: { ts: m.ts, sig: m.sig },
     },
   };
 }

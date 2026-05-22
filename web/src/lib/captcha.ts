@@ -12,6 +12,9 @@ export async function verifyCaptcha(token: string | undefined): Promise<boolean>
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ secret, response: token }).toString(),
     });
+    if (!res.ok) {
+      throw new Error(`hCaptcha siteverify HTTP ${res.status}`);
+    }
     const data = (await res.json()) as { success?: boolean };
     return Boolean(data.success);
   } catch (e) {

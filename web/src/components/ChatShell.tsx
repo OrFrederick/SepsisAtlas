@@ -418,6 +418,21 @@ export default function ChatShell() {
   // back to the centered-chat landing state.
   const showPdf = pending || history.length > 0;
 
+  // Pointer/focus stays disabled on the viewer pane until the slide-in
+  // finishes — prevents grabbing the divider mid-animation when its
+  // visual position is still mid-translate. Re-disabled instantly on
+  // the reverse (Clear chat → solo).
+  const VIEWER_REVEAL_MS = 600;
+  const [viewerInteractive, setViewerInteractive] = useState(false);
+  useEffect(() => {
+    if (!showPdf) {
+      setViewerInteractive(false);
+      return;
+    }
+    const id = window.setTimeout(() => setViewerInteractive(true), VIEWER_REVEAL_MS);
+    return () => window.clearTimeout(id);
+  }, [showPdf]);
+
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     let next: number | null = null;
     switch (e.key) {
@@ -461,9 +476,11 @@ export default function ChatShell() {
         className={`split${resizing ? " resizing" : ""}${showPdf ? " active" : ""}`}
         ref={splitRef}
         style={{
+          // Percent tracks (rather than fr) so the solo → split transition
+          // interpolates cleanly across Chromium, Safari, and Firefox.
           gridTemplateColumns: showPdf
-            ? `${chatPct}fr ${100 - chatPct}fr`
-            : "1fr 0fr",
+            ? `${chatPct}% ${100 - chatPct}%`
+            : "100% 0%",
         }}
       >
         <section className="chat">
@@ -594,7 +611,7 @@ export default function ChatShell() {
           </form>
         </section>
 
-        <section className="viewer-wrap" aria-hidden={!showPdf}>
+        <section className="viewer-wrap" inert={!viewerInteractive}>
           <div
             className="divider"
             role="separator"
@@ -604,7 +621,7 @@ export default function ChatShell() {
             aria-valuenow={Math.round(chatPct)}
             aria-valuetext={`${Math.round(chatPct)}%`}
             aria-label="Resize chat pane (use arrow keys, double-click to reset)"
-            tabIndex={showPdf ? 0 : -1}
+            tabIndex={viewerInteractive ? 0 : -1}
             onPointerDown={onDividerPointerDown}
             onPointerMove={onDividerPointerMove}
             onPointerUp={endDividerDrag}

@@ -34,18 +34,21 @@ const fakeResponse = {
   ],
 };
 
-type FetchSpy = ReturnType<typeof vi.spyOn<typeof globalThis, "fetch">>;
-let fetchSpy: FetchSpy;
+// `vi.spyOn(globalThis, "fetch")` chokes the TS type checker because Node's
+// globalThis typings don't list `fetch`. Stub via vi.stubGlobal instead — it's
+// the documented vitest pattern for replacing global APIs and exposes the
+// same Mock surface the tests below assert against.
+let fetchSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  fetchSpy = vi.spyOn(globalThis, "fetch") as unknown as FetchSpy;
-  fetchSpy.mockResolvedValue(
+  fetchSpy = vi.fn().mockResolvedValue(
     new Response(JSON.stringify(fakeResponse), { status: 200 }),
   );
+  vi.stubGlobal("fetch", fetchSpy);
 });
 
 afterEach(() => {
-  fetchSpy.mockRestore();
+  vi.unstubAllGlobals();
   cleanup();
 });
 

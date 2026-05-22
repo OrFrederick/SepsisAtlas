@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Paper } from "../lib/types";
+import { yearFromFileName } from "../lib/paperYear";
 
 type SortDir = 1 | -1;
 type SortKey =
@@ -29,6 +30,10 @@ const COLS: Col[] = [
   { key: "last_update", label: "Last update", type: "str" },
 ];
 
+function paperYear(p: Paper): number | null {
+  return p.year ?? yearFromFileName(p.file_name);
+}
+
 function cellValue(p: Paper, key: SortKey): string | number | boolean {
   switch (key) {
     case "file_name":
@@ -36,7 +41,7 @@ function cellValue(p: Paper, key: SortKey): string | number | boolean {
     case "title":
       return p.title ?? "";
     case "year":
-      return p.year ?? 0;
+      return paperYear(p) ?? 0;
     case "n_rows":
       return p.n_rows;
     case "ok":
@@ -120,7 +125,7 @@ export default function PapersTable({ papers, basePath }: Props) {
               <td>
                 <a href={href}>{p.title ?? ""}</a>
               </td>
-              <td>{p.year ?? ""}</td>
+              <td>{paperYear(p) ?? ""}</td>
               <td>{p.n_rows}</td>
               <td className="col-ok">{p.verdicts?.ok ?? 0}</td>
               <td className="col-weak">{p.verdicts?.weak ?? 0}</td>

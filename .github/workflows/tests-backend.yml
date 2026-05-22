@@ -1,0 +1,62 @@
+name: backend tests
+
+# Runs the pytest suite under tests/. Tests that depend on db.sqlite, the
+# parsed corpus, or a live :8000 backend self-skip when those assets aren't
+# present, so CI exercises the offline subset (api smoke via TestClient,
+# verifier regex paths, dedupe/meta/projection/anchor logic, etc.).
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths-ignore:
+      - 'web/**'
+      - 'docs/**'
+      - '**.md'
+      - 'deploy/**'
+  push:
+    branches: [dev]
+    paths-ignore:
+      - 'web/**'
+      - 'docs/**'
+      - '**.md'
+      - 'deploy/**'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-uv handles two of the three caches we want:
+      #   - ~/.cache/uv          (download/build cache, enable-cache: true)
+      #   - uv-managed Python    (pinned via python-version below)
+      # The third — the resolved .venv/ — we cache explicitly so a clean
+      # `uv sync` is a near-noop when uv.lock hasn't changed.
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.11"
+
+      - name: cache .venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-uv-venv-py3.11-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-venv-py3.11-
+
+      - name: sync deps (incl. dev)
+        run: uv sync --extra dev
+
+      - name: pytest
+        run: uv run pytest -q tests/

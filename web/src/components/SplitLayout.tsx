@@ -1,7 +1,5 @@
 "use client";
 
-import "./SplitLayout.css";
-
 type Props = {
   left: React.ReactNode;
   right: React.ReactNode;

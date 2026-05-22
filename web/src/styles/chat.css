@@ -21,6 +21,10 @@ body:has(.chat-shell) { overflow: hidden; }
   left: 0;
   right: 0;
   bottom: 0;
+  /* Topbar sits at z-index: 20. Pin the shell below it so any future ancestor
+     that creates a stacking context (transform, opacity<1, will-change,
+     isolation) can't let the topbar paint over the shell. */
+  z-index: 10;
   background: var(--bg);
 }
 
@@ -29,6 +33,17 @@ body:has(.chat-shell) { overflow: hidden; }
   padding: 8px 22px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+}
+/* Narrow viewports: the fixed shell can't grow page scroll to absorb a tall
+   controls row, so allow it to wrap and tighten side padding instead. */
+@media (max-width: 480px) {
+  .controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .mode-hint { flex: 1 1 100%; order: -1; }
 }
 .backend-toggle {
   display: inline-flex; gap: 0;
@@ -118,6 +133,10 @@ body:has(.chat-shell) { overflow: hidden; }
 .scrollback {
   flex: 1;
   overflow-y: auto;
+  /* Prevent iOS Safari momentum scroll from leaking into the body and shifting
+     the fixed .chat-shell. body:has(.chat-shell) { overflow: hidden } alone
+     isn't enough on mobile Safari. */
+  overscroll-behavior: contain;
   padding: 28px 36px;
   display: flex;
   flex-direction: column;

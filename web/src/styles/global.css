@@ -3,7 +3,9 @@
   --bg: #FCFCFC;
   --panel: #FFFFFF;
   --panel-2: #F2F6FB;
-  --panel-3: #E8F3FB;
+  /* Neutral cool gray — kept distinct from --accent-soft so a hover that walks
+     panel → panel-2 → panel-3 doesn't accidentally read as an accent state. */
+  --panel-3: #E8ECEF;
   --border: #D8E0EC;
   --border-strong: #B8CCEA;
   --fg: #1A1F2C;
@@ -498,10 +500,20 @@ dialog.feedback .feedback-body {
   padding: 20px;
 }
 
-/* App-wide override: split-pane shells (chat, paper detail) need the main
-   element to span edge-to-edge instead of inheriting the centered max-width
-   used on chrome pages. Selector is body-level so it applies wherever a
-   split-shell renders. */
+/* App-wide override: paper-detail split-pane needs the main element to span
+   edge-to-edge instead of inheriting the centered max-width used on chrome
+   pages. The :has() selector is body-level so it applies wherever a
+   .split-shell renders.
+
+   Why !important is still needed here (unlike the .chat-shell main {} rule
+   in chat.css which dropped !important): .split-shell renders inside the
+   global <main>, so the override and the original main rule have the same
+   specificity (both single-element selectors). Without !important, source
+   order wins and the global rule clobbers this one. The chat-shell fix
+   avoided this by switching to position: fixed so the inner <main class=split>
+   no longer needs to fight the outer main's width. If a future refactor
+   gives split-shell the same treatment, this !important and the selector
+   can go away together. */
 body:has(.split-shell) main {
   max-width: none !important;
   padding: 0 !important;

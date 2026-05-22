@@ -73,7 +73,13 @@ services:
     # 2023-11) ships an old Docker SDK that speaks API 1.25, which modern
     # Docker daemons (29.x default MinAPIVersion = 1.40) reject with
     # "client version 1.25 is too old". The fork ships a current SDK.
-    image: nickfedor/watchtower:1.17.1
+    #
+    # Pinned by manifest digest (not just :1.17.1) because this container
+    # gets root-equivalent access via the bind-mounted docker socket; a
+    # mutable tag is too sharp an edge to leave on. Digest corresponds to
+    # nickfedor/watchtower:1.17.1 at pin time (2026-05-22). Bump both the
+    # tag-as-comment and the digest together when rolling forward.
+    image: nickfedor/watchtower@sha256:a0859caf70e234dcd4ac893a62b4a8b7ac08543250b85e9ccf060190a4cb847c
     container_name: atlas-watchtower
     restart: unless-stopped
     volumes:

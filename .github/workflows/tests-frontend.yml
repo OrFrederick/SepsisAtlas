@@ -2,22 +2,12 @@ name: frontend tests
 
 # Typecheck + vitest for the Next.js app under web/.
 #
-# Install strategy is intentionally different from the deploy workflow:
-#
-#  - We need postinstall scripts to RUN (vitest pulls vite -> rollup, and
-#    rollup loads `@rollup/rollup-linux-x64-gnu` at runtime). The deploy
-#    workflow's `--ignore-scripts` would block that and we'd see
-#    `Cannot find module '@rollup/rollup-linux-x64-gnu'` the moment vitest
-#    boots.
-#
-#  - We also can NOT use `--frozen-lockfile`. bun.lock was generated on
-#    macOS, so only the darwin optional-deps for esbuild@0.27.7 are pinned.
-#    On a Linux runner with the lock frozen, the top-level esbuild install
-#    falls back to the transitive 0.21.5 binary and the postinstall sanity
-#    check explodes with `Expected "0.27.7" but got "0.21.5"`. Dropping
-#    `--frozen-lockfile` lets bun resolve the Linux optional-deps. Test
-#    reproducibility is enforced by the lockfile being committed, not by
-#    refusing to update it during install.
+# bun.lock pins the linux-x64 platform binaries for esbuild and rollup as
+# explicit optionalDependencies in web/package.json — without that, bun
+# would only record the host-platform binary (darwin-arm64) and the Linux
+# runner would fail with either `Cannot find module
+# '@rollup/rollup-linux-x64-gnu'` (rollup runtime) or
+# `Expected "0.27.7" but got "0.21.5"` (esbuild postinstall sanity check).
 
 on:
   pull_request:
@@ -54,10 +44,6 @@ jobs:
         with:
           bun-version: 1.3.13
 
-      # setup-bun does not cache packages. Cache both the resolved
-      # node_modules tree and bun's global download cache. On a hit with
-      # an unchanged bun.lock, `bun install --frozen-lockfile` becomes
-      # effectively a no-op.
       - name: cache bun deps
         uses: actions/cache@v4
         with:
@@ -69,7 +55,7 @@ jobs:
             ${{ runner.os }}-bun-
 
       - name: install
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: typecheck
         run: bun run check

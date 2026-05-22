@@ -1,17 +1,17 @@
-"""FastAPI app: headless query API + PDF.js viewer for the Astro frontend.
+"""FastAPI app: headless query API for the Astro frontend.
 
 Endpoints
 ---------
 POST /query                       NL question → ranked rows + markdown table + summary
-GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-side
-GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
-GET  /static/*                    Static mount (PDF.js bundle, viewer.html assets)
+GET  /static/*                    Static mount (PDF.js assets, plots)
 POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-The Astro app iframes `/viewer/<stem>` for source previews, so we keep the
-permissive frame headers below.
+The PDF viewer is served entirely by the Astro app at /viewer/<stem>/.
+The PDF bytes themselves come from web/public/pdfs/<stem>.pdf, vendored
+into the Astro build, so the static site has no runtime dependency on
+this backend for PDF rendering.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
@@ -66,21 +66,7 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def relax_iframe_headers(request: Request, call_next):
-    """Permissive frame headers so the SPA's PDF iframe can embed /viewer/*.
-
-    No X-Frame-Options; CSP frame-ancestors '*'.
-    """
-    response = await call_next(request)
-    # Strip default deny if any upstream set it (Starlette MutableHeaders has no .pop).
-    if "x-frame-options" in response.headers:
-        del response.headers["x-frame-options"]
-    response.headers["Content-Security-Policy"] = "frame-ancestors *;"
-    return response
-
-
-# Static mount: /static/pdfjs, /static/plots, /static/viewer.html
+# Static mount: /static/pdfjs (PDF.js bundle), /static/plots (rendered forest plots).
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "plots").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -415,59 +401,6 @@ def get_rank_predictors(
         paper_ref=paper_ref,
         population_contains=population_contains,
         top_k=top_k,
-    )
-
-
-# ---------------------------------------------------------------------------
-# /viewer
-# ---------------------------------------------------------------------------
-
-
-@app.get("/viewer/{file_stem}")
-def viewer(file_stem: str):
-    """Serve the static PDF.js viewer page.
-
-    Query params (read client-side): page, bbox=x0,y0,x1,y1.
-    The page itself fetches /papers/{file_stem}/pdf to load the PDF.
-    """
-    safe = _safe_stem(file_stem)
-    viewer_path = STATIC_DIR / "viewer.html"
-    if not viewer_path.exists():
-        raise HTTPException(500, "viewer.html missing")
-    html = viewer_path.read_text(encoding="utf-8")
-    # Inject the file_stem so client knows which PDF to fetch.
-    html = html.replace("__FILE_STEM__", safe)
-    return Response(
-        content=html,
-        media_type="text/html",
-        headers={"Content-Security-Policy": "frame-ancestors *;"},
-    )
-
-
-def _safe_stem(stem: str) -> str:
-    if "/" in stem or ".." in stem or "\\" in stem:
-        raise HTTPException(400, "invalid file_stem")
-    return stem
-
-
-# ---------------------------------------------------------------------------
-# /papers/{file_stem}/pdf
-# ---------------------------------------------------------------------------
-
-
-@app.get("/papers/{file_stem}/pdf")
-def get_pdf(file_stem: str):
-    safe = _safe_stem(file_stem)
-    pdf_path = PAPERS_RAW / f"{safe}.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(404, f"PDF not found: {safe}.pdf")
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{safe}.pdf"',
-            "Cache-Control": "public, max-age=3600",
-        },
     )
 
 

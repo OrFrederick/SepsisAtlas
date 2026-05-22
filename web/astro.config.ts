@@ -15,11 +15,9 @@ export default defineConfig({
       proxy: {
         "/query": forward,
         "/rank_predictors": forward,
-        "/viewer": forward,
         "/ingest_pubmed": forward,
         "/health": forward,
         "/phenotypes": forward,
-        "^/papers/[^/]+/pdf$": forward,
       },
     },
   },

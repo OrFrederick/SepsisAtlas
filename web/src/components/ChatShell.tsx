@@ -157,6 +157,34 @@ function buildViewerUrl(row: EvidenceRow): string {
   return url;
 }
 
+// Pulls stem + page + bbox + origin out of a `/viewer/<stem>?page=N&bbox=...`
+// URL. Returns null on malformed input so callers can fall back to a full
+// iframe reload. Mirrors the parser in SplitShell.astro so chat and papers
+// shells use the same in-place jump protocol with the iframe.
+function parseViewerHref(href: string): {
+  stem: string;
+  page: number;
+  bbox: number[] | null;
+  origin: string;
+} | null {
+  try {
+    const u = new URL(href, window.location.origin);
+    const m = u.pathname.match(/\/viewer\/([^/]+)\/?$/);
+    if (!m) return null;
+    const stem = decodeURIComponent(m[1]);
+    const page = Math.max(1, parseInt(u.searchParams.get("page") || "1", 10));
+    const bboxStr = u.searchParams.get("bbox");
+    const bboxParts = bboxStr ? bboxStr.split(",").map(Number) : null;
+    const bbox = bboxParts && bboxParts.length === 4 && bboxParts.every(Number.isFinite)
+      ? bboxParts
+      : null;
+    const origin = (u.searchParams.get("origin") || "tl").toLowerCase();
+    return { stem, page, bbox, origin };
+  } catch {
+    return null;
+  }
+}
+
 type VerdictKind = "ok" | "warn" | "fail" | "unk";
 
 function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
@@ -212,6 +240,11 @@ export default function ChatShell() {
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const viewerIframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Tracks the stem currently loaded in the iframe; lets us tell apart
+  // "same paper, different bbox" (postMessage) from "different paper"
+  // (force a full iframe.src reload).
+  const currentStemRef = useRef<string | null>(null);
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
@@ -223,7 +256,12 @@ export default function ChatShell() {
         const okOrigin = BACKEND_URL
           ? u.origin === new URL(BACKEND_URL).origin
           : u.origin === window.location.origin;
-        if (okOrigin) setViewerUrl(last);
+        if (okOrigin) {
+          setViewerUrl(last);
+          // Seed the stem ref so the first click after rehydrate can take the
+          // postMessage fast-path when it's the same paper.
+          currentStemRef.current = parseViewerHref(last)?.stem ?? null;
+        }
       } catch {
         /* drop malformed urls silently */
       }
@@ -238,10 +276,35 @@ export default function ChatShell() {
   }, [history.length, pending]);
 
   // ---- row click → update viewer ----------------------------------------
+  // When the clicked row points at the *same* paper that's already loaded
+  // in the iframe, we postMessage a jump instead of swapping iframe.src —
+  // that keeps the rendered PDF in place and only moves the highlight.
+  // Different paper → fall back to a full iframe reload via setViewerUrl.
   const activateRow = useCallback((turnIdx: number, rowIdx: number, row: EvidenceRow) => {
     const url = buildViewerUrl(row);
     if (!url) return;
     setActiveRowKey(`${turnIdx}:${rowIdx}`);
+    const parsed = parseViewerHref(url);
+    const sameStem = parsed && currentStemRef.current === parsed.stem;
+    if (sameStem && viewerIframeRef.current?.contentWindow) {
+      // Target the iframe's same-origin viewer page explicitly. The viewer
+      // is served by the same Astro app, so cross-origin posts here are
+      // either a misconfiguration or an attempt to spoof — drop them by
+      // pinning the targetOrigin.
+      const targetOrigin = BACKEND_URL || window.location.origin;
+      viewerIframeRef.current.contentWindow.postMessage(
+        {
+          type: "sepsis-atlas:jump",
+          page: parsed!.page,
+          bbox: parsed!.bbox,
+          origin: parsed!.origin,
+        },
+        targetOrigin,
+      );
+      saveViewerUrl(url);
+      return;
+    }
+    currentStemRef.current = parsed?.stem ?? null;
     setViewerUrl(url);
     saveViewerUrl(url);
   }, []);
@@ -491,7 +554,7 @@ export default function ChatShell() {
 
         <section className="viewer">
           {viewerUrl ? (
-            <iframe src={viewerUrl} title="PDF viewer" />
+            <iframe ref={viewerIframeRef} src={viewerUrl} title="PDF viewer" />
           ) : (
             <div className="viewer-empty">Click an evidence row to view the source PDF.</div>
           )}

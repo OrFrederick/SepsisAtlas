@@ -1,5 +1,10 @@
 ---
-import Base from "../../layouts/Base.astro";
+/**
+ * Bare-bones HTML host for the React PDF viewer island. Intentionally
+ * skips the site-wide Base layout (header + nav) because this page is
+ * almost always loaded inside an iframe by the parent shells (chat,
+ * papers), where a second copy of the top bar is noise.
+ */
 import PdfViewer from "../../components/PdfViewer.astro";
 import type { Paper } from "../../lib/types";
 import { readFileSync } from "node:fs";
@@ -12,14 +17,34 @@ export async function getStaticPaths() {
   let papers: Paper[] = [];
   try {
     papers = JSON.parse(readFileSync(dataPath, "utf-8")) as Paper[];
-  } catch {
-    papers = [];
+  } catch (err) {
+    // Build runs `seed-data.mjs` first, which writes a stub `[]` when the
+    // real exporter hasn't populated papers.json. We still want to know
+    // about a genuine read/parse error vs. the empty-stub case, so log it.
+    console.warn(`[viewer/[stem]] could not read ${dataPath}: ${err}. No viewer routes will be emitted.`);
+  }
+  if (papers.length === 0) {
+    console.warn(
+      "[viewer/[stem]] papers.json is empty — every /viewer/<stem>/ will 404 at runtime. " +
+        "Run the corpus exporter (or copy `data/papers/raw/*.pdf` into `web/public/pdfs/`) before deploying.",
+    );
   }
   return papers.map((p) => ({ params: { stem: p.file_name } }));
 }
 
 const { stem } = Astro.params;
 ---
-<Base title={`Sepsis Atlas — ${stem}`} route="viewer">
-  <PdfViewer stem={stem!} />
-</Base>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{stem} — PDF</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <PdfViewer stem={stem!} />
+  </body>
+</html>

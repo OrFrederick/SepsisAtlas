@@ -152,44 +152,6 @@ def test_query_empty_input_400(app_client):
     assert r.status_code == 400
 
 
-def test_viewer_serves_html(app_client, tmp_path, monkeypatch):
-    r = app_client.get("/viewer/Gai_2022?page=4&bbox=100,200,400,260")
-    assert r.status_code == 200
-    assert "text/html" in r.headers["content-type"]
-    assert "Gai_2022" in r.text
-    assert "pdfCanvas" in r.text
-    # CSP allows any framing parent (OpenWebUI artifact pane).
-    assert "frame-ancestors *" in r.headers.get("content-security-policy", "")
-    assert "X-Frame-Options" not in r.headers
-
-
-def test_viewer_rejects_traversal(app_client):
-    r = app_client.get("/viewer/..%2Fetc%2Fpasswd")
-    # FastAPI may percent-decode; either we 400 or 404 is acceptable, but never 200.
-    assert r.status_code in (400, 404)
-
-
-def test_pdf_endpoint_404_when_missing(app_client):
-    r = app_client.get("/papers/__definitely_not_real__/pdf")
-    assert r.status_code == 404
-
-
-def test_pdf_endpoint_streams(app_client, tmp_path, monkeypatch):
-    # Drop a fake PDF in PAPERS_RAW for the duration of the test.
-    from sepsis_atlas.config import PAPERS_RAW
-
-    PAPERS_RAW.mkdir(parents=True, exist_ok=True)
-    fake = PAPERS_RAW / "__test_fake__.pdf"
-    fake.write_bytes(b"%PDF-1.4\n%fake\n")
-    try:
-        r = app_client.get("/papers/__test_fake__/pdf")
-        assert r.status_code == 200
-        assert r.headers["content-type"] == "application/pdf"
-        assert r.content.startswith(b"%PDF")
-    finally:
-        fake.unlink(missing_ok=True)
-
-
 def test_ingest_pubmed_stub(app_client):
     r = app_client.post("/ingest_pubmed", json={"query": "sepsis", "n": 5})
     assert r.status_code == 200

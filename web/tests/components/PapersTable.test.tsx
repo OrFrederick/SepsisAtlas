@@ -68,6 +68,19 @@ describe("PapersTable", () => {
     expect(rowFileNames()).toEqual(["B", "A"]);
   });
 
+  it("falls back to the year encoded in file_name when year is null", () => {
+    render(
+      <PapersTable
+        papers={[{ ...papers[0], file_name: "Smith_2018", year: null }]}
+        basePath="/"
+      />,
+    );
+    const tbody = screen.getByRole("table").querySelector("tbody")!;
+    const cells = tbody.querySelectorAll("td");
+    // Column order: file_name, title, year, ...
+    expect(cells[2].textContent).toBe("2018");
+  });
+
   it("each row links to /papers/<stem>/ with basePath applied", () => {
     render(<PapersTable papers={papers} basePath="/app/" />);
     const tbody = screen.getByRole("table").querySelector("tbody")!;

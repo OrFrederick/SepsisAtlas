@@ -213,8 +213,12 @@ def test_resolve_table_cell_match():
     assert hit is not None
     assert hit["kind"] == "table_cell"
     assert hit["page"] == 5
-    # bbox is flat [l, y0, r, y1]; left edge came from the cell with l=80.
-    assert hit["bbox"][0] == 80
+    # build_index emits every cell with the ROW UNION bbox (so any single-cell
+    # match still highlights the full row in the viewer). We verify we picked
+    # the right cell via text, and the bbox spans both cells (l = min(10, 80)).
+    assert hit["text"] == "OR 1.42 (1.10-1.85)"
+    assert hit["bbox"][0] == 10
+    assert hit["bbox"][2] >= 80
 
 
 # ---------------------------------------------------------------------------

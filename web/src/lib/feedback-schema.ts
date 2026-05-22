@@ -34,7 +34,9 @@ export function validateFeedback(input: unknown): ValidationResult {
   if (typeof o.type !== "string" || !FEEDBACK_TYPES.includes(o.type as FeedbackType)) {
     return { ok: false, error: "bad-type" };
   }
-  if (typeof o.title !== "string" || o.title.length < 5 || o.title.length > 120) {
+  if (typeof o.title !== "string") return { ok: false, error: "bad-title" };
+  const trimmedTitle = o.title.trim();
+  if (trimmedTitle.length < 5 || trimmedTitle.length > 120) {
     return { ok: false, error: "bad-title" };
   }
   if (typeof o.body !== "string" || o.body.length < 10 || o.body.length > 5000) {
@@ -64,7 +66,7 @@ export function validateFeedback(input: unknown): ValidationResult {
     ok: true,
     value: {
       type: o.type as FeedbackType,
-      title: (o.title as string).trim(),
+      title: trimmedTitle,
       body: o.body as string,
       paperStem: o.paperStem as string | undefined,
       rowContext: o.rowContext,

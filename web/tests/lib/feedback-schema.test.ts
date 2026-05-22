@@ -31,6 +31,10 @@ describe("validateFeedback", () => {
     expect(validateFeedback({ ...base, title: "x".repeat(121) }).ok).toBe(false);
   });
 
+  it("rejects title that is only whitespace-padded to meet minimum", () => {
+    expect(validateFeedback({ ...base, title: "   hi   " }).ok).toBe(false);
+  });
+
   it("rejects body shorter than 10 chars", () => {
     expect(validateFeedback({ ...base, body: "short" }).ok).toBe(false);
   });

@@ -84,13 +84,23 @@ ssh efferon-deploy 'cd /opt/sepsisatlas && docker compose -f docker-compose.yml 
 ## Feedback feature
 
 The feedback form (`/feedback`) creates labeled GitHub issues via the GitHub
-REST API. Required production env vars:
+REST API. Required production env vars, all read by the frontend container
+from `/opt/sepsisatlas/.env` (interpolated by `docker-compose.prod.yml`):
 
 - `GITHUB_FEEDBACK_TOKEN` — fine-grained PAT, scoped to `Issues: read & write`
   on `OrFrederick/SepsisAtlas` only. Set 1-year expiry; rotate annually.
 - `GITHUB_FEEDBACK_REPO` — usually `OrFrederick/SepsisAtlas`.
 - `FEEDBACK_ALLOWED_ORIGIN` — comma-separated list of allowed `Origin`/`Referer`
   prefixes for form submissions. In prod, set to the public hostname.
+- `FEEDBACK_MOUNT_SECRET` — ≥16 random bytes (`openssl rand -hex 32`) that
+  HMAC-sign the mount-time token served by `/api/feedback/mount`.
+
+After editing `/opt/sepsisatlas/.env`, restart the frontend container so
+Next picks up the new env:
+
+```bash
+ssh efferon-deploy 'cd /opt/sepsisatlas && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d frontend'
+```
 
 Run `scripts/setup-feedback-labels.sh` once after deploy to seed the
 required labels. Triage board: https://github.com/users/OrFrederick/projects/2

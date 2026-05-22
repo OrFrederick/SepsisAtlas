@@ -79,8 +79,15 @@ export function viewerHrefFor(
   if (!Number.isFinite(page) || page < 1) page = 1;
   let url = `${baseOrigin}/viewer/${encodeURIComponent(stem)}?page=${page}`;
   const bbox = sr.anchor_bbox;
+  // Backend serializes anchor_bbox either as a [x0,y0,x1,y1] tuple or as
+  // its comma-joined string form. Both need to round-trip into the viewer
+  // URL — silently dropping the string form was the bug.
+  let bboxStr: string | null = null;
   if (Array.isArray(bbox) && bbox.length === 4) {
-    url += `&bbox=${bbox.map((v) => Number(v).toFixed(2)).join(",")}&origin=tl`;
+    bboxStr = bbox.map((v) => Number(v).toFixed(2)).join(",");
+  } else if (typeof bbox === "string" && bbox.length > 0) {
+    bboxStr = bbox;
   }
+  if (bboxStr) url += `&bbox=${bboxStr}&origin=tl`;
   return url;
 }

@@ -93,11 +93,115 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
 
 .split {
   display: grid;
-  grid-template-columns: 1fr 1px 1fr;
+  /* Percent tracks (not fr) so solo → split interpolates cleanly. The
+     active ratio comes from --chat-pct set as an inline style on .split;
+     the divider is absolutely positioned inside .viewer-wrap, straddling
+     the boundary. Smooth grid-template-columns interpolation needs
+     Chromium 111+ / Safari 17+ / Firefox 124+ — older engines snap to
+     the end state but the visual reveal is still carried by the
+     .viewer-wrap opacity + translateX, so no regression. */
+  grid-template-columns: 100% 0%;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  transition: grid-template-columns 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.split.active {
+  grid-template-columns: var(--chat-pct, 50%) calc(100% - var(--chat-pct, 50%));
+}
+.split.resizing {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+.split.resizing .viewer iframe { pointer-events: none; }
+
+/* Landing → split chat width animation. Solo mode caps the chat at a
+   readable column centered in the viewport; once the viewer panel is
+   revealed the chat fills its grid track. */
+.split .chat {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+  transition: max-width 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.split.active .chat {
+  max-width: none;
+  margin: 0;
+}
+
+/* Landing-state alignment: welcome card and composer share the same
+   inner column so their left/right edges line up. The thin top border
+   on the composer is dropped in solo mode since there is nothing
+   above it to separate. */
+.split:not(.active) .welcome {
+  max-width: none;
+  width: 100%;
+}
+.split:not(.active) .scrollback {
+  padding: 28px 36px 12px;
+}
+.split:not(.active) .composer {
+  padding: 14px 36px 32px;
+  border-top: none;
+}
+
+.viewer-wrap {
+  position: relative;
   height: 100%;
   overflow: hidden;
+  opacity: 0;
+  transform: translateX(28px);
+  transition:
+    opacity 360ms cubic-bezier(0.2, 0.7, 0.2, 1) 80ms,
+    transform 520ms cubic-bezier(0.2, 0.7, 0.2, 1) 80ms;
 }
-.divider { background: var(--border); width: 1px; height: 100%; }
+.split.active .viewer-wrap {
+  opacity: 1;
+  transform: translateX(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .split,
+  .split .chat {
+    transition: none;
+  }
+  .viewer-wrap { transition: none; transform: none; }
+}
+
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 8px hit area pinned to the left edge of .viewer-wrap (i.e. the
+     column boundary). Kept on the viewer side only so it doesn't
+     overlap the chat's vertical scrollbar gutter. Visual hairline is
+     the 1px ::before below, at the boundary itself. */
+  left: 0;
+  width: 8px;
+  z-index: 2;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.divider::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  transition: background 160ms ease, width 160ms ease;
+}
+.divider:hover::before,
+.divider:focus-visible::before,
+.split.resizing .divider::before {
+  background: var(--accent);
+  width: 2px;
+}
+.divider:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 
 .chat {
   display: flex;
@@ -339,6 +443,10 @@ main { padding: 0 !important; max-width: none !important; margin: 0 !important; 
   height: 100%;
   background: var(--panel-3);
   position: relative;
+  /* Establish a stacking context bounded below the divider (z-index 2
+     in .viewer-wrap). Without this, an iframe that later picks up a
+     transform / will-change could float above the divider. */
+  z-index: 0;
 }
 .viewer iframe {
   width: 100%; height: 100%;

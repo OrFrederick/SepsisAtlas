@@ -1,25 +1,18 @@
 ---
-import Base from "../../layouts/Base.astro";
-import PdfViewer from "../../components/PdfViewer.astro";
-import type { Paper } from "../../lib/types";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-
+// Delegate to the backend viewer endpoint which serves static/viewer.html
+// with CDN-based PDF.js. The Astro-generated viewer pages use local pdfjs
+// paths that don't work in production.
 export async function getStaticPaths() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const dataPath = join(here, "..", "..", "..", "public", "data", "papers.json");
-  let papers: Paper[] = [];
-  try {
-    papers = JSON.parse(readFileSync(dataPath, "utf-8")) as Paper[];
-  } catch {
-    papers = [];
-  }
-  return papers.map((p) => ({ params: { stem: p.file_name } }));
+  return [];
 }
-
-const { stem } = Astro.params;
 ---
-<Base title={`Sepsis Atlas — ${stem}`} route="viewer">
-  <PdfViewer stem={stem!} />
-</Base>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url=/viewer/{Astro.params.stem}{Astro.url.search}">
+</head>
+<body>
+  <p>Redirecting to PDF viewer…</p>
+</body>
+</html>

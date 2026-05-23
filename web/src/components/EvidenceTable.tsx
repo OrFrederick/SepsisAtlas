@@ -7,7 +7,7 @@
   Sort state is local to each instance (one table per turn).
 */
 
-import { useState } from "react";
+import React, { useState } from "react";
 
 export type EvidenceRow = {
   paper_ref?: string;

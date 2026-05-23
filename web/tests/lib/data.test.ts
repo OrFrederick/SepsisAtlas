@@ -1,65 +1,75 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+
+const API_URL = "http://api.test";
+
+function mockFetch(responder: (url: string) => unknown) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const body = responder(url);
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+}
 
 describe("data loader", () => {
-  let dir: string;
-
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "atlas-data-"));
-    mkdirSync(join(dir, "public", "data"), { recursive: true });
     vi.resetModules();
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
-  it("loads papers from public/data/papers.json", async () => {
-    writeFileSync(
-      join(dir, "public", "data", "papers.json"),
-      JSON.stringify([{ file_name: "Ren_2022", title: "T", year: 2022 }]),
-    );
-    writeFileSync(join(dir, "public", "data", "rows.json"), "[]");
+  it("loads papers from GET /papers", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API_URL}/papers`);
+      return { papers: [{ file_name: "Ren_2022", title: "T", year: 2022 }] };
+    });
     const mod = await import("../../src/lib/data");
-    const papers = await mod.loadPapers(dir);
+    const papers = await mod.loadPapers(API_URL);
     expect(papers).toHaveLength(1);
     expect(papers[0].file_name).toBe("Ren_2022");
   });
 
-  it("loads rows from public/data/rows.json", async () => {
-    writeFileSync(join(dir, "public", "data", "papers.json"), "[]");
-    writeFileSync(
-      join(dir, "public", "data", "rows.json"),
-      JSON.stringify([{ row_id: "r1", file_name: "Ren_2022" }]),
-    );
+  it("returns an empty array when the backend reports no papers", async () => {
+    mockFetch(() => ({ papers: [] }));
     const mod = await import("../../src/lib/data");
-    const rows = await mod.loadRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].row_id).toBe("r1");
+    expect(await mod.loadPapers(API_URL)).toEqual([]);
   });
 
-  it("returns an empty array when the file is the seed stub", async () => {
-    writeFileSync(join(dir, "public", "data", "papers.json"), "[]");
-    writeFileSync(join(dir, "public", "data", "rows.json"), "[]");
+  it("fetches rows for a paper via GET /papers/:stem/rows", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API_URL}/papers/Ren_2022/rows`);
+      return {
+        rows: [
+          { row_id: "r1", file_name: "Ren_2022" },
+          { row_id: "r3", file_name: "Ren_2022" },
+        ],
+      };
+    });
     const mod = await import("../../src/lib/data");
-    expect(await mod.loadPapers(dir)).toEqual([]);
-    expect(await mod.loadRows(dir)).toEqual([]);
-  });
-
-  it("filters rows by file_name via loadRowsFor", async () => {
-    writeFileSync(join(dir, "public", "data", "papers.json"), "[]");
-    writeFileSync(
-      join(dir, "public", "data", "rows.json"),
-      JSON.stringify([
-        { row_id: "r1", file_name: "Ren_2022" },
-        { row_id: "r2", file_name: "Seymour_2016" },
-        { row_id: "r3", file_name: "Ren_2022" },
-      ]),
-    );
-    const mod = await import("../../src/lib/data");
-    const rows = await mod.loadRowsFor("Ren_2022", dir);
+    const rows = await mod.loadRowsFor("Ren_2022", API_URL);
     expect(rows.map((r) => r.row_id)).toEqual(["r1", "r3"]);
+  });
+
+  it("URL-encodes the file_name when fetching rows", async () => {
+    let seenUrl = "";
+    mockFetch((url) => {
+      seenUrl = url;
+      return { rows: [] };
+    });
+    const mod = await import("../../src/lib/data");
+    await mod.loadRowsFor("name with space", API_URL);
+    expect(seenUrl).toBe(`${API_URL}/papers/name%20with%20space/rows`);
+  });
+
+  it("throws when the backend returns a non-2xx response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("nope", { status: 500, statusText: "Internal Server Error" }),
+    );
+    const mod = await import("../../src/lib/data");
+    await expect(mod.loadPapers(API_URL)).rejects.toThrow(/500/);
   });
 });

@@ -3,13 +3,10 @@ import { buildViewerUrl } from "@/lib/viewerUrl";
 import { loadPapers, loadRowsFor } from "@/lib/data";
 import { notFound } from "next/navigation";
 
-export const dynamicParams = true;
-export const revalidate = 3600;
-
-export async function generateStaticParams() {
-  const papers = await loadPapers();
-  return papers.map((p) => ({ stem: p.file_name }));
-}
+// On-demand rendering against the live API. Pre-generating params would
+// require a running backend at build time, which the CI image build does
+// not have.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
@@ -18,11 +15,10 @@ export async function generateMetadata({ params }: { params: Promise<{ stem: str
 
 export default async function PaperDetail({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
-  const papers = await loadPapers();
+  const [papers, rows] = await Promise.all([loadPapers(), loadRowsFor(stem)]);
   const paper = papers.find((p) => p.file_name === stem);
   if (!paper) notFound();
 
-  const rows = await loadRowsFor(stem);
   const basePath = "/";
   const firstRow = rows[0];
   const defaultViewerUrl = firstRow

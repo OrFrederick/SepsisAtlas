@@ -41,6 +41,11 @@ atlas.efferon.com {
 		path /ingest_pubmed
 		path /health
 		path /health/cost
+		# Note: only the corpus list (/papers) and per-paper rows
+		# (/papers/<stem>/rows) belong to FastAPI. /papers/<stem> is a
+		# Next App Router page; matching /papers/* here would shadow it.
+		path /papers
+		path /papers/*/rows
 		path /phenotypes
 		path /phenotypes/*
 		path /static/*

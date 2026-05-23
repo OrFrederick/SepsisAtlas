@@ -55,6 +55,11 @@ services:
       # revalidate window. Setting the token to anything is fine for now;
       # it will become load-bearing once the exporter is wired up.
       REVALIDATE_TOKEN: ${REVALIDATE_TOKEN:?REVALIDATE_TOKEN must be set on the host}
+      # SSR fetches from /papers and other backend routes resolve through
+      # this URL. Same compose network as the backend service, so the
+      # hostname is the service name. The client side still uses relative
+      # URLs (NEXT_PUBLIC_BACKEND_URL="") that Caddy proxies same-origin.
+      API_URL: "http://backend:8000"
       # Next reads NODE_ENV=production from the Dockerfile already; the
       # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.
     volumes:

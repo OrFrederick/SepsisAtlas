@@ -1,13 +1,10 @@
 import PdfViewer from "@/components/pdf/PdfViewer";
-import { loadPapers } from "@/lib/data";
 
-export const dynamicParams = true;
-export const revalidate = 3600;
-
-export async function generateStaticParams() {
-  const papers = await loadPapers();
-  return papers.map((p) => ({ stem: p.file_name }));
-}
+// Renders the PDF viewer for any stem; the client component fetches the
+// PDF (and any anchor metadata) at runtime, so there's nothing to
+// prerender. Skipping generateStaticParams means the build doesn't need a
+// live backend to enumerate paper stems.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;

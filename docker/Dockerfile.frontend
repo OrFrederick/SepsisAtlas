@@ -5,7 +5,7 @@
 # Why both in one image:
 #   - Caddy keeps owning TLS on :80/:443 and serving the public hostname,
 #     same as before. No compose topology change needed.
-#   - Next handles SSG + ISR + /api/revalidate; it cannot itself terminate
+#   - Next handles SSR for App Router routes; it cannot itself terminate
 #     TLS. Caddy reverse-proxies / to localhost:3000.
 #   - One image to publish per push instead of splitting into a `web` and
 #     `frontend` pair. Watchtower's "label-enabled container" model stays

@@ -48,6 +48,11 @@ from api.rank_predictors import (
 )
 from api.dedupe import dedupe_rows
 from api.evidence_projection import apply_evidence_projection
+from api.papers import (
+    get_paper as _get_paper,
+    list_papers as _list_papers,
+    list_rows_for_file as _list_rows_for_file,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +566,54 @@ def health_cost(run_id: str | None = None, since: str | None = None):
         return payload
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# /papers — live corpus catalog (replaces build-time JSON snapshot)
+#
+# These endpoints back the Next /papers tab and the per-paper detail view.
+# Same shape as web/src/lib/types.ts Paper / Row, so the frontend can drop
+# loadPapers()/loadRows() and read from the API instead.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/papers")
+def list_papers_endpoint():
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        return {"papers": _list_papers(session)}
+
+
+@app.get("/papers/{file_name}")
+def get_paper_endpoint(file_name: str):
+    """Per-stem corpus meta — exists for the Next per-paper page to call
+    `notFound()` cheaply without fetching the full corpus list.
+
+    Returns the same Paper shape as the items in `GET /papers`. 404 when no
+    Paper row and no StudyCohort row carry that file_name.
+    """
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        paper = _get_paper(session, file_name)
+        if paper is None:
+            raise HTTPException(404, f"paper not found: {file_name!r}")
+        return paper
+
+
+@app.get("/papers/{file_name}/rows")
+def get_paper_rows_endpoint(file_name: str):
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        # Allow rows-only fetch without forcing a Paper row to exist — the
+        # caller may already have the meta from /papers and just wants the
+        # evidence rows. Returns an empty list (not 404) for unknown stems
+        # so the per-paper page can still render "no rows" without erroring.
+        # The per-stem existence check lives at GET /papers/{file_name}.
+        rows = _list_rows_for_file(session, file_name)
+        return {"rows": rows}
 
 
 # ---------------------------------------------------------------------------

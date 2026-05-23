@@ -1,15 +1,12 @@
 import PaperDetailPage from "@/components/PaperDetailPage";
 import { buildViewerUrl } from "@/lib/viewerUrl";
-import { loadPapers, loadRowsFor } from "@/lib/data";
+import { loadPaper, loadRowsFor } from "@/lib/data";
 import { notFound } from "next/navigation";
 
-export const dynamicParams = true;
-export const revalidate = 3600;
-
-export async function generateStaticParams() {
-  const papers = await loadPapers();
-  return papers.map((p) => ({ stem: p.file_name }));
-}
+// On-demand rendering against the live API. Pre-generating params would
+// require a running backend at build time, which the CI image build does
+// not have.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
@@ -18,11 +15,18 @@ export async function generateMetadata({ params }: { params: Promise<{ stem: str
 
 export default async function PaperDetail({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
-  const papers = await loadPapers();
-  const paper = papers.find((p) => p.file_name === stem);
+  // Sequential, not Promise.all: loadRowsFor rejects on backend errors
+  // (timeout, 500), and a parallel rejection would propagate before the
+  // `if (!paper) notFound()` gate could run, surfacing a 500 for an
+  // unknown stem instead of a 404. Resolving existence first also avoids
+  // a wasted rows fetch on the 404 hot path (bot scans, broken links).
+  // The rows endpoint can't substitute for the existence check — it
+  // returns `200 + {rows: []}` for unknown stems by contract — so we need
+  // the meta call to discriminate "paper exists with no rows" from "no paper".
+  const paper = await loadPaper(stem);
   if (!paper) notFound();
-
   const rows = await loadRowsFor(stem);
+
   const basePath = "/";
   const firstRow = rows[0];
   const defaultViewerUrl = firstRow

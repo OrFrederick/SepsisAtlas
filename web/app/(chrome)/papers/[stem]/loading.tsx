@@ -4,8 +4,8 @@ export default function Loading() {
   // the last build). Roughly mirrors the eventual layout so the page
   // doesn't shift on first paint.
   return (
-    <div className="split-shell p-3">
+    <main className="split-shell p-3">
       <div className="text-fg-muted text-[13px]">Loading paper…</div>
-    </div>
+    </main>
   );
 }

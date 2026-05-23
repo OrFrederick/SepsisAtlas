@@ -59,7 +59,9 @@ export function FeedbackDialog({
         className={
           "m-auto bg-panel text-fg border border-border rounded-lg p-0 overflow-hidden " +
           "w-[min(560px,92vw)] max-h-[88vh] shadow-[0_16px_48px_rgba(0,0,0,0.18)] " +
-          "backdrop:bg-black/40 backdrop:backdrop-blur-[2px]"
+          // Warm-dark backdrop (efferon palette) — not pure black, so the
+          // scrim reads as part of the page rather than a system overlay.
+          "backdrop:bg-[rgba(26,22,20,0.4)] backdrop:backdrop-blur-[2px]"
         }
       >
         <div className="flex items-center justify-between py-[14px] px-[18px] bg-panel-2 border-b border-border">

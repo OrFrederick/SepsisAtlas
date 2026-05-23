@@ -592,7 +592,7 @@ export default function ChatShell() {
 
   const composerCls = showPdf
     ? "bg-bg pt-[14px] pb-[22px] px-[22px] flex gap-[10px] items-end border-t border-border"
-    : "bg-bg py-[14px] pt-[14px] pb-8 px-9 flex gap-[10px] items-end";
+    : "bg-bg pt-[14px] pb-8 px-9 flex gap-[10px] items-end";
 
   return (
     <MotionConfig reducedMotion="user">
@@ -757,9 +757,16 @@ export default function ChatShell() {
         <section
           ref={viewerWrapRef}
           inert={!viewerInteractive}
+          // Two transition durations on purpose: opacity at 360ms, transform
+          // at 520ms — fade lands first, slide carries on. Stays in sync with
+          // the rest of the editorial-clinical motion language (520ms /
+          // SPLIT_EASE for spatial moves).
+          style={{
+            transition:
+              `opacity 360ms ${SPLIT_EASE} 80ms, transform 520ms ${SPLIT_EASE} 80ms`,
+          }}
           className={
             "relative h-full overflow-hidden motion-reduce:transition-none motion-reduce:transform-none " +
-            "transition-[opacity,transform] duration-[360ms] ease-[cubic-bezier(0.2,0.7,0.2,1)] delay-[80ms] " +
             (showPdf
               ? "opacity-100 translate-x-0"
               : "opacity-0 translate-x-[28px]")
@@ -790,7 +797,15 @@ export default function ChatShell() {
               (resizing ? "before:!bg-accent before:!w-[2px] " : "")
             }
           />
-          <div className="h-full relative z-0 bg-panel-3 [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:bg-white">
+          {/* Pointer-events shield on the iframe during drag: pointer-capture
+              on the divider should cover this on modern engines, but blocking
+              the iframe outright avoids any capture-quirk on edge cases. */}
+          <div
+            className={
+              "h-full relative z-0 bg-panel-3 [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:bg-white " +
+              (resizing ? "[&_iframe]:pointer-events-none" : "")
+            }
+          >
             <PdfViewerPane
               src={viewerUrl || null}
               storageKey={VIEWER_KEY}

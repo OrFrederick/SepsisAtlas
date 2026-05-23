@@ -60,9 +60,9 @@ export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUr
               {paper.verdicts && (
                 <>
                   {" · "}
-                  <span className={`badge ok ${BADGE_OK}`}>ok {paper.verdicts.ok ?? 0}</span>{" "}
-                  <span className={`badge warn ${BADGE_WARN}`}>weak {paper.verdicts.weak ?? 0}</span>{" "}
-                  <span className={`badge fail ${BADGE_FAIL}`}>fail {paper.verdicts.fail ?? 0}</span>
+                  <span className={BADGE_OK}>ok {paper.verdicts.ok ?? 0}</span>{" "}
+                  <span className={BADGE_WARN}>weak {paper.verdicts.weak ?? 0}</span>{" "}
+                  <span className={BADGE_FAIL}>fail {paper.verdicts.fail ?? 0}</span>
                 </>
               )}
             </p>

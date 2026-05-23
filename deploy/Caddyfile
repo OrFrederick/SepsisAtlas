@@ -41,10 +41,15 @@ atlas.efferon.com {
 		path /ingest_pubmed
 		path /health
 		path /health/cost
-		# Note: only the corpus list (/papers) and per-paper rows
-		# (/papers/<stem>/rows) belong to FastAPI. /papers/<stem> is a
-		# Next App Router page; matching /papers/* here would shadow it.
-		path /papers
+		# Note: per-paper rows (/papers/<stem>/rows) and the per-paper
+		# meta lookup (/papers/<stem>) belong to FastAPI, but only when
+		# called from SSR — i.e. the Next server reaches FastAPI directly
+		# via API_URL on the compose network, not through Caddy. The
+		# bare /papers list and the /papers/<stem> detail are both Next
+		# App Router pages; matching them here would shadow them on hard
+		# navigations (typed URL / refresh / bookmark) and return raw
+		# JSON instead of the rendered page. Only /papers/<stem>/rows
+		# is safe to expose through Caddy because no Next route owns it.
 		path /papers/*/rows
 		path /phenotypes
 		path /phenotypes/*
@@ -54,16 +59,7 @@ atlas.efferon.com {
 		reverse_proxy backend:8000
 	}
 
-	# Lock down Next's ISR-flush endpoint. Only the Python exporter on the
-	# compose network should reach it (via the backend service hitting
-	# localhost:3000 directly inside the frontend container, bypassing
-	# Caddy entirely). External traffic gets a 404.
-	@revalidate path /api/revalidate
-	handle @revalidate {
-		respond 404
-	}
-
-	# Everything else (chrome routes, /papers/<stem>, /viewer/<stem>,
+	# Everything else (chrome routes, /papers, /papers/<stem>, /viewer/<stem>,
 	# /_next/* asset chunks, items in public/) is served by Next. Next
 	# emits its own cache-control headers; let it answer.
 	#

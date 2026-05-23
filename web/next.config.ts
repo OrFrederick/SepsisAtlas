@@ -18,9 +18,10 @@ const config: NextConfig = {
       { source: "/ingest_pubmed", destination: `${API_URL}/ingest_pubmed` },
       { source: "/health", destination: `${API_URL}/health` },
       { source: "/health/:path*", destination: `${API_URL}/health/:path*` },
-      // /papers (list) and /papers/<stem>/rows go to FastAPI; /papers/<stem>
-      // stays a Next page so the rewrite cannot be a blanket /papers/:path*.
-      { source: "/papers", destination: `${API_URL}/papers` },
+      // Only /papers/:stem/rows is reachable from the client side; the
+      // /papers list and /papers/:stem detail are Next pages and must NOT
+      // be rewritten, or Caddy/Next would shadow them on hard navigations.
+      // SSR reaches /papers and /papers/:stem directly via process.env.API_URL.
       { source: "/papers/:stem/rows", destination: `${API_URL}/papers/:stem/rows` },
       { source: "/phenotypes", destination: `${API_URL}/phenotypes` },
       { source: "/phenotypes/:path*", destination: `${API_URL}/phenotypes/:path*` },

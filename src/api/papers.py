@@ -9,6 +9,7 @@ SQLAlchemy ORM rather than via raw SQL against a snapshot DB. Endpoints in
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Optional
 
 from sqlalchemy import func
@@ -120,6 +121,30 @@ def _is_parsed(file_name: str) -> bool:
     )
 
 
+def _parsed_stems() -> set[str]:
+    """One scan of PAPERS_PARSED per /papers request.
+
+    `_is_parsed` does two stat syscalls per file_name; for a corpus of N papers
+    that's 2N syscalls inside list_papers. List the dir once and resolve to a
+    set of "parsed" stems (with `.json` extension stripped) so each lookup is
+    O(1) and the cost is bounded by the directory size, not the corpus size.
+    Returns an empty set if PAPERS_PARSED is missing — same as `_is_parsed`
+    returning False for every paper, which is the desired graceful behavior
+    when the container layout changes.
+    """
+    try:
+        entries = set()
+        for name in os.listdir(PAPERS_PARSED):
+            entries.add(name)
+            # A parsed paper can be either `<stem>/` (a dir of pages) or
+            # `<stem>.json` (the legacy single-file format).
+            if name.endswith(".json"):
+                entries.add(name[:-5])
+        return entries
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return set()
+
+
 def _row_dict(pm: PredictorModel, sc: Optional[StudyCohort]) -> dict:
     """Build one Row payload from a (PredictorModel, StudyCohort) join."""
     return {
@@ -166,58 +191,151 @@ def list_rows(session: Session) -> list[dict]:
 
 def list_rows_for_file(session: Session, file_name: str) -> list[dict]:
     """Evidence rows scoped to one paper (file_name stem, no extension)."""
+    # Outerjoin (matching list_rows) so a PredictorModel pointing at a missing
+    # StudyCohort still surfaces — otherwise an orphan row is silently dropped
+    # from the per-paper page but visible in the global Evidence tab, which is
+    # the kind of asymmetry that hides data-integrity bugs.
     q = (
         session.query(PredictorModel, StudyCohort)
-        .join(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
+        .outerjoin(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
         .filter(StudyCohort.file_name == file_name)
     )
     return [_row_dict(pm, sc) for pm, sc in q.all()]
 
 
-def list_papers(session: Session) -> list[dict]:
-    """Corpus list payload matching web/src/lib/types.ts Paper interface."""
-    # Papers table is the source of truth for metadata; aggregate counts come
-    # from rows so the verdict buckets stay consistent with the Evidence tab.
-    papers_meta: dict[str, dict] = {}
+def _empty_verdicts() -> dict[str, int]:
+    return {"ok": 0, "weak": 0, "fail": 0, "unverified": 0}
+
+
+def _paper_meta(session: Session) -> dict[str, dict]:
+    """`{stem: {title, year, journal}}` from the Paper table.
+
+    Stems strip a trailing `.pdf` so they line up with StudyCohort.file_name,
+    which the corpus stores without extension.
+    """
+    out: dict[str, dict] = {}
     for p in session.query(Paper).all():
         fn = p.file_name
         if not fn:
             continue
         stem = fn[:-4] if fn.lower().endswith(".pdf") else fn
-        papers_meta[stem] = {
+        out[stem] = {
             "title": _coerce_str(p.title),
             "year": _coerce_int(p.year),
             "journal": _coerce_str(p.journal),
         }
+    return out
 
-    # MAX(extracted_ts) per file_name → last_update. NULL-safe; LEFT JOIN
-    # in case a cohort exists without its file_name set yet.
-    last_update: dict[str, Optional[str]] = {}
-    lu_rows = (
-        session.query(StudyCohort.file_name, func.max(PredictorModel.extracted_ts))
-        .outerjoin(PredictorModel, PredictorModel.cohort_id == StudyCohort.cohort_id)
-        .filter(StudyCohort.file_name.is_not(None))
-        .group_by(StudyCohort.file_name)
+
+def get_paper(session: Session, file_name: str) -> Optional[dict]:
+    """Per-stem Paper payload, or None when no Paper row or evidence row carries that stem.
+
+    Used by GET /papers/{file_name} as a cheap existence check so the per-paper
+    detail page doesn't have to fetch the full corpus just to call notFound().
+    """
+    meta_by_stem = _paper_meta(session)
+    meta = meta_by_stem.get(file_name)
+    # A paper may be present in the corpus only via its StudyCohort rows
+    # (no Paper row), so consider it existent if either source knows it.
+    has_cohort = (
+        session.query(StudyCohort.cohort_id)
+        .filter(StudyCohort.file_name == file_name)
+        .first()
+        is not None
+    )
+    if meta is None and not has_cohort:
+        return None
+
+    parsed_set = _parsed_stems()
+
+    counts = (
+        session.query(
+            PredictorModel.verifier_verdict,
+            func.count(PredictorModel.id),
+            func.max(PredictorModel.extracted_ts),
+        )
+        .join(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
+        .filter(StudyCohort.file_name == file_name)
+        .group_by(PredictorModel.verifier_verdict)
         .all()
     )
-    for fn, lu in lu_rows:
-        if fn:
-            last_update[fn] = str(lu) if lu is not None else None
+    verdicts = _empty_verdicts()
+    n_rows = 0
+    last_update: Optional[str] = None
+    for verdict, n, lu in counts:
+        n_int = int(n or 0)
+        n_rows += n_int
+        verdicts[_bucket(_norm_verdict(verdict))] += n_int
+        if lu is not None:
+            lu_str = str(lu)
+            if last_update is None or lu_str > last_update:
+                last_update = lu_str
 
-    # Aggregate row counts + verdict buckets in Python so the SQL stays
-    # portable across SQLite/Postgres and there's no second pass over rows.
-    rows = list_rows(session)
+    return {
+        "file_name": file_name,
+        "title": (meta or {}).get("title"),
+        "year": (meta or {}).get("year"),
+        "journal": (meta or {}).get("journal"),
+        "parsed": (file_name in parsed_set) or _is_parsed(file_name),
+        "n_rows": n_rows,
+        "verdicts": verdicts,
+        "last_update": last_update,
+    }
+
+
+def list_papers(session: Session) -> list[dict]:
+    """Corpus list payload matching web/src/lib/types.ts Paper interface.
+
+    SQL aggregation: one GROUP BY (file_name, verifier_verdict) returns ~4N
+    rows for an N-paper corpus, instead of materializing every PredictorModel
+    in Python just to count it. The `_row_dict` materialization through
+    list_rows() that the previous implementation used scaled quadratically
+    in corpus size once combined with the SSR-per-request fetch on /papers.
+    """
+    papers_meta = _paper_meta(session)
+    parsed_set = _parsed_stems()
+
+    # Single GROUP BY (file_name, verifier_verdict) → (file_name, verdict, n, max_ts)
+    # Outerjoin is symmetric with list_rows and the previous behaviour: orphan
+    # PredictorModels (no StudyCohort) are still counted, just under file_name=NULL,
+    # which we filter out below.
+    rows = (
+        session.query(
+            StudyCohort.file_name,
+            PredictorModel.verifier_verdict,
+            func.count(PredictorModel.id),
+            func.max(PredictorModel.extracted_ts),
+        )
+        .outerjoin(PredictorModel, PredictorModel.cohort_id == StudyCohort.cohort_id)
+        .filter(StudyCohort.file_name.is_not(None))
+        .group_by(StudyCohort.file_name, PredictorModel.verifier_verdict)
+        .all()
+    )
+
     file_names: set[str] = set(papers_meta.keys())
     n_rows: dict[str, int] = {}
     verdicts: dict[str, dict[str, int]] = {}
-    for r in rows:
-        fn = r.get("file_name")
+    last_update: dict[str, Optional[str]] = {}
+    for fn, verdict, n, lu in rows:
         if not fn:
             continue
         file_names.add(fn)
-        n_rows[fn] = n_rows.get(fn, 0) + 1
-        bucket = verdicts.setdefault(fn, {"ok": 0, "weak": 0, "fail": 0, "unverified": 0})
-        bucket[_bucket(r.get("verifier_verdict"))] += 1
+        n_int = int(n or 0)
+        if n_int == 0:
+            # Outerjoin emits one row per StudyCohort with no matching
+            # PredictorModel (count(PredictorModel.id) = 0 because count()
+            # ignores NULL). The cohort exists, just no evidence rows yet —
+            # keep an empty verdicts bucket and don't inflate n_rows.
+            verdicts.setdefault(fn, _empty_verdicts())
+            continue
+        n_rows[fn] = n_rows.get(fn, 0) + n_int
+        bucket = verdicts.setdefault(fn, _empty_verdicts())
+        bucket[_bucket(_norm_verdict(verdict))] += n_int
+        if lu is not None:
+            lu_str = str(lu)
+            prev = last_update.get(fn)
+            if prev is None or lu_str > prev:
+                last_update[fn] = lu_str
 
     out: list[dict] = []
     for fn in sorted(file_names):
@@ -227,9 +345,9 @@ def list_papers(session: Session) -> list[dict]:
             "title": meta.get("title"),
             "year": meta.get("year"),
             "journal": meta.get("journal"),
-            "parsed": _is_parsed(fn),
+            "parsed": (fn in parsed_set) or _is_parsed(fn),
             "n_rows": n_rows.get(fn, 0),
-            "verdicts": verdicts.get(fn, {"ok": 0, "weak": 0, "fail": 0, "unverified": 0}),
+            "verdicts": verdicts.get(fn, _empty_verdicts()),
             "last_update": last_update.get(fn),
         })
     return out

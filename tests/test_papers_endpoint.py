@@ -1,4 +1,5 @@
-"""Tests for the live corpus endpoints (/papers, /papers/{stem}/rows).
+"""Tests for the live corpus endpoints (/papers, /papers/{stem},
+/papers/{stem}/rows).
 
 Spins up a file-backed SQLite, seeds a couple of papers + cohorts +
 predictor_model rows, and asserts the JSON shape matches what
@@ -7,18 +8,20 @@ web/src/lib/types.ts expects (Paper + Row interfaces).
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture(scope="module")
-def app_client(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("sepsis-papers-api")
-    db_path = tmp / "test.sqlite"
+@pytest.fixture
+def app_client(tmp_path, monkeypatch):
+    """Function-scoped so SEPSIS_DB_URL is reset between tests via
+    `monkeypatch.setenv` — the previous module-scoped version leaked the env
+    var into other test modules (whose collection order determined whether
+    they read a stale pointer to a deleted sqlite path).
+    """
+    db_path = tmp_path / "test.sqlite"
     db_url = f"sqlite:///{db_path}"
-    os.environ["SEPSIS_DB_URL"] = db_url
+    monkeypatch.setenv("SEPSIS_DB_URL", db_url)
 
     from sepsis_atlas.db import (
         Paper,
@@ -34,6 +37,10 @@ def app_client(tmp_path_factory):
     with Session() as s:
         s.add(Paper(file_name="Gai_2022", title="Gai paper", year=2022, journal="J"))
         s.add(Paper(file_name="Seymour_2016", title="Seymour", year=2016, journal="JAMA"))
+        # Paper with no StudyCohort / no PredictorModel at all — exercises the
+        # papers_meta-only branch in list_papers (otherwise a regression that
+        # drops the seeding loop would still pass with rows-driven file_names).
+        s.add(Paper(file_name="Empty_2024", title="Empty", year=2024, journal="X"))
         s.add(
             StudyCohort(
                 cohort_id="Gai 2022 Total",
@@ -106,13 +113,32 @@ def app_client(tmp_path_factory):
     yield client
 
 
-def test_list_papers_shape(app_client):
+@pytest.fixture
+def parsed_dir(tmp_path, monkeypatch):
+    """Point PAPERS_PARSED at a controlled temp dir so the `parsed` field is
+    deterministic in CI. Without this the assertion would vary between a CI
+    box (empty dir → False) and a dev machine (populated → True), so any
+    regression in `_parsed_stems`/`_is_parsed` could pass silently.
+    """
+    parsed = tmp_path / "parsed"
+    parsed.mkdir()
+    monkeypatch.setattr("sepsis_atlas.config.PAPERS_PARSED", parsed)
+    monkeypatch.setattr("api.papers.PAPERS_PARSED", parsed)
+    return parsed
+
+
+def test_list_papers_shape(app_client, parsed_dir):
+    # Mark Gai as parsed (dir form), Seymour as parsed (legacy .json form);
+    # leave Empty unparsed so both branches of `_parsed_stems` are exercised.
+    (parsed_dir / "Gai_2022").mkdir()
+    (parsed_dir / "Seymour_2016.json").write_text("{}")
+
     r = app_client.get("/papers")
     assert r.status_code == 200
     body = r.json()
     assert "papers" in body
     by_name = {p["file_name"]: p for p in body["papers"]}
-    assert set(by_name) == {"Gai_2022", "Seymour_2016"}
+    assert set(by_name) == {"Gai_2022", "Seymour_2016", "Empty_2024"}
 
     gai = by_name["Gai_2022"]
     # Required fields per web/src/lib/types.ts Paper interface.
@@ -122,17 +148,60 @@ def test_list_papers_shape(app_client):
     assert gai["n_rows"] == 2
     assert gai["verdicts"] == {"ok": 1, "weak": 1, "fail": 0, "unverified": 0}
     assert "last_update" in gai
-    assert isinstance(gai["parsed"], bool)
+    assert gai["parsed"] is True
+    assert by_name["Seymour_2016"]["parsed"] is True
+    assert by_name["Empty_2024"]["parsed"] is False
 
 
-def test_list_papers_includes_paper_without_rows(app_client):
-    # Seymour has one row but qualifies; if rows were dropped the paper
-    # would still appear via the Paper table union.
+def test_list_papers_includes_paper_without_any_rows(app_client, parsed_dir):
+    # Empty_2024 has a Paper row but no StudyCohort and no PredictorModel.
+    # If a regression drops the Paper-table union in list_papers (so only
+    # file_names that appear in StudyCohort surface) this paper disappears.
+    r = app_client.get("/papers")
+    body = r.json()
+    by_name = {p["file_name"]: p for p in body["papers"]}
+    assert "Empty_2024" in by_name
+    empty = by_name["Empty_2024"]
+    assert empty["n_rows"] == 0
+    assert empty["verdicts"] == {"ok": 0, "weak": 0, "fail": 0, "unverified": 0}
+    assert empty["last_update"] is None
+
+
+def test_list_papers_verdict_bucketing(app_client, parsed_dir):
     r = app_client.get("/papers")
     body = r.json()
     seymour = next(p for p in body["papers"] if p["file_name"] == "Seymour_2016")
     assert seymour["n_rows"] == 1
     assert seymour["verdicts"]["fail"] == 1
+
+
+def test_get_paper_meta(app_client, parsed_dir):
+    (parsed_dir / "Gai_2022").mkdir()
+    r = app_client.get("/papers/Gai_2022")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["file_name"] == "Gai_2022"
+    assert body["title"] == "Gai paper"
+    assert body["year"] == 2022
+    assert body["n_rows"] == 2
+    assert body["verdicts"] == {"ok": 1, "weak": 1, "fail": 0, "unverified": 0}
+    assert body["parsed"] is True
+
+
+def test_get_paper_meta_unknown_stem_404(app_client, parsed_dir):
+    r = app_client.get("/papers/no_such_stem")
+    assert r.status_code == 404
+
+
+def test_get_paper_meta_paper_only(app_client, parsed_dir):
+    # Empty_2024 has a Paper row but no StudyCohort/PredictorModel — still
+    # exists, returns zero counts. Mirrors what /papers reports for it.
+    r = app_client.get("/papers/Empty_2024")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["n_rows"] == 0
+    assert body["verdicts"] == {"ok": 0, "weak": 0, "fail": 0, "unverified": 0}
+    assert body["parsed"] is False
 
 
 def test_get_paper_rows_shape(app_client):
@@ -152,7 +221,8 @@ def test_get_paper_rows_shape(app_client):
 
 def test_get_paper_rows_unknown_stem_empty(app_client):
     # Rows-only endpoint returns an empty list (not 404) so the per-paper
-    # page can still render an empty state.
+    # page can still render an empty state. Existence discrimination is the
+    # job of GET /papers/{file_name}.
     r = app_client.get("/papers/no_such_stem/rows")
     assert r.status_code == 200
     assert r.json() == {"rows": []}

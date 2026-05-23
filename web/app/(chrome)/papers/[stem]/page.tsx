@@ -1,6 +1,6 @@
 import PaperDetailPage from "@/components/PaperDetailPage";
 import { buildViewerUrl } from "@/lib/viewerUrl";
-import { loadPapers, loadRowsFor } from "@/lib/data";
+import { loadPaper, loadRowsFor } from "@/lib/data";
 import { notFound } from "next/navigation";
 
 // On-demand rendering against the live API. Pre-generating params would
@@ -15,8 +15,11 @@ export async function generateMetadata({ params }: { params: Promise<{ stem: str
 
 export default async function PaperDetail({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
-  const [papers, rows] = await Promise.all([loadPapers(), loadRowsFor(stem)]);
-  const paper = papers.find((p) => p.file_name === stem);
+  // Existence check via the per-stem endpoint instead of fetching the full
+  // corpus just to call `notFound()`. The rows endpoint can't substitute —
+  // it returns `200 + {rows: []}` for unknown stems by contract — so we need
+  // the meta call to discriminate "paper exists with no rows" from "no paper".
+  const [paper, rows] = await Promise.all([loadPaper(stem), loadRowsFor(stem)]);
   if (!paper) notFound();
 
   const basePath = "/";

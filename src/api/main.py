@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
 
-from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
+from sepsis_atlas.config import PAPERS_RAW, ROOT, STATIC_DIR
 from sepsis_atlas.db import (
     PhenotypeCluster,
     StudyPhenotypeSummary,
@@ -411,112 +411,152 @@ def post_query_kg(req: QueryRequest) -> QueryResponse:
 
 @app.get("/kg/graph")
 def get_kg_graph() -> dict:
-    """Return a frontend-friendly graph view of the KG.
+    """Return a frontend-friendly graph view built from SQLite.
 
-    After the lateral-promote stage runs, Predictor / Outcome /
-    StatMethod / Setting / PhenotypeCluster are real nodes, so the
-    earlier synthetic-hub logic has been replaced with direct
-    queries. The Connected-Papers-style SIMILAR_TO edges over
-    predictor overlap remain unchanged.
+    Derives Paper/Cohort/PredictorModel nodes and synthetic predictor/outcome
+    hubs plus structural edges from the main SQLite DB. No Neo4j needed.
     """
-    try:
-        store = _get_kg_backend()._store
-    except Exception as e:
-        print(f"[kg/graph] backend failure: {type(e).__name__}: {e}", flush=True)
-        raise HTTPException(
-            status_code=503,
-            detail=f"KG backend unavailable ({type(e).__name__})",
-        )
+    engine = _engine()
+    from sqlalchemy import text as _text
 
-    paper_rows = store.run(
-        "MATCH (p:Paper) RETURN p.file_name AS id, p.paper_ref AS label, "
-        "p.year AS year, p.n_cohorts AS n_cohorts, "
-        "p.n_predictor_models AS n_predictor_models"
-    )
-    cohort_rows = store.run(
-        "MATCH (c:Cohort) RETURN c.cohort_id AS id, c.cohort_label AS label, "
-        "c.paper_file_name AS paper, c.cohort_size_n AS n, "
-        "c.population_description AS population"
-    )
-    pm_rows = store.run(
-        "MATCH (pm:PredictorModel) RETURN pm.id AS id, "
-        "pm.predictor_canonical AS predictor, pm.outcome_type AS outcome_type, "
-        "pm.outcome AS outcome, pm.effect_size_str AS effect, "
-        "pm.cohort_id AS cohort, pm.paper_file_name AS paper, "
-        "pm.verifier_verdict AS verdict, pm.anchor_page AS page, "
-        "pm.anchor_bbox AS bbox"
-    )
-    predictor_rows = store.run(
-        "MATCH (p:Predictor) RETURN p.canonical AS id, p.canonical AS label, "
-        "p.category AS category"
-    )
-    outcome_rows = store.run(
-        "MATCH (o:Outcome) RETURN o.outcome_id AS id, o.canonical AS label, "
-        "o.type AS type, o.window_days AS window_days"
-    )
-    method_rows = store.run(
-        "MATCH (m:StatMethod) RETURN m.name AS id, m.name AS label, "
-        "m.family AS family"
-    )
-    setting_rows = store.run(
-        "MATCH (s:Setting) RETURN s.type AS id, s.type AS label"
-    )
-    cluster_rows = store.run(
-        "MATCH (c:PhenotypeCluster) RETURN c.cluster_id AS id, "
-        "c.cluster_label AS label, c.paper_file_name AS paper"
-    )
+    # Paper nodes — strip .pdf suffix for consistent IDs
+    paper_rows = []
+    with engine.connect() as cx:
+        rows = cx.execute(_text(
+            "SELECT p.file_name AS id_raw, "
+            "REPLACE(p.file_name, '.pdf', '') AS id, "
+            "COALESCE(p.title, REPLACE(p.file_name, '.pdf', '')) AS label, "
+            "p.year AS year, "
+            "(SELECT COUNT(*) FROM study_cohort sc WHERE sc.file_name = REPLACE(p.file_name, '.pdf', '')) AS n_cohorts, "
+            "(SELECT COUNT(*) FROM predictor_model pm "
+            " JOIN study_cohort sc2 ON sc2.cohort_id = pm.cohort_id "
+            " WHERE sc2.file_name = REPLACE(p.file_name, '.pdf', '')) AS n_predictor_models "
+            "FROM papers p ORDER BY p.file_name"
+        )).fetchall()
+        paper_rows = [dict(r._mapping) for r in rows]
 
-    structural_edges = store.run(
-        "MATCH (a)-[r:HAS_COHORT|REPORTS|USES_PREDICTOR|TARGETS_OUTCOME"
-        "|USES_METHOD|IN_SETTING|DEFINES_CLUSTER|HAS_CLUSTER]->(b) "
-        "RETURN type(r) AS kind, "
-        "coalesce(a.id, a.cohort_id, a.file_name, a.outcome_id, "
-        "a.cluster_id, a.canonical, a.name, a.type) AS src, "
-        "coalesce(b.id, b.cohort_id, b.file_name, b.outcome_id, "
-        "b.cluster_id, b.canonical, b.name, b.type) AS dst"
-    )
+    # Cohort nodes
+    cohort_rows = []
+    with engine.connect() as cx:
+        rows = cx.execute(_text(
+            "SELECT cohort_id AS id, cohort_label AS label, "
+            "file_name AS paper, cohort_size_n AS n, "
+            "population_description AS population "
+            "FROM study_cohort ORDER BY cohort_id"
+        )).fetchall()
+        cohort_rows = [dict(r._mapping) for r in rows]
 
+    # PredictorModel nodes
+    pm_rows = []
+    with engine.connect() as cx:
+        rows = cx.execute(_text(
+            "SELECT pm.id AS id, pm.predictor_canonical AS predictor, "
+            "pm.outcome_type, pm.outcome, pm.effect_size_str AS effect, "
+            "pm.cohort_id AS cohort, sc.file_name AS paper, "
+            "pm.verifier_verdict AS verdict, pm.anchor_page AS page, "
+            "pm.anchor_bbox AS bbox "
+            "FROM predictor_model pm "
+            "JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id "
+            "ORDER BY pm.id"
+        )).fetchall()
+        pm_rows = [dict(r._mapping) for r in rows]
+
+    # Predictor hub nodes (aggregated)
+    predictor_rows = []
+    with engine.connect() as cx:
+        rows = cx.execute(_text(
+            "SELECT predictor_canonical AS id, predictor_canonical AS label, "
+            "'predictor' AS category, "
+            "COUNT(*) AS n_pms, "
+            "COUNT(DISTINCT sc.file_name) AS n_papers "
+            "FROM predictor_model pm "
+            "JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id "
+            "WHERE pm.predictor_canonical IS NOT NULL "
+            "AND pm.predictor_canonical != '' "
+            "GROUP BY pm.predictor_canonical "
+            "HAVING COUNT(*) >= 2 "
+            "ORDER BY COUNT(*) DESC"
+        )).fetchall()
+        predictor_rows = [dict(r._mapping) for r in rows]
+
+    # Outcome hub nodes (aggregated)
+    outcome_rows = []
+    with engine.connect() as cx:
+        rows = cx.execute(_text(
+            "SELECT outcome_type AS id, outcome_type AS label, "
+            "outcome_type AS type, "
+            "COUNT(*) AS n_pms, "
+            "COUNT(DISTINCT sc.file_name) AS n_papers "
+            "FROM predictor_model pm "
+            "JOIN study_cohort sc ON sc.cohort_id = pm.cohort_id "
+            "WHERE pm.outcome_type IS NOT NULL "
+            "AND pm.outcome_type != '' "
+            "GROUP BY pm.outcome_type "
+            "ORDER BY COUNT(*) DESC"
+        )).fetchall()
+        outcome_rows = [dict(r._mapping) for r in rows]
+
+    # Build nodes
     nodes: list[dict] = []
     for r in paper_rows:
-        nodes.append({"id": r["id"], "type": "Paper", "label": r["label"] or r["id"],
-                      "year": r.get("year"), "n_cohorts": r.get("n_cohorts"),
-                      "n_predictor_models": r.get("n_predictor_models")})
+        nodes.append({
+            "id": r["id"], "type": "Paper", "label": r["label"] or r["id"],
+            "year": r.get("year"), "n_cohorts": r.get("n_cohorts"),
+            "n_predictor_models": r.get("n_predictor_models"),
+        })
     for r in cohort_rows:
-        nodes.append({"id": r["id"], "type": "Cohort", "label": r["label"] or r["id"],
-                      "paper": r.get("paper"), "n": r.get("n"),
-                      "population": r.get("population")})
+        nodes.append({
+            "id": r["id"], "type": "Cohort", "label": r["label"] or r["id"],
+            "paper": r.get("paper"), "n": r.get("n"),
+            "population": r.get("population"),
+        })
     for r in pm_rows:
-        nodes.append({"id": r["id"], "type": "PredictorModel",
-                      "label": r.get("predictor") or r["id"],
-                      "predictor": r.get("predictor"),
-                      "outcome_type": r.get("outcome_type"),
-                      "outcome": r.get("outcome"), "effect": r.get("effect"),
-                      "cohort": r.get("cohort"), "paper": r.get("paper"),
-                      "verdict": r.get("verdict"), "page": r.get("page"),
-                      "bbox": r.get("bbox")})
+        nodes.append({
+            "id": r["id"], "type": "PredictorModel",
+            "label": r.get("predictor") or r["id"],
+            "predictor": r.get("predictor"), "outcome_type": r.get("outcome_type"),
+            "outcome": r.get("outcome"), "effect": r.get("effect"),
+            "cohort": r.get("cohort"), "paper": r.get("paper"),
+            "verdict": r.get("verdict"), "page": r.get("page"),
+            "bbox": r.get("bbox"),
+        })
     for r in predictor_rows:
-        nodes.append({"id": r["id"], "type": "Predictor", "label": r["label"],
-                      "category": r.get("category")})
+        nodes.append({
+            "id": r["id"], "type": "Predictor", "label": r["label"],
+            "category": r.get("category"),
+            "n_pms": r.get("n_pms"), "n_papers": r.get("n_papers"),
+        })
     for r in outcome_rows:
-        nodes.append({"id": r["id"], "type": "Outcome", "label": r["label"],
-                      "outcome_type": r.get("type"),
-                      "window_days": r.get("window_days")})
-    for r in method_rows:
-        nodes.append({"id": r["id"], "type": "StatMethod", "label": r["label"],
-                      "family": r.get("family")})
-    for r in setting_rows:
-        nodes.append({"id": r["id"], "type": "Setting", "label": r["label"]})
-    for r in cluster_rows:
-        nodes.append({"id": r["id"], "type": "PhenotypeCluster",
-                      "label": r["label"] or r["id"],
-                      "paper": r.get("paper")})
+        nodes.append({
+            "id": r["id"], "type": "Outcome", "label": r["label"],
+            "n_pms": r.get("n_pms"), "n_papers": r.get("n_papers"),
+        })
 
-    edges: list[dict] = [
-        {"src": r["src"], "dst": r["dst"], "kind": r["kind"]} for r in structural_edges
-    ]
+    # Build structural edges
+    edges: list[dict] = []
+    paper_set = {r["id"] for r in paper_rows}
+    for cr in cohort_rows:
+        pid = cr.get("paper") or ""
+        if pid in paper_set:
+            edges.append({"src": pid, "dst": cr["id"], "kind": "HAS_COHORT"})
+    cohort_set = {r["id"] for r in cohort_rows}
+    for pmr in pm_rows:
+        cid = pmr.get("cohort") or ""
+        if cid in cohort_set:
+            edges.append({"src": cid, "dst": pmr["id"], "kind": "REPORTS"})
+
+    pred_set = {r["id"] for r in predictor_rows}
+    for pmr in pm_rows:
+        pid = pmr.get("predictor") or ""
+        if pid in pred_set:
+            edges.append({"src": pmr["id"], "dst": pid, "kind": "TESTS"})
+    outc_set = {r["id"] for r in outcome_rows}
+    for pmr in pm_rows:
+        ot = pmr.get("outcome_type") or ""
+        if ot in outc_set:
+            edges.append({"src": pmr["id"], "dst": ot, "kind": "TARGETS"})
 
     # ---- direct paper-to-paper similarity --------------------------------
-    # (Unchanged: overlap coefficient over predictor_canonical sets.)
     paper_predictors: dict[str, set[str]] = {}
     for pm in pm_rows:
         pid = pm.get("paper")
@@ -553,12 +593,9 @@ def get_kg_graph() -> dict:
             "papers": len(paper_rows),
             "cohorts": len(cohort_rows),
             "predictor_models": len(pm_rows),
-            "predictors": len(predictor_rows),
-            "outcomes": len(outcome_rows),
-            "stat_methods": len(method_rows),
-            "settings": len(setting_rows),
-            "phenotype_clusters": len(cluster_rows),
-            "structural_edges": len(structural_edges),
+            "predictor_hubs": len(predictor_rows),
+            "outcome_hubs": len(outcome_rows),
+            "structural_edges": len(edges) - similar_edges,
             "similar_to_edges": similar_edges,
             "edges": len(edges),
         },
@@ -651,6 +688,7 @@ def get_rank_predictors(
 
 
 @app.get("/viewer/{file_stem}")
+@app.get("/viewer/{file_stem}/")
 def viewer(file_stem: str):
     """Serve the static PDF.js viewer page.
 
@@ -667,7 +705,10 @@ def viewer(file_stem: str):
     return Response(
         content=html,
         media_type="text/html",
-        headers={"Content-Security-Policy": "frame-ancestors *;"},
+        headers={
+            "Content-Security-Policy": "frame-ancestors *;",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
     )
 
 
@@ -977,5 +1018,14 @@ def get_phenotype(paper_ref: str):
             .all()
         )
         return _phenotype_paper_dict(s, clusters)
+
+
+# ---------------------------------------------------------------------------
+# Serve the Astro-built frontend (must be last so API routes take precedence)
+# ---------------------------------------------------------------------------
+
+WEB_DIST = ROOT / "web" / "dist"
+if WEB_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIST), html=True), name="web")
 
 

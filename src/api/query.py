@@ -302,8 +302,19 @@ def build_sql(intent: IntentParse, *, window_override: int | None = None) -> tup
 
     cond = (intent.population or {}).get("condition")
     if cond:
-        where.append("LOWER(sc.population_description) LIKE :cond")
-        params["cond"] = f"%{cond.lower()}%"
+        cond_l = cond.lower()
+        # Broaden sepsis-spectrum conditions so "septic shock" also matches
+        # papers that describe their population as "sepsis" (most common).
+        if cond_l == "septic shock":
+            where.append(
+                "(LOWER(sc.population_description) LIKE :cond "
+                "OR LOWER(sc.population_description) LIKE :cond_broad)"
+            )
+            params["cond"] = "%septic shock%"
+            params["cond_broad"] = "%sepsis%"
+        else:
+            where.append("LOWER(sc.population_description) LIKE :cond")
+            params["cond"] = f"%{cond_l}%"
 
     setting = (intent.population or {}).get("setting")
     if setting:

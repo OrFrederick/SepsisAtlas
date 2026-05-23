@@ -133,6 +133,14 @@ def run_cohort_enum(
     model: str = MODEL_EXTRACT,
 ) -> tuple[list[StudyCohortOut], dict]:
     """Run stage-1 cohort enumeration. Returns (cohorts, llm_meta)."""
+    from sepsis_atlas.config import LLM_PROVIDER as _llm_provider
+    _is_ollama = (_llm_provider or "").strip().lower() == "ollama"
+    # cohort_enum only needs abstract + methods to find cohorts — not full tables.
+    # 10k chars ≈ 5k tokens. System prompt + schema ≈ 2k → 7k total.
+    # KV cache for 7k tokens (~896MB) fits in the remaining VRAM on 8GB GPU.
+    # 20k caused partial CPU offload (KV cache overflow) → multi-minute prefill.
+    _payload_cap = 10_000 if _is_ollama else 200_000
+
     sys_prompt, prompt_id = _load_prompt("cohort_enum_v1.md")
     user_payload = {
         "paper_id": paper_id,
@@ -143,13 +151,25 @@ def run_cohort_enum(
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(CohortEnumResponse)
     )
+    # /no_think disables Qwen3 reasoning mode: cuts avg output from ~9k to ~500
+    # tokens, making each call ~15x faster with no accuracy loss on this task.
+    if _is_ollama:
+        paper_label = paper_id.replace("_", " ")
+        sys_prompt_with_schema = (
+            f"/no_think\n\n"
+            f"IMPORTANT: The paper you are extracting from is '{paper_label}'. "
+            f"Every cohort_id you output MUST start with '{paper_label}' "
+            f"(e.g. '{paper_label} Total Cohort'). Never use example names like "
+            f"'Author 2001' or 'Smith 2024'.\n\n"
+            + sys_prompt_with_schema
+        )
     messages = [
         {"role": "system", "content": sys_prompt_with_schema},
         {
             "role": "user",
             "content": (
                 "Enumerate cohorts for the parsed paper below. Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]
+                + json.dumps(user_payload)[:_payload_cap]
             ),
         },
     ]
@@ -166,7 +186,16 @@ def run_cohort_enum(
     )
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "cohort_enum")
-    parsed = CohortEnumResponse.model_validate_json(_strip_fences(raw))
+    raw_obj = json.loads(_strip_fences(raw))
+    raw_obj = _normalize_cohort_enum(raw_obj)
+    if _is_ollama:
+        paper_label = paper_id.replace("_", " ")
+        for c in raw_obj.get("cohorts", []):
+            cid = c.get("cohort_id", "")
+            if cid and not cid.startswith(paper_label):
+                suffix = cid.split(" ", 2)[-1] if " " in cid else cid
+                c["cohort_id"] = f"{paper_label} {suffix}"
+    parsed = CohortEnumResponse.model_validate(raw_obj)
     meta = {
         "model": model,
         "prompt_id": prompt_id,
@@ -193,6 +222,12 @@ def run_predictor_extract(
     run_id: str,
     model: str = MODEL_EXTRACT,
 ) -> tuple[list[PredictorModelOut], dict]:
+    from sepsis_atlas.config import LLM_PROVIDER as _llm_provider
+    _is_ollama = (_llm_provider or "").strip().lower() == "ollama"
+    # 15k chars ≈ 7-8k tokens, stays within 16k context when thinking is off.
+    # 40k caused VRAM overflow on GPU → CPU fallback → 100× slowdown.
+    _payload_cap = 15_000 if _is_ollama else 200_000
+
     sys_prompt, prompt_id = _load_prompt("predictor_extract_v1.md")
     user_payload = {
         "paper_id": paper_id,
@@ -206,6 +241,12 @@ def run_predictor_extract(
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(PredictorExtractResponse)
     )
+    if _is_ollama:
+        # /no_think disables Qwen3 reasoning mode. Without this, thinking tokens
+        # can exhaust VRAM (7.5GB model + large KV cache > 8GB) causing extreme
+        # CPU fallback slowdown. _normalize_predictor_row() handles any field-name
+        # differences that thinking mode would otherwise fix.
+        sys_prompt_with_schema = "/no_think\n\n" + sys_prompt_with_schema
     messages = [
         {"role": "system", "content": sys_prompt_with_schema},
         {
@@ -214,7 +255,7 @@ def run_predictor_extract(
                 f"Extract predictor/model rows for cohort_id={cohort.cohort_id!r}. "
                 "Only emit rows whose anchor text is from the section/table reporting "
                 "this cohort. Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]
+                + json.dumps(user_payload)[:_payload_cap]
             ),
         },
     ]
@@ -231,7 +272,38 @@ def run_predictor_extract(
     )
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "predictor_extract")
-    parsed = PredictorExtractResponse.model_validate_json(_strip_fences(raw))
+    stripped = _strip_fences(raw)
+    # Guard: _strip_fences already extracts first {…}, but json.loads may still
+    # fail with "Extra data" if the model emitted two JSON objects back-to-back.
+    # json.JSONDecoder.raw_decode stops at the first complete object, so use it.
+    if stripped:
+        try:
+            _obj, _ = json.JSONDecoder().raw_decode(stripped)
+            if isinstance(_obj, dict):
+                stripped = json.dumps(_obj)
+        except json.JSONDecodeError:
+            pass
+    if _is_ollama and not stripped:
+        # Model exhausted token budget on <think> and returned no JSON.
+        # Retry once with /no_think to skip reasoning and get the answer directly.
+        import sys as _sys
+        print("[predictor_extract] empty response after stripping, retrying with /no_think", file=_sys.stderr, flush=True)
+        messages[0]["content"] = "/no_think\n\n" + messages[0]["content"]
+        t1 = time.time()
+        resp = _call_predictor_extract(
+            messages, model, response_format=rf, temperature=0,
+            run_id=run_id, paper_id=paper_id, prompt_id=prompt_id,
+        )
+        latency_ms += int((time.time() - t1) * 1000)
+        raw = _check_resp(resp, "predictor_extract retry")
+        stripped = _strip_fences(raw)
+    raw_obj = json.loads(stripped)
+    if isinstance(raw_obj.get("rows"), list):
+        raw_obj["rows"] = [
+            _normalize_predictor_row(r, cohort.cohort_id)
+            for r in raw_obj["rows"]
+        ]
+    parsed = PredictorExtractResponse.model_validate(raw_obj)
     meta = {
         "model": model,
         "prompt_id": prompt_id,
@@ -245,6 +317,129 @@ def run_predictor_extract(
     return parsed.rows, meta
 
 
+def _normalize_cohort_enum(obj) -> dict:
+    if not isinstance(obj, dict):
+        return {"cohorts": []}
+
+    """Map qwen3-8b cohort_enum variants to the canonical CohortEnumResponse shape.
+
+    The model returns singular forms (cohort/study_cohort) or wraps a single
+    cohort dict instead of a list. Normalise to {"cohorts": [...]}.
+    """
+    # Top-level key: cohort / study_cohort / study_cohorts → cohorts
+    if "cohorts" not in obj:
+        for alias in ("cohort", "study_cohort", "study_cohorts", "cohort_list"):
+            if alias in obj:
+                val = obj.pop(alias)
+                obj["cohorts"] = val if isinstance(val, list) else ([val] if val else [])
+                break
+        else:
+            obj.setdefault("cohorts", [])
+    # cohorts must be a list — model sometimes emits null or a plain dict
+    if not isinstance(obj["cohorts"], list):
+        val = obj["cohorts"]
+        obj["cohorts"] = [val] if isinstance(val, dict) else []
+
+    # Each cohort row: require cohort_id, paper_ref, anchor
+    for c in obj.get("cohorts", []):
+        if not isinstance(c, dict):
+            continue
+        # cohort_id aliases
+        if "cohort_id" not in c:
+            c["cohort_id"] = (
+                c.pop("id", None)
+                or c.pop("name", None)
+                or c.pop("cohort_name", None)
+                or c.pop("label", None)
+                or ""
+            )
+        # paper_ref: filled at call site if absent — pass through
+        c.setdefault("paper_ref", "")
+        # anchor
+        if not isinstance(c.get("anchor"), dict):
+            text = (
+                c.pop("anchor_text", None)
+                or c.pop("source_span", None)
+                or c.pop("supporting_text", None)
+                or ""
+            )
+            page = int(c.pop("anchor_page", None) or c.pop("page", None) or 1)
+            c["anchor"] = {"text": str(text), "page": page}
+        else:
+            c["anchor"].setdefault("text", "")
+            c["anchor"].setdefault("page", 1)
+    return obj
+
+
+def _normalize_predictor_row(row: dict, cohort_id: str) -> dict:
+    """Map qwen3-8b field-name variants to the canonical PredictorModelOut schema.
+
+    qwen3-8b reliably uses wrong names (cohort vs cohort_id, predictor vs
+    predictors) and puts asterisks in p_values. Normalize before Pydantic sees
+    the dict so the pipeline doesn't crash on every non-Claude model.
+    """
+    import re as _re
+
+    # cohort_id: always use the caller's value — the model gets this wrong
+    row["cohort_id"] = cohort_id
+    row.pop("cohort", None)
+
+    # predictors (required string): map singular + common aliases
+    if "predictors" not in row:
+        row["predictors"] = (
+            row.pop("predictor", None)
+            or row.pop("predictor_name", None)
+            or row.pop("variable", None)
+            or ""
+        )
+    row.pop("predictor", None)
+
+    # outcome (required string): map common aliases
+    if "outcome" not in row:
+        row["outcome"] = (
+            row.pop("outcome_measure", None)
+            or row.pop("outcome_variable", None)
+            or row.pop("endpoint", None)
+            or ""
+        )
+
+    # p_value: strip asterisks, significance markers; cast to float
+    pv = row.get("p_value")
+    if isinstance(pv, str):
+        cleaned = _re.sub(r"[^0-9.\-eE]", "", pv.lstrip("<>≤≥ "))
+        try:
+            row["p_value"] = float(cleaned)
+        except (ValueError, TypeError):
+            row["p_value"] = None
+
+    # effect_size_str (required string): build from numerics if absent — after p_value is cleaned
+    if not row.get("effect_size_str"):
+        parts = []
+        if row.get("effect_value") is not None:
+            parts.append(str(row["effect_value"]))
+        if row.get("p_value") is not None:
+            parts.append(f"p={row['p_value']}")
+        row["effect_size_str"] = ", ".join(parts) or "N/A"
+
+    # anchor (required {page, text}): build from any source-span field if absent
+    if not isinstance(row.get("anchor"), dict):
+        text = (
+            row.pop("anchor_text", None)
+            or row.pop("source_span", None)
+            or row.pop("source", None)
+            or row.pop("evidence", None)
+            or row.pop("supporting_text", None)
+            or ""
+        )
+        page = int(row.pop("anchor_page", None) or row.pop("page", None) or 1)
+        row["anchor"] = {"text": str(text), "page": page}
+    else:
+        row["anchor"].setdefault("text", "")
+        row["anchor"].setdefault("page", 1)
+
+    return row
+
+
 def _strip_fences(s: str) -> str:
     """Extract a JSON object from a model response.
 
@@ -254,13 +449,18 @@ def _strip_fences(s: str) -> str:
       3. Preamble + JSON: ``"I'll extract...\n```json\n{ ... }\n```"``
          (Sonnet routinely prepends a sentence before the JSON, which
          strict ``model_validate_json`` rejects.)
+      4. Qwen3/DeepSeek reasoning models wrap thinking in ``<think>…</think>``
+         before the answer; strip that block first so ``find("{")`` lands on the
+         actual JSON, not on a stray brace inside the thought process.
 
     Strategy: slice from the first ``{`` to the last ``}``; that is the
     JSON object regardless of surrounding prose or fences. Falls back to
     the stripped input if no braces are found, so the downstream JSON
     error stays informative.
     """
+    import re as _re
     s = s.strip()
+    s = _re.sub(r"<think>.*?</think>", "", s, flags=_re.DOTALL).strip()
     start = s.find("{")
     end = s.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -481,7 +681,13 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         session.commit()
 
     # Stage 2 per cohort: LLM extract + verify, then short session for insert
+    # Build a verdict lookup so we can skip rejected cohorts (hallucinated by
+    # the model). Running predictor_extract on a rejected cohort wastes the
+    # full LLM round-trip and produces rows that will all be rejected anyway.
+    _cohort_verdict_map = {c.cohort_id: v.verdict for c, v in cohort_verdicts}
     for c in cohorts:
+        if _cohort_verdict_map.get(c.cohort_id) == "reject":
+            continue
         try:
             rows, pm_meta = run_predictor_extract(
                 paper_json, c, paper_id=file_stem, run_id=run_id

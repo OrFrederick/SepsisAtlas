@@ -126,8 +126,8 @@ looking at what happened to them?" If the latter, it is NOT a cohort.
 > "We enrolled 5,443 sepsis patients from Database-A for model development and
 > 5,658 sepsis patients from Database-B for external validation."
 
-→ Cohort 1: `Smith 2024 Database-A Development cohort`
-→ Cohort 2: `Smith 2024 Database-B Validation cohort`
+→ Cohort 1: `Author 2001 Database-A Development cohort`
+→ Cohort 2: `Author 2001 Database-B Validation cohort`
 
 ### POSITIVE — emit two cohorts (enrollment-phenotype split)
 
@@ -135,8 +135,8 @@ looking at what happened to them?" If the latter, it is NOT a cohort.
 > 1,200 did not. Baseline characteristics are reported separately for each
 > subgroup."
 
-→ Cohort 1: `Smith 2024  Septic shock subgroup`
-→ Cohort 2: `Smith 2024  Non-septic shock subgroup`
+→ Cohort 1: `Author 2001  Septic shock subgroup`
+→ Cohort 2: `Author 2001  Non-septic shock subgroup`
 (Plus optionally a Total Cohort row if the paper also reports pooled stats.)
 
 ### POSITIVE — emit FIVE cohorts (cross-tab: dataset × care-setting)
@@ -146,11 +146,11 @@ looking at what happened to them?" If the latter, it is NOT a cohort.
 > 300 were ICU-admitted and 650 were ward-managed. AUROC is reported for each
 > subset and for the overall cohort of each database."
 
-→ Cohort 1: `Smith 2024 Database-X Overall cohort`
-→ Cohort 2: `Smith 2024 Database-X ICU subset`
-→ Cohort 3: `Smith 2024 Database-X non-ICU subset`
-→ Cohort 4: `Smith 2024 Database-Y Overall cohort`
-→ Cohort 5: `Smith 2024 Database-Y ICU subset`
+→ Cohort 1: `Author 2001 Database-X Overall cohort`
+→ Cohort 2: `Author 2001 Database-X ICU subset`
+→ Cohort 3: `Author 2001 Database-X non-ICU subset`
+→ Cohort 4: `Author 2001 Database-Y Overall cohort`
+→ Cohort 5: `Author 2001 Database-Y ICU subset`
 (Plus a Database-Y non-ICU subset row if it has its own reported result.)
 
 ### POSITIVE — emit two cohorts (exclusion-defined subcohort)
@@ -160,15 +160,15 @@ looking at what happened to them?" If the latter, it is NOT a cohort.
 > 24 hours of presentation (n=3,100); the AUROC of the score in this restricted
 > subset is also reported."
 
-→ Cohort 1: `Smith 2024 Hospital-Z Overall cohort`
-→ Cohort 2: `Smith 2024 Hospital-Z non-ICU subset`
+→ Cohort 1: `Author 2001 Hospital-Z Overall cohort`
+→ Cohort 2: `Author 2001 Hospital-Z non-ICU subset`
 
 ### NEGATIVE — emit ONE cohort, NOT three (outcome partition)
 
 > "Of the 1,388 patients in the Training set, 668 survived and 720 died.
 > Table 1 reports baseline characteristics for survivors and non-survivors."
 
-→ Cohort 1: `Smith 2024 Database-A Training set`
+→ Cohort 1: `Author 2001 Database-A Training set`
 
 (Do NOT emit `… Training set, Survival group` or `… Training set, Death group`.
 Survivors-vs-non-survivors is an outcome partition, not a cohort.)
@@ -178,7 +178,7 @@ Survivors-vs-non-survivors is an outcome partition, not a cohort.)
 > "Among the 30-day mortality cohort, the 30-day mortality group (n=120) had
 > higher SOFA than the 30-day survival group (n=480)."
 
-→ Cohort 1: `Smith 2024  Total Cohort` (or whatever the parent label is)
+→ Cohort 1: `Author 2001  Total Cohort` (or whatever the parent label is)
 
 ---
 
@@ -194,14 +194,14 @@ Return JSON conforming to the supplied `cohorts` schema. **One object per cohort
 
 Style-matching examples:
 
-- `Smith 2024  Total Cohort`  (no dataset slot — drop it)
-- `Smith 2024 KPNC (Liu et al., 2013)    Overall cohort`
-- `Smith 2024 UPMC ICU Validation cohort`
-- `Smith 2024 UPMC non-ICU Validation cohort`
-- `Smith 2024 Database-A Training set`
-- `Smith 2024 Database-A Testing set`
-- `Smith 2024 Database-B Development set`
-- `Smith 2024  Septic shock subgroup`
+- `Author 2001  Total Cohort`  (no dataset slot — drop it)
+- `Author 2001 KPNC (Liu et al., 2013)    Overall cohort`
+- `Author 2001 UPMC ICU Validation cohort`
+- `Author 2001 UPMC non-ICU Validation cohort`
+- `Author 2001 Database-A Training set`
+- `Author 2001 Database-A Testing set`
+- `Author 2001 Database-B Development set`
+- `Author 2001  Septic shock subgroup`
 
 Important:
 
@@ -225,7 +225,7 @@ otherwise leave `field_status="ok"` even if a few sub-fields are null.
 
 Field hints:
 
-- `paper_ref`: `"<FirstAuthor> <Year>"` (e.g. `"Smith 2024"`).
+- `paper_ref`: `"<FirstAuthor> <Year>"` (e.g. `"Author 2001"`).
 - `encounters_period`: data collection window verbatim, e.g. `"2019–2021"`.
 - `population_location`: hospital + city / country, verbatim.
 - `data_sets`: named dataset(s), e.g. `"MIMIC-IV"`, `"KPNC (Liu et al., 2013)"`.

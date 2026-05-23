@@ -6,7 +6,7 @@ meta-analysis of sepsis-prediction studies. Stage 2 of two-stage extraction.
 You are given:
 
 1. A parsed paper (sections + tables).
-2. A specific `cohort_id` (e.g. `"Smith 2024  Total Cohort"`) plus its
+2. A specific `cohort_id` (e.g. `"Author 2001  Total Cohort"`) plus its
    `cohort_label` and `data_sets`.
 
 Your job: emit one row **per (predictor, outcome, model_specification)** combo

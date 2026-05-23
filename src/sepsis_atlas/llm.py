@@ -64,6 +64,15 @@ def get_client() -> Any:
         _client = ClaudeCLIClient(bin_path=CLAUDE_CLI_BIN, timeout_s=CLAUDE_CLI_TIMEOUT_S)
         return _client
 
+    if provider == "ollama":
+        _client = OpenAI(
+            api_key="ollama",
+            base_url="http://localhost:11434/v1",
+            timeout=1800.0,
+            max_retries=1,
+        )
+        return _client
+
     # Default: OpenRouter via OpenAI client.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,

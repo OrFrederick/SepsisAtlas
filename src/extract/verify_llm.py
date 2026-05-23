@@ -275,7 +275,14 @@ def _input_hash(
 # ---------------------------------------------------------------------------
 
 
-_MAX_PAPER_CHARS = 150_000  # well under Haiku 4.5's 200k context window
+# Ollama models have a small context window (typically 16k tokens).
+# The system prompt + examples consume ~1 500 tokens, the claim ~200 tokens, and
+# the thinking output budget another ~2 000 tokens, leaving only ~12 000 tokens
+# (~48 000 chars) for the paper.  Cap tightly so the system prompt is never
+# truncated (truncation = model never sees the expected JSON format → verdict None).
+from sepsis_atlas.config import LLM_PROVIDER as _LLM_PROVIDER
+_IS_OLLAMA_VERIFIER = (_LLM_PROVIDER or "").strip().lower() == "ollama"
+_MAX_PAPER_CHARS = 15_000 if _IS_OLLAMA_VERIFIER else 150_000
 
 
 def _table_to_text(table: dict) -> str:
@@ -369,6 +376,8 @@ _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 def _strip_fences(s: str) -> str:
     s = (s or "").strip()
+    # Strip <think>...</think> blocks produced by Qwen3/DeepSeek reasoning models.
+    s = re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL).strip()
     if s.startswith("```"):
         s = re.sub(r"^```(?:json)?\s*", "", s)
         s = re.sub(r"\s*```$", "", s)
@@ -396,7 +405,27 @@ def _parse_judge_response(raw: str) -> dict:
     if not isinstance(obj, dict):
         raise ValueError(f"verifier_llm: expected JSON object, got {type(obj)}")
     verdict = obj.get("verdict")
+    if isinstance(verdict, str):
+        verdict = verdict.strip().lower()
+        obj["verdict"] = verdict
+    # Some models return {"status":"success",...} instead of {"verdict":"ok",...}
+    if verdict is None and obj.get("status"):
+        status = str(obj["status"]).strip().lower()
+        if status in ("success", "supported", "valid", "true"):
+            verdict = "ok"
+        elif status in ("partial", "inconclusive"):
+            verdict = "partial"
+        elif status in ("fail", "failed", "reject", "rejected", "false", "unsupported"):
+            verdict = "reject"
+        if verdict:
+            obj["verdict"] = verdict
     if verdict not in {"ok", "partial", "reject"}:
+        import sys
+        print(
+            f"[verify_llm DEBUG] invalid verdict={verdict!r}  raw={raw[:300]!r}",
+            file=sys.stderr,
+            flush=True,
+        )
         raise ValueError(f"verifier_llm: invalid verdict {verdict!r}")
     try:
         score = float(obj.get("score", 0.0))
@@ -522,17 +551,26 @@ def run_llm_judge(
             {"role": "user", "content": _build_user_message(claim, source_span)},
         ]
         t0 = time.time()
-        resp_obj = _call_verify_llm(
-            messages,
-            model,
+        from sepsis_atlas.config import LLM_PROVIDER
+        _is_ollama = (LLM_PROVIDER or "").strip().lower() == "ollama"
+        call_kwargs: dict = dict(
             response_format={"type": "json_object"},
             temperature=0,
             run_id=run_id,
             paper_id=paper_id,
             row_id=row_id,
             prompt_id="verify_llm@v2",
-            extra_body={"anthropic_beta": "prompt-caching-2024-07-31"},
         )
+        if not _is_ollama:
+            call_kwargs["extra_body"] = {"anthropic_beta": "prompt-caching-2024-07-31"}
+        # Ollama expects system content as a plain string, not a list of blocks.
+        if _is_ollama:
+            sys_blocks = messages[0]["content"]
+            if isinstance(sys_blocks, list):
+                messages[0]["content"] = "\n\n".join(
+                    b.get("text", "") for b in sys_blocks if isinstance(b, dict)
+                )
+        resp_obj = _call_verify_llm(messages, model, **call_kwargs)
         latency_ms = int((time.time() - t0) * 1000)
 
         if not getattr(resp_obj, "choices", None):
@@ -541,6 +579,9 @@ def run_llm_judge(
         content = getattr(resp_obj.choices[0].message, "content", None)
         if not content:
             raise RuntimeError("verifier_llm: empty content")
+        if _is_ollama and os.getenv("VERIFY_LLM_DEBUG"):
+            import sys
+            print(f"[verify_llm DEBUG] raw content={content[:400]!r}", file=sys.stderr, flush=True)
 
         parsed = _parse_judge_response(content)
         _cache_put(con, h, parsed)

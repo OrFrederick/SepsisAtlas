@@ -8,7 +8,22 @@ import type { Paper, Row } from "./types";
 // FastAPI on :8000.
 function apiBase(override?: string): string {
   if (override) return override;
-  return (process.env.API_URL || "http://localhost:8000").replace(/\/$/, "");
+  const fromEnv = process.env.API_URL;
+  if (!fromEnv) {
+    // Fail loudly in prod: a missing API_URL (operator forgot env_file,
+    // `.env` regression, `docker run` without prod compose, ...) used to
+    // silently fall back to localhost:8000 inside the frontend container,
+    // where nothing listens — every SSR call then stalled until the 5s
+    // timeout and 500'd. The previous filesystem loader at least failed
+    // with ENOENT; preserve that loudness here.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "API_URL must be set in production (frontend SSR has no FastAPI to reach).",
+      );
+    }
+    return "http://localhost:8000";
+  }
+  return fromEnv.replace(/\/$/, "");
 }
 
 // Hard upper bound on an SSR fetch. With `force-dynamic` on every paper

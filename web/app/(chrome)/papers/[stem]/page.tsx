@@ -15,12 +15,17 @@ export async function generateMetadata({ params }: { params: Promise<{ stem: str
 
 export default async function PaperDetail({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
-  // Existence check via the per-stem endpoint instead of fetching the full
-  // corpus just to call `notFound()`. The rows endpoint can't substitute —
-  // it returns `200 + {rows: []}` for unknown stems by contract — so we need
+  // Sequential, not Promise.all: loadRowsFor rejects on backend errors
+  // (timeout, 500), and a parallel rejection would propagate before the
+  // `if (!paper) notFound()` gate could run, surfacing a 500 for an
+  // unknown stem instead of a 404. Resolving existence first also avoids
+  // a wasted rows fetch on the 404 hot path (bot scans, broken links).
+  // The rows endpoint can't substitute for the existence check — it
+  // returns `200 + {rows: []}` for unknown stems by contract — so we need
   // the meta call to discriminate "paper exists with no rows" from "no paper".
-  const [paper, rows] = await Promise.all([loadPaper(stem), loadRowsFor(stem)]);
+  const paper = await loadPaper(stem);
   if (!paper) notFound();
+  const rows = await loadRowsFor(stem);
 
   const basePath = "/";
   const firstRow = rows[0];

@@ -190,14 +190,17 @@ def list_rows(session: Session) -> list[dict]:
 
 
 def list_rows_for_file(session: Session, file_name: str) -> list[dict]:
-    """Evidence rows scoped to one paper (file_name stem, no extension)."""
-    # Outerjoin (matching list_rows) so a PredictorModel pointing at a missing
-    # StudyCohort still surfaces — otherwise an orphan row is silently dropped
-    # from the per-paper page but visible in the global Evidence tab, which is
-    # the kind of asymmetry that hides data-integrity bugs.
+    """Evidence rows scoped to one paper (file_name stem, no extension).
+
+    Inner join: scoping by `StudyCohort.file_name` is what defines "this
+    paper's rows", and an orphan PredictorModel (no matching StudyCohort)
+    has no file_name to scope to — so it cannot be a per-paper row by
+    definition. Orphans surface only in the global Evidence view, where
+    `list_rows` outer-joins and renders them with null StudyCohort fields.
+    """
     q = (
         session.query(PredictorModel, StudyCohort)
-        .outerjoin(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
+        .join(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
         .filter(StudyCohort.file_name == file_name)
     )
     return [_row_dict(pm, sc) for pm, sc in q.all()]
@@ -227,14 +230,31 @@ def _paper_meta(session: Session) -> dict[str, dict]:
     return out
 
 
+def _paper_meta_one(session: Session, file_name: str) -> Optional[dict]:
+    """Single-paper meta lookup. Avoids loading the whole Paper table for
+    `GET /papers/{stem}` (called on every detail render under force-dynamic).
+    """
+    p = (
+        session.query(Paper)
+        .filter(Paper.file_name.in_([file_name, f"{file_name}.pdf"]))
+        .first()
+    )
+    if p is None:
+        return None
+    return {
+        "title": _coerce_str(p.title),
+        "year": _coerce_int(p.year),
+        "journal": _coerce_str(p.journal),
+    }
+
+
 def get_paper(session: Session, file_name: str) -> Optional[dict]:
     """Per-stem Paper payload, or None when no Paper row or evidence row carries that stem.
 
     Used by GET /papers/{file_name} as a cheap existence check so the per-paper
     detail page doesn't have to fetch the full corpus just to call notFound().
     """
-    meta_by_stem = _paper_meta(session)
-    meta = meta_by_stem.get(file_name)
+    meta = _paper_meta_one(session, file_name)
     # A paper may be present in the corpus only via its StudyCohort rows
     # (no Paper row), so consider it existent if either source knows it.
     has_cohort = (
@@ -296,9 +316,11 @@ def list_papers(session: Session) -> list[dict]:
     parsed_set = _parsed_stems()
 
     # Single GROUP BY (file_name, verifier_verdict) → (file_name, verdict, n, max_ts)
-    # Outerjoin is symmetric with list_rows and the previous behaviour: orphan
-    # PredictorModels (no StudyCohort) are still counted, just under file_name=NULL,
-    # which we filter out below.
+    # StudyCohort LEFT OUTER JOIN PredictorModel — keep cohorts with zero
+    # evidence rows so the corpus list still shows the paper (n_rows=0,
+    # empty verdicts bucket). Orphan PredictorModels (no StudyCohort) are
+    # NOT surfaced here by construction; they show up only in the global
+    # Evidence view via `list_rows`.
     rows = (
         session.query(
             StudyCohort.file_name,

@@ -1,6 +1,7 @@
 import PdfViewer from "@/components/pdf/PdfViewer";
 import { notFound } from "next/navigation";
-import { headers } from "next/headers";
+import { access } from "node:fs/promises";
+import path from "node:path";
 
 // Renders the PDF viewer for any stem; the client component fetches the
 // PDF (and any anchor metadata) at runtime, so there's nothing to
@@ -9,32 +10,23 @@ import { headers } from "next/headers";
 export const dynamic = "force-dynamic";
 
 const STEM_RE = /^[A-Za-z0-9_-]+$/;
-const HEAD_TIMEOUT_MS = 3000;
 
 async function pdfExists(stem: string): Promise<boolean> {
   // PDFs are baked into the frontend container at web/public/pdfs/<stem>.pdf
-  // and served by Next as static assets. The Next server is what's currently
-  // executing this server component, so we HEAD itself via the public origin.
-  // Build that origin from request headers so the check works under both
-  // localhost dev and the prod Caddy proxy without hard-coding a base URL.
+  // (Dockerfile.frontend rsyncs them in during build). Probing the local
+  // filesystem is the authoritative answer and avoids the previous HEAD
+  // self-loop, which routed back through the public Caddy origin into the
+  // same Next process — racing the request-handler pool and silently
+  // failing-open whenever the probe couldn't complete (TLS error in dev on
+  // 127.0.0.1, DNS issues, etc.). With `output: "standalone"`, the
+  // standalone server runs with cwd=/app and `public/` sits beside it.
   if (!STEM_RE.test(stem)) return false;
-  const h = await headers();
-  const host = h.get("host");
-  if (!host) return false;
-  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const url = `${proto}://${host}/pdfs/${encodeURIComponent(stem)}.pdf`;
+  const file = path.join(process.cwd(), "public", "pdfs", `${stem}.pdf`);
   try {
-    const res = await fetch(url, {
-      method: "HEAD",
-      cache: "no-store",
-      signal: AbortSignal.timeout(HEAD_TIMEOUT_MS),
-    });
-    return res.ok;
-  } catch {
-    // Timeout / network error: don't 404 a real paper because the HEAD
-    // probe stalled. Let the client viewer render and surface the error
-    // through its own loading state.
+    await access(file);
     return true;
+  } catch {
+    return false;
   }
 }
 

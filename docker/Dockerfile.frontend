@@ -99,9 +99,21 @@ COPY deploy/Caddyfile /etc/caddy/Caddyfile
 # HOSTNAME=0.0.0.0 lets the standalone server bind to all interfaces inside
 # the container so health probes from the docker network (e.g. depends_on
 # checks) can reach it.
+#
+# XDG_DATA_HOME / XDG_CONFIG_HOME redirect Caddy's storage off the default
+# $HOME/.local/share/caddy and $HOME/.config/caddy (i.e. /root/...) onto
+# /data and /config respectively. docker-compose.prod.yml mounts the
+# `caddy_data` and `caddy_config` named volumes at those paths so ACME
+# accounts, issued certs, and OCSP staples survive container recreates.
+# Without this, every `docker compose up -d frontend` would lose the cert
+# store and force a fresh Let's Encrypt issuance — which trips LE's
+# "5 certs / 168h / exact identifier" rate limit after a few deploys and
+# falls back to ZeroSSL (or serves no cert at all).
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    XDG_DATA_HOME=/data \
+    XDG_CONFIG_HOME=/config
 
 EXPOSE 80 443 443/udp
 

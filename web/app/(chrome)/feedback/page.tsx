@@ -22,19 +22,19 @@ function parseRow(v: string | undefined): unknown {
 export default async function FeedbackPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   return (
-    <div className="feedback-page">
-      <h1>Send feedback</h1>
-      <p className="intro">
+    <main className="max-w-[640px] mx-auto my-6 px-5">
+      <h1 className="text-2xl font-medium m-0 mb-[6px] font-serif">Send feedback</h1>
+      <p className="text-fg-muted m-0 mb-[18px] text-sm">
         Submissions are filed as labeled GitHub issues. No account required;
         leave an email only if you want a reply.
       </p>
-      <div className="card-wrap">
+      <div className="bg-panel border border-border rounded-lg p-5">
         <FeedbackForm
           initialType={parseType(sp.type)}
           initialPaper={sp.paper || undefined}
           initialRowContext={parseRow(sp.row)}
         />
       </div>
-    </div>
+    </main>
   );
 }

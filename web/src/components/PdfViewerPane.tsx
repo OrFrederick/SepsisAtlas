@@ -100,7 +100,11 @@ export default function PdfViewerPane({
   }, [src, storageKey, targetOrigin]);
 
   if (!src) {
-    return <div className="viewer-empty">{emptyHint}</div>;
+    return (
+      <div className="absolute inset-0 flex items-center justify-center text-fg-muted italic p-10 text-center font-serif">
+        {emptyHint}
+      </div>
+    );
   }
   return <iframe ref={iframeRef} src={initialSrcRef.current ?? undefined} title="PDF viewer" />;
 }

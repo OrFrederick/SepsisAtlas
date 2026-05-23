@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ stem: str
 export default async function ViewerPage({ params }: { params: Promise<{ stem: string }> }) {
   const { stem } = await params;
   return (
-    <div style={{ margin: 0, padding: 0, height: "100vh" }}>
+    <div className="m-0 p-0 h-screen">
       <PdfViewer stem={stem} basePath="/" />
     </div>
   );

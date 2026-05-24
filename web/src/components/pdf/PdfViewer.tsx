@@ -62,22 +62,32 @@ export default function PdfViewer({ stem, basePath }: Props) {
 
     let cancelled = false;
     (async () => {
-      const pdfjsLib = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ `${basePath}pdfjs/build/pdf.min.mjs`);
-      if (cancelled) return;
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}pdfjs/build/pdf.worker.min.mjs`;
-      await controller.init(pdfjsLib);
-      if (cancelled) return;
-      // Tell the parent shell we're ready (back-compat with SplitShell).
-      // We can't know the parent's origin a priori (this iframe could be
-      // embedded anywhere), but the only payload we send is "viewer-ready"
-      // with a non-sensitive paper stem, so a permissive targetOrigin is
-      // acceptable here.
       try {
-        window.parent.postMessage(
-          { type: "sepsis-atlas:viewer-ready", file: stem, page: initialPage },
-          "*",
-        );
-      } catch { /* sandboxed iframe */ }
+        const pdfjsLib = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ `${basePath}pdfjs/build/pdf.min.mjs`);
+        if (cancelled) return;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `${basePath}pdfjs/build/pdf.worker.min.mjs`;
+        await controller.init(pdfjsLib);
+        if (cancelled) return;
+        // Tell the parent shell we're ready (back-compat with SplitShell).
+        // We can't know the parent's origin a priori (this iframe could be
+        // embedded anywhere), but the only payload we send is "viewer-ready"
+        // with a non-sensitive paper stem, so a permissive targetOrigin is
+        // acceptable here.
+        try {
+          window.parent.postMessage(
+            { type: "sepsis-atlas:viewer-ready", file: stem, page: initialPage },
+            "*",
+          );
+        } catch { /* sandboxed iframe */ }
+      } catch (err) {
+        // Swallow + surface to the status line. Without the catch, a missing
+        // PDF (404 in dev seed data, network blip in prod) bubbles up as an
+        // unhandled promise rejection and Next.js renders its red overlay
+        // for what is actually a routine data-not-available case.
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatus(`Couldn't load PDF: ${msg}`);
+      }
     })();
 
     return () => {

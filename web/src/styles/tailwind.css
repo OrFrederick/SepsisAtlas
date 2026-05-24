@@ -76,3 +76,73 @@
     @apply overflow-hidden;
   }
 }
+
+/* ------------------------------------------------------------------
+   Composer auto-grow textarea (CSS-Tricks "grow-wrap" pattern).
+
+   The textarea and a hidden ::after pseudo overlay in a single grid
+   cell. ::after carries the live text via `attr(data-replicated-value)`
+   so the grid container expands with the content while the textarea
+   itself just fills the cell — no JS height math, no scrollbar flash,
+   no reflow on every keystroke. Cap the visual height via max-height
+   on .grow-wrap; once the content overflows, the textarea scrolls
+   internally with a thin Webkit/Firefox scrollbar (no end-cap arrows).
+
+   The replica must use the SAME font, padding, line-height, and border
+   as the textarea or the grid will mismeasure and the cursor will
+   drift. Keep them in sync below.
+   ------------------------------------------------------------------ */
+.grow-wrap {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.grow-wrap::after {
+  content: attr(data-replicated-value) " ";
+  visibility: hidden;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  pointer-events: none;
+}
+.grow-wrap > textarea,
+.grow-wrap::after {
+  grid-area: 1 / 1 / 2 / 2;
+  font: inherit;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-panel);
+  color: var(--color-fg);
+  /* Replica needs the same min-height so an empty textarea still
+     reserves a single-line cell. The replica and textarea share the
+     same max-height so the cell caps at the same point, after which
+     the textarea scrolls internally. */
+  min-height: 40px;
+  max-height: 140px;
+  box-sizing: border-box;
+}
+.grow-wrap > textarea {
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  scrollbar-width: thin;
+}
+.grow-wrap > textarea::-webkit-scrollbar {
+  width: 6px;
+}
+.grow-wrap > textarea::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+.grow-wrap > textarea::-webkit-scrollbar-button {
+  display: none;
+}
+.grow-wrap > textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(63, 104, 178, 0.10);
+}
+.grow-wrap > textarea::placeholder {
+  color: var(--color-fg-faint);
+  font-style: italic;
+}

@@ -417,13 +417,10 @@ export default function ChatShell() {
     inputRef.current?.focus();
   };
 
-  // ---- auto-grow textarea (mirror the original behaviour) ----------------
-  useEffect(() => {
-    const ta = inputRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 132)}px`;
-  }, [input]);
+  // Auto-grow is handled by the CSS-grid `grow-wrap` pattern in
+  // tailwind.css (a hidden ::after pseudo replicates the textarea
+  // content and pushes the grid cell to the right height). No JS
+  // height math, no scrollbar flash on each keystroke.
 
   // ---- divider resize ----------------------------------------------------
   // Pointer-capture on the divider keeps drag events flowing even when the
@@ -762,19 +759,20 @@ export default function ChatShell() {
           </div>
 
           <form className={composerCls} onSubmit={onComposerSubmit} autoComplete="off">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              placeholder="Ask about sepsis predictors, biomarkers, or outcomes..."
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onInputKeyDown}
-              // `[scrollbar-width:thin]` + the webkit-button arbitrary
-              // variant suppresses Firefox / Webkit's scrollbar end-cap
-              // arrows on the textarea — without them the empty composer
-              // shows up/down buttons in the right gutter on mobile.
-              className="flex-1 bg-panel border border-border rounded py-[10px] px-3 resize-none overflow-y-auto outline-none min-h-10 max-h-[132px] leading-[1.5] transition-[border-color,box-shadow] duration-[180ms] ease-out focus:border-accent focus:shadow-[0_0_0_3px_rgba(63,104,178,0.10)] placeholder:text-fg-faint placeholder:italic [scrollbar-width:thin] [&::-webkit-scrollbar-button]:hidden"
-            />
+            {/* `grow-wrap` is the CSS-grid replica trick — see tailwind.css.
+                React just keeps `data-replicated-value` in sync with the
+                state; the wrapper's ::after pseudo handles the height
+                math via grid layout. */}
+            <div className="grow-wrap flex-1" data-replicated-value={input}>
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={input}
+                placeholder="Ask about sepsis predictors, biomarkers, or outcomes..."
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onInputKeyDown}
+              />
+            </div>
             <button
               type="submit"
               className="bg-accent text-white rounded py-[10px] px-3 sm:px-[18px] border-0 font-semibold cursor-pointer transition-[background,transform] duration-[180ms] ease-out disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-accent-hover enabled:hover:-translate-y-px shrink-0"

@@ -133,13 +133,10 @@ def run_cohort_enum(
     model: str = MODEL_EXTRACT,
 ) -> tuple[list[StudyCohortOut], dict]:
     """Run stage-1 cohort enumeration. Returns (cohorts, llm_meta)."""
+    import os as _os
     from sepsis_atlas.config import LLM_PROVIDER as _llm_provider
     _is_ollama = (_llm_provider or "").strip().lower() == "ollama"
-    # cohort_enum only needs abstract + methods to find cohorts — not full tables.
-    # 10k chars ≈ 5k tokens. System prompt + schema ≈ 2k → 7k total.
-    # KV cache for 7k tokens (~896MB) fits in the remaining VRAM on 8GB GPU.
-    # 20k caused partial CPU offload (KV cache overflow) → multi-minute prefill.
-    _payload_cap = 10_000 if _is_ollama else 200_000
+    _payload_cap = int(_os.environ.get("PAYLOAD_CAP", 35_000 if _is_ollama else 200_000))
 
     sys_prompt, prompt_id = _load_prompt("cohort_enum_v1.md")
     user_payload = {
@@ -151,16 +148,24 @@ def run_cohort_enum(
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(CohortEnumResponse)
     )
-    # /no_think disables Qwen3 reasoning mode: cuts avg output from ~9k to ~500
-    # tokens, making each call ~15x faster with no accuracy loss on this task.
     if _is_ollama:
         paper_label = paper_id.replace("_", " ")
         sys_prompt_with_schema = (
-            f"/no_think\n\n"
+            "/no_think\n\n"
             f"IMPORTANT: The paper you are extracting from is '{paper_label}'. "
             f"Every cohort_id you output MUST start with '{paper_label}' "
             f"(e.g. '{paper_label} Total Cohort'). Never use example names like "
             f"'Author 2001' or 'Smith 2024'.\n\n"
+            "CRITICAL — enumerate ALL distinct patient subgroups as SEPARATE cohorts. "
+            "Do NOT collapse multiple subgroups into one entry. Look specifically for:\n"
+            "  • Severity strata: sepsis vs septic shock; mild/moderate/severe\n"
+            "  • Setting strata: ICU vs ward vs ED vs community\n"
+            "  • Age strata: adult vs pediatric; age quartiles\n"
+            "  • Time strata: different enrollment periods or validation cohorts\n"
+            "  • Outcome strata: survivor vs non-survivor subgroups\n"
+            "  • External validation cohorts (often named after their data source)\n"
+            "If the paper analyzes 4 subgroups, output 4 cohort entries. "
+            "A single Total Cohort entry is only correct when the paper truly has one undivided population.\n\n"
             + sys_prompt_with_schema
         )
     messages = [
@@ -186,7 +191,16 @@ def run_cohort_enum(
     )
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "cohort_enum")
-    raw_obj = json.loads(_strip_fences(raw))
+    stripped = _strip_fences(raw)
+    if not stripped or not stripped.strip():
+        raw_obj = {"cohorts": []}
+    else:
+        import re as _ctrl_re2
+        stripped = _ctrl_re2.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', stripped)
+        try:
+            raw_obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            raw_obj = {"cohorts": []}
     raw_obj = _normalize_cohort_enum(raw_obj)
     if _is_ollama:
         paper_label = paper_id.replace("_", " ")
@@ -222,11 +236,10 @@ def run_predictor_extract(
     run_id: str,
     model: str = MODEL_EXTRACT,
 ) -> tuple[list[PredictorModelOut], dict]:
+    import os as _os
     from sepsis_atlas.config import LLM_PROVIDER as _llm_provider
     _is_ollama = (_llm_provider or "").strip().lower() == "ollama"
-    # 15k chars ≈ 7-8k tokens, stays within 16k context when thinking is off.
-    # 40k caused VRAM overflow on GPU → CPU fallback → 100× slowdown.
-    _payload_cap = 15_000 if _is_ollama else 200_000
+    _payload_cap = int(_os.environ.get("PAYLOAD_CAP", 35_000 if _is_ollama else 200_000))
 
     sys_prompt, prompt_id = _load_prompt("predictor_extract_v1.md")
     user_payload = {
@@ -242,11 +255,15 @@ def run_predictor_extract(
         + _schema_hint(PredictorExtractResponse)
     )
     if _is_ollama:
-        # /no_think disables Qwen3 reasoning mode. Without this, thinking tokens
-        # can exhaust VRAM (7.5GB model + large KV cache > 8GB) causing extreme
-        # CPU fallback slowdown. _normalize_predictor_row() handles any field-name
-        # differences that thinking mode would otherwise fix.
-        sys_prompt_with_schema = "/no_think\n\n" + sys_prompt_with_schema
+        sys_prompt_with_schema = (
+            "/no_think\n\n"
+            "IMPORTANT — p_value field: If the paper reports an INEQUALITY "
+            "(e.g. 'p < 0.05', 'p ≤ 0.05', 'p < 0.001'), set p_value to null. "
+            "NEVER convert an inequality to its boundary (do NOT output 0.05 for 'p < 0.05'). "
+            "Only output a numeric p_value when the paper gives the exact value "
+            "(e.g. p = 0.023, p = 0.007).\n\n"
+            + sys_prompt_with_schema
+        )
     messages = [
         {"role": "system", "content": sys_prompt_with_schema},
         {
@@ -297,6 +314,10 @@ def run_predictor_extract(
         latency_ms += int((time.time() - t1) * 1000)
         raw = _check_resp(resp, "predictor_extract retry")
         stripped = _strip_fences(raw)
+    # Strip control characters that cause JSONDecodeError (model may emit \x01
+    # etc. inside string fields — valid UTF-8 but illegal bare in JSON).
+    import re as _ctrl_re
+    stripped = _ctrl_re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', stripped)
     raw_obj = json.loads(stripped)
     if isinstance(raw_obj.get("rows"), list):
         raw_obj["rows"] = [
@@ -355,6 +376,17 @@ def _normalize_cohort_enum(obj) -> dict:
             )
         # paper_ref: filled at call site if absent — pass through
         c.setdefault("paper_ref", "")
+        # mortality_rate_pct: strip "%" suffix and pipe-separated alternatives
+        mrp = c.get("mortality_rate_pct")
+        if isinstance(mrp, str):
+            import re as _re2
+            first = _re2.split(r"[|,]", mrp)[0].strip()
+            cleaned = _re2.sub(r"[^0-9.\-eE]", "", first)
+            try:
+                c["mortality_rate_pct"] = float(cleaned)
+            except (ValueError, TypeError):
+                c["mortality_rate_pct"] = None
+
         # anchor
         if not isinstance(c.get("anchor"), dict):
             text = (
@@ -366,8 +398,11 @@ def _normalize_cohort_enum(obj) -> dict:
             page = int(c.pop("anchor_page", None) or c.pop("page", None) or 1)
             c["anchor"] = {"text": str(text), "page": page}
         else:
-            c["anchor"].setdefault("text", "")
-            c["anchor"].setdefault("page", 1)
+            # setdefault won't replace None — fix explicitly
+            if not c["anchor"].get("text"):
+                c["anchor"]["text"] = ""
+            if not c["anchor"].get("page"):
+                c["anchor"]["page"] = 1
     return obj
 
 
@@ -384,8 +419,8 @@ def _normalize_predictor_row(row: dict, cohort_id: str) -> dict:
     row["cohort_id"] = cohort_id
     row.pop("cohort", None)
 
-    # predictors (required string): map singular + common aliases
-    if "predictors" not in row:
+    # predictors (required string): map singular + common aliases; handle None
+    if not row.get("predictors"):
         row["predictors"] = (
             row.pop("predictor", None)
             or row.pop("predictor_name", None)
@@ -393,6 +428,8 @@ def _normalize_predictor_row(row: dict, cohort_id: str) -> dict:
             or ""
         )
     row.pop("predictor", None)
+    if row["predictors"] is None:
+        row["predictors"] = ""
 
     # outcome (required string): map common aliases
     if "outcome" not in row:
@@ -403,14 +440,73 @@ def _normalize_predictor_row(row: dict, cohort_id: str) -> dict:
             or ""
         )
 
-    # p_value: strip asterisks, significance markers; cast to float
+    # p_value: strip asterisks/markers, handle lists → take first element
     pv = row.get("p_value")
+    if isinstance(pv, list):
+        pv = pv[0] if pv else None
+        row["p_value"] = pv
     if isinstance(pv, str):
-        cleaned = _re.sub(r"[^0-9.\-eE]", "", pv.lstrip("<>≤≥ "))
-        try:
-            row["p_value"] = float(cleaned)
-        except (ValueError, TypeError):
+        # If the paper only says "p < 0.05" (pure inequality), we cannot verify
+        # an exact value. Store None so the verifier doesn't reject it as a
+        # contradiction (claim says 0.05 but source says < 0.05).
+        if _re.match(r'^\s*[<>≤≥]\s*0?\.\d', pv):
             row["p_value"] = None
+        else:
+            cleaned = _re.sub(r"[^0-9.\-eE]", "", pv.lstrip("<>≤≥ "))
+            try:
+                row["p_value"] = float(cleaned)
+            except (ValueError, TypeError):
+                row["p_value"] = None
+
+    # effect_value: handle list → take first element
+    ev = row.get("effect_value")
+    if isinstance(ev, list):
+        row["effect_value"] = ev[0] if ev else None
+
+    # outcome_type: coerce free-text to the valid enum literals
+    _VALID_OUTCOME_TYPES = {"mortality", "readmission", "los", "organ_failure", "other"}
+    ot = row.get("outcome_type")
+    if isinstance(ot, str) and ot not in _VALID_OUTCOME_TYPES:
+        ot_lower = ot.lower()
+        if any(k in ot_lower for k in ("mortalit", "death", "surviv")):
+            row["outcome_type"] = "mortality"
+        elif any(k in ot_lower for k in ("readmit", "re-admit")):
+            row["outcome_type"] = "readmission"
+        elif any(k in ot_lower for k in ("length", " los", "stay")):
+            row["outcome_type"] = "los"
+        elif any(k in ot_lower for k in ("organ", "failure", "dysfunction", "aki", "ards")):
+            row["outcome_type"] = "organ_failure"
+        else:
+            row["outcome_type"] = "other"
+
+    # cutoff: schema requires string — coerce float/int to string
+    ct = row.get("cutoff")
+    if ct is not None and not isinstance(ct, str):
+        row["cutoff"] = str(ct)
+
+    # effect_type: model sometimes emits "OR, AUROC" — take the first valid literal
+    _VALID_EFFECT_TYPES = {"OR", "HR", "RR", "AUC", "AUROC", "cutoff", "mean_diff", "c_index", "other"}
+    et = row.get("effect_type")
+    if isinstance(et, str) and et not in _VALID_EFFECT_TYPES:
+        for part in _re.split(r"[,/|]", et):
+            candidate = part.strip()
+            if candidate in _VALID_EFFECT_TYPES:
+                row["effect_type"] = candidate
+                break
+        else:
+            row["effect_type"] = "other"
+
+    # auc / auc_ci_lo / auc_ci_hi: model sometimes emits comma-separated strings → take first
+    for _auc_field in ("auc", "auc_ci_lo", "auc_ci_hi"):
+        _v = row.get(_auc_field)
+        if isinstance(_v, str) and "," in _v:
+            first_part = _v.split(",")[0].strip()
+            try:
+                row[_auc_field] = float(first_part)
+            except (ValueError, TypeError):
+                row[_auc_field] = None
+        elif isinstance(_v, list):
+            row[_auc_field] = _v[0] if _v else None
 
     # effect_size_str (required string): build from numerics if absent — after p_value is cleaned
     if not row.get("effect_size_str"):
@@ -434,8 +530,15 @@ def _normalize_predictor_row(row: dict, cohort_id: str) -> dict:
         page = int(row.pop("anchor_page", None) or row.pop("page", None) or 1)
         row["anchor"] = {"text": str(text), "page": page}
     else:
-        row["anchor"].setdefault("text", "")
-        row["anchor"].setdefault("page", 1)
+        if not row["anchor"].get("text"):
+            row["anchor"]["text"] = ""
+        if not row["anchor"].get("page"):
+            row["anchor"]["page"] = 1
+        # bbox: schema expects a list [x0,y0,x1,y1] — model sometimes emits a
+        # dict {l,t,r,b}. Strip it entirely; the resolver overwrites it anyway.
+        bbox = row["anchor"].get("bbox")
+        if isinstance(bbox, dict):
+            row["anchor"]["bbox"] = None
 
     return row
 

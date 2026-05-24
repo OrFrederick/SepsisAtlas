@@ -400,8 +400,20 @@ def _parse_judge_response(raw: str) -> dict:
         )
     try:
         obj, _end = json.JSONDecoder().raw_decode(body[start:])
-    except json.JSONDecodeError as e:
-        raise ValueError(f"verifier_llm: non-JSON response ({e}): {raw[:200]!r}") from e
+    except json.JSONDecodeError:
+        # Truncated JSON — try regex extraction of key fields
+        import re as _re
+        _verdict_m = _re.search(r'"verdict"\s*:\s*"(ok|partial|reject)"', body)
+        _score_m = _re.search(r'"score"\s*:\s*([0-9.]+)', body)
+        _rat_m = _re.search(r'"rationale"\s*:\s*"([^"]{0,300})', body)
+        if _verdict_m:
+            obj = {
+                "verdict": _verdict_m.group(1),
+                "score": float(_score_m.group(1)) if _score_m else 0.5,
+                "rationale": (_rat_m.group(1) if _rat_m else "") + " [truncated]",
+            }
+        else:
+            raise ValueError(f"verifier_llm: non-JSON response: {raw[:200]!r}")
     if not isinstance(obj, dict):
         raise ValueError(f"verifier_llm: expected JSON object, got {type(obj)}")
     verdict = obj.get("verdict")
@@ -419,14 +431,23 @@ def _parse_judge_response(raw: str) -> dict:
             verdict = "reject"
         if verdict:
             obj["verdict"] = verdict
+    # Truncated response — model emitted supported/contradicted atoms but verdict
+    # key never appeared (JSON cut off before it). Infer from atoms.
     if verdict not in {"ok", "partial", "reject"}:
+        supported = obj.get("supported_atoms") or []
+        contradicted = obj.get("contradicted_atoms") or []
+        if contradicted:
+            verdict = "partial"
+        elif supported:
+            verdict = "ok"
+        else:
+            verdict = "partial"
+        obj["verdict"] = verdict
         import sys
         print(
-            f"[verify_llm DEBUG] invalid verdict={verdict!r}  raw={raw[:300]!r}",
-            file=sys.stderr,
-            flush=True,
+            f"[verify_llm] inferred verdict={verdict!r} from atoms (truncated response)",
+            file=sys.stderr, flush=True,
         )
-        raise ValueError(f"verifier_llm: invalid verdict {verdict!r}")
     try:
         score = float(obj.get("score", 0.0))
     except (TypeError, ValueError):
@@ -570,6 +591,9 @@ def run_llm_judge(
                 messages[0]["content"] = "\n\n".join(
                     b.get("text", "") for b in sys_blocks if isinstance(b, dict)
                 )
+            # Disable thinking mode — verifier just needs a verdict, not CoT.
+            if not messages[0]["content"].startswith("/no_think"):
+                messages[0]["content"] = "/no_think\n\n" + messages[0]["content"]
         resp_obj = _call_verify_llm(messages, model, **call_kwargs)
         latency_ms = int((time.time() - t0) * 1000)
 

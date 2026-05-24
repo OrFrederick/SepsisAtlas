@@ -1,0 +1,131 @@
+# syntax=docker/dockerfile:1.7
+
+# Frontend container: Next.js (App Router) behind Caddy.
+#
+# Why both in one image:
+#   - Caddy keeps owning TLS on :80/:443 and serving the public hostname,
+#     same as before. No compose topology change needed.
+#   - Next handles SSR for App Router routes; it cannot itself terminate
+#     TLS. Caddy reverse-proxies / to localhost:3000.
+#   - One image to publish per push instead of splitting into a `web` and
+#     `frontend` pair. Watchtower's "label-enabled container" model stays
+#     1:1 with the frontend service.
+#
+# Why Next "standalone" output:
+#   - `.next/standalone/` is a self-contained server.js + just the
+#     node_modules it actually imports. Ship that instead of the full
+#     bun-installed tree.
+
+# ---- Stage 1: build Next with PDFs baked in ----
+FROM oven/bun:1.3.13-alpine AS build
+
+WORKDIR /app
+
+# Install rsync (Alpine doesn't ship it by default; we use it to mirror the
+# PDF set into web/public/pdfs/ exactly the way deploy-main.sh did).
+RUN apk add --no-cache rsync
+
+# Cache deps on package.json + bun.lock. Pinned via --frozen-lockfile for
+# reproducible builds. --ignore-scripts skips esbuild's postinstall sanity
+# check: bun's lockfile only encodes the host-platform optional-dep for
+# `esbuild@0.27.7` (e.g. `@esbuild/darwin-arm64` after a macOS install),
+# so on Linux arm64 the postinstall would fail with "Expected 0.27.7 but
+# got 0.21.5". esbuild is only a transitive dev dep (vitest → vite →
+# esbuild) and is not invoked by `next build` (Next uses its own SWC),
+# so skipping the install-time validation is safe. The downside is that
+# `node_modules/esbuild` would not be functional inside this stage, but
+# we never call it; the final runtime image (stage 2) ships only the
+# Next standalone output and never touches `node_modules` from stage 1.
+COPY web/package.json web/bun.lock ./web/
+RUN cd web && bun install --frozen-lockfile --ignore-scripts
+
+# Web source.
+COPY web ./web
+
+# Raw PDFs go next to the source so the build can rsync them in. Doing the
+# rsync inside the image (rather than from the build context directly into
+# web/public/pdfs/) keeps the file layout obvious in case the build is
+# debugged later.
+#
+# Important: `web/public/pdfs` is a *symlink* in the repo (-> ../../data/papers/raw)
+# so that `next dev` resolves PDFs from the source tree without copying. BuildKit's
+# COPY preserves that symlink, and the relative target points outside stage 2's
+# final filesystem — leaving a dangling link that 404s every /pdfs/*.pdf request
+# in production. Delete the symlink first so the rsync below writes a real
+# directory that stage 2 can copy verbatim.
+COPY data/papers/raw ./data/papers/raw
+RUN rm -f web/public/pdfs && \
+    mkdir -p web/public/pdfs && \
+    rsync -a --delete --include='*.pdf' --exclude='*' \
+      data/papers/raw/ web/public/pdfs/
+
+# Build Next. NEXT_PUBLIC_BACKEND_URL="" means client-side fetches use
+# relative URLs that Caddy resolves to same-origin (matching the old
+# Astro PUBLIC_BACKEND_URL="" behaviour).
+RUN cd web && NEXT_PUBLIC_BACKEND_URL="" bun run build
+
+# ---- Stage 2: runtime — Node + Caddy in the same container ----
+#
+# Copy the Caddy binary out of the official `caddy:2-alpine` image
+# rather than `apk add --no-cache caddy`. Alpine's community repo
+# floats the major version (today 2.11, tomorrow could be 3.x with
+# breaking Caddyfile syntax). `caddy:2-alpine` is the upstream-
+# maintained tag that tracks the 2.x series specifically.
+FROM caddy:2-alpine AS caddy-source
+
+FROM node:20-alpine
+
+# ca-certificates lets Caddy reach Let's Encrypt; wget powers the
+# HEALTHCHECK below.
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=caddy-source /usr/bin/caddy /usr/bin/caddy
+
+WORKDIR /app
+
+# Next standalone output: minimal server.js + the node_modules subset it
+# actually imports. Public assets (PDFs, pdfjs vendor, data JSON) live
+# under public/ and are referenced relative to the standalone tree.
+COPY --from=build /app/web/.next/standalone ./
+COPY --from=build /app/web/.next/static ./.next/static
+COPY --from=build /app/web/public ./public
+
+# Caddy config (baked in; conf.d allows per-deploy overrides via the
+# host bind-mount declared in docker-compose.prod.yml).
+RUN mkdir -p /etc/caddy/conf.d
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+
+# Next listens here; Caddy reverse-proxies / to localhost:3000.
+# HOSTNAME=0.0.0.0 lets the standalone server bind to all interfaces inside
+# the container so health probes from the docker network (e.g. depends_on
+# checks) can reach it.
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+EXPOSE 80 443 443/udp
+
+# Healthcheck probes Caddy on :80 (so a dead Caddy gets noticed) and
+# Next on :3000 (so a dead Next does too). Both must return 2xx/3xx
+# inside the timeout for the container to stay healthy. The 308 from
+# Caddy's auto-HTTPS redirect counts as healthy. Compose's
+# `restart: unless-stopped` combined with a failing healthcheck plus
+# Watchtower's poll loop is what eventually recreates the container.
+#
+# The Host header is required: the Caddyfile only has a site block for
+# atlas.efferon.com, so a request with `Host: localhost` (wget's default)
+# gets rejected by Caddy and wget returns exit 4 (network failure). With
+# the right Host the probe hits the configured server block and gets a
+# 308 from the auto-HTTPS redirect, which wget --spider accepts.
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q --spider --header="Host: atlas.efferon.com" http://localhost:80/ \
+      && wget -q --spider http://localhost:3000/
+
+# Run-both wrapper: trap SIGCHLD so the container exits the moment
+# either Caddy or Next dies. PID 1 must be the trap-holding shell so
+# the signal reaches us; we wait on both children and exit non-zero if
+# the first to die was abnormal. Compose `restart: unless-stopped`
+# then recreates the container. Without this trap, the exec form
+# (`exec node server.js`) made Node PID 1, and a Caddy crash left the
+# container alive but with TLS dark.
+CMD ["sh", "-c", "set -e; caddy run --config /etc/caddy/Caddyfile --adapter caddyfile & CADDY_PID=$!; node server.js & NEXT_PID=$!; trap 'kill $CADDY_PID $NEXT_PID 2>/dev/null' TERM INT; wait -n $CADDY_PID $NEXT_PID; STATUS=$?; kill $CADDY_PID $NEXT_PID 2>/dev/null; exit $STATUS"]

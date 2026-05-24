@@ -1,17 +1,17 @@
-"""FastAPI app: headless query API + PDF.js viewer for the Astro frontend.
+"""FastAPI app: headless query API for the Astro frontend.
 
 Endpoints
 ---------
 POST /query                       NL question → ranked rows + markdown table + summary
-GET  /viewer/{file_stem}          Static PDF.js page; reads ?page=&bbox= client-side
-GET  /papers/{file_stem}/pdf      Streams data/papers/raw/<file_stem>.pdf
-GET  /static/*                    Static mount (PDF.js bundle, viewer.html assets)
+GET  /static/*                    Static mount (PDF.js assets, plots)
 POST /ingest_pubmed               Stub for live corpus expansion
 GET  /health                      Liveness ping
 GET  /health/cost                 Aggregate LLM cost telemetry from llm_calls
 
-The Astro app iframes `/viewer/<stem>` for source previews, so we keep the
-permissive frame headers below.
+The PDF viewer is served entirely by the Astro app at /viewer/<stem>/.
+The PDF bytes themselves come from web/public/pdfs/<stem>.pdf, vendored
+into the Astro build, so the static site has no runtime dependency on
+this backend for PDF rendering.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect as sqla_inspect, text
@@ -48,6 +48,11 @@ from api.rank_predictors import (
 )
 from api.dedupe import dedupe_rows
 from api.evidence_projection import apply_evidence_projection
+from api.papers import (
+    get_paper as _get_paper,
+    list_papers as _list_papers,
+    list_rows_for_file as _list_rows_for_file,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -66,21 +71,7 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def relax_iframe_headers(request: Request, call_next):
-    """Permissive frame headers so the SPA's PDF iframe can embed /viewer/*.
-
-    No X-Frame-Options; CSP frame-ancestors '*'.
-    """
-    response = await call_next(request)
-    # Strip default deny if any upstream set it (Starlette MutableHeaders has no .pop).
-    if "x-frame-options" in response.headers:
-        del response.headers["x-frame-options"]
-    response.headers["Content-Security-Policy"] = "frame-ancestors *;"
-    return response
-
-
-# Static mount: /static/pdfjs, /static/plots, /static/viewer.html
+# Static mount: /static/pdfjs (PDF.js bundle), /static/plots (rendered forest plots).
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "plots").mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -112,8 +103,6 @@ class QueryResponse(BaseModel):
     n_rows: int
     refused: bool = False
     refused_reason: str | None = None
-    # KG path piggybacks here for table_spec ({shape, columns, footer}) and
-    # n_turns; SQL path leaves it null.
     meta: dict | None = None
 
 
@@ -896,6 +885,54 @@ def health_cost(run_id: str | None = None, since: str | None = None):
         return payload
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# /papers — live corpus catalog (replaces build-time JSON snapshot)
+#
+# These endpoints back the Next /papers tab and the per-paper detail view.
+# Same shape as web/src/lib/types.ts Paper / Row, so the frontend can drop
+# loadPapers()/loadRows() and read from the API instead.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/papers")
+def list_papers_endpoint():
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        return {"papers": _list_papers(session)}
+
+
+@app.get("/papers/{file_name}")
+def get_paper_endpoint(file_name: str):
+    """Per-stem corpus meta — exists for the Next per-paper page to call
+    `notFound()` cheaply without fetching the full corpus list.
+
+    Returns the same Paper shape as the items in `GET /papers`. 404 when no
+    Paper row and no StudyCohort row carry that file_name.
+    """
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        paper = _get_paper(session, file_name)
+        if paper is None:
+            raise HTTPException(404, f"paper not found: {file_name!r}")
+        return paper
+
+
+@app.get("/papers/{file_name}/rows")
+def get_paper_rows_endpoint(file_name: str):
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        # Allow rows-only fetch without forcing a Paper row to exist — the
+        # caller may already have the meta from /papers and just wants the
+        # evidence rows. Returns an empty list (not 404) for unknown stems
+        # so the per-paper page can still render "no rows" without erroring.
+        # The per-stem existence check lives at GET /papers/{file_name}.
+        rows = _list_rows_for_file(session, file_name)
+        return {"rows": rows}
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,85 @@
+# Sepsis Atlas — atlas.efferon.com
+#
+# This Caddyfile is baked into the frontend container image at
+# /etc/caddy/Caddyfile. Caddy terminates TLS on :80/:443 and reverse-
+# proxies every request that isn't a FastAPI route to the Next.js server
+# running alongside it on localhost:3000 (see docker/Dockerfile.frontend).
+# API routes go to the `backend` compose service over the internal network.
+#
+# Path matchers below mirror src/api/main.py exactly. Tight on purpose:
+# trailing `*` was hijacking sibling Next routes — /papers/<stem> is a
+# Next page, /papers/<stem>/pdf is the FastAPI raw-PDF endpoint, and
+# whoever shadows the other wins. /viewer/* used to belong to FastAPI
+# (the static viewer.html shim) but is now a Next App Router route; the
+# matcher no longer includes it. Any new FastAPI route must be added
+# here AND the Next config's rewrites() block.
+
+{
+	email ops@efferon.com
+}
+
+# NOTE: the container HEALTHCHECK in docker/Dockerfile.frontend probes
+# `http://localhost:80/` with `Host: atlas.efferon.com`, relying on this
+# hostname matching the site block below. If you rename the host or split
+# this block, update the HEALTHCHECK Host header too — otherwise Caddy
+# rejects the probe (no matching site = wget exit 4) and the container
+# stays `unhealthy` forever even though external traffic still works.
+atlas.efferon.com {
+	encode zstd gzip
+
+	# Server-side directives that shouldn't live in the public repo
+	# (basic-auth credential hash, IP allow-lists, etc.). Empty dir = no-op.
+	import /etc/caddy/conf.d/*.caddy
+
+	# Backend API routes — keep in sync with @app.{get,post} in src/api/main.py
+	# and the rewrites() block in web/next.config.ts. Raw PDFs are served by
+	# Next from web/public/pdfs/<stem>.pdf, not by FastAPI, so /papers/*/pdf
+	# (which used to be in this matcher) does not belong here.
+	@api {
+		path /query
+		path /rank_predictors
+		path /ingest_pubmed
+		path /health
+		path /health/cost
+		# Note: per-paper rows (/papers/<stem>/rows) and the per-paper
+		# meta lookup (/papers/<stem>) belong to FastAPI, but only when
+		# called from SSR — i.e. the Next server reaches FastAPI directly
+		# via API_URL on the compose network, not through Caddy. The
+		# bare /papers list and the /papers/<stem> detail are both Next
+		# App Router pages; matching them here would shadow them on hard
+		# navigations (typed URL / refresh / bookmark) and return raw
+		# JSON instead of the rendered page. Only /papers/<stem>/rows
+		# is safe to expose through Caddy because no Next route owns it.
+		path /papers/*/rows
+		path /phenotypes
+		path /phenotypes/*
+		path /static/*
+	}
+	handle @api {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else (chrome routes, /papers, /papers/<stem>, /viewer/<stem>,
+	# /_next/* asset chunks, items in public/) is served by Next. Next
+	# emits its own cache-control headers; let it answer.
+	#
+	# X-Real-IP and X-Forwarded-For are *overwritten* (not appended to)
+	# with the actual TCP peer. Without this Caddy would forward whatever
+	# XFF the client sent in, letting attackers spoof their rate-limit
+	# key — see web/app/api/feedback/route.ts:clientIp.
+	#
+	# ASSUMPTION: Caddy is the edge — i.e. {remote_ip} here IS the real
+	# client. If anything (Cloudflare, an L7 LB, another reverse proxy)
+	# is ever placed in front of Caddy, this overwrite will replace the
+	# real client IP with the upstream proxy's egress IP, and every
+	# legitimate request will collapse onto a single rate-limit bucket.
+	# In that case: enable `servers { trusted_proxies static <cidr> }`
+	# at the global level and read the rightmost untrusted entry from
+	# the *incoming* X-Forwarded-For instead of using {remote_ip}.
+	handle {
+		reverse_proxy localhost:3000 {
+			header_up X-Real-IP {remote_ip}
+			header_up X-Forwarded-For {remote_ip}
+		}
+	}
+}

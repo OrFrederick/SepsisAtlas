@@ -1,7 +1,18 @@
 node_modules/
 dist/
+.next
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
 .astro/
 .DS_Store
 public/pdfjs/
 public/pdfs/
 public/data/*.json
+# Three canonical exports are committed so CI builds reproduce prod state.
+# Other JSON files written under public/data/ stay ignored.
+!public/data/rows.json
+!public/data/papers.json
+!public/data/manifest.json

@@ -1,0 +1,103 @@
+# Production override.
+#
+# Applied with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d
+#
+# Differences from dev compose:
+#   - Backend is pulled from ghcr.io (built by .github/workflows/deploy.yml),
+#     never built on the host. The local `build:` directive is reset.
+#   - Backend is only reachable over the compose network; no host port mapping.
+#   - Source-code volume mount dropped (no hot reload in prod).
+#   - Frontend container (caddy + Next.js standalone server + PDFs + JSON,
+#     all baked in) terminates TLS on :80/:443. Caddy proxies API routes to
+#     `backend` and everything else to the Next process on localhost:3000.
+#   - Watchtower watches both labeled containers and pulls/restarts whenever
+#     a new image tag appears in ghcr.
+
+services:
+  backend:
+    build: !reset null
+    image: ghcr.io/orfrederick/sepsis-atlas-backend:main
+    # `missing` so a transient ghcr outage during deploy doesn't recreate
+    # the container into a hole. Ongoing image refreshes are owned by the
+    # Watchtower sidecar below, which polls ghcr every 5 minutes.
+    pull_policy: missing
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    volumes: !override
+      - ./data:/app/data
+      - ./db.sqlite:/app/db.sqlite
+      - ./static:/app/static
+      - ./runs:/app/runs
+      - ./logs:/app/logs
+    ports: !reset null
+
+  frontend:
+    image: ghcr.io/orfrederick/sepsis-atlas-frontend:main
+    pull_policy: missing
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # All values are sourced from /opt/sepsisatlas/.env on the host (the
+      # same env file the backend reads via env_file). Compose interpolates
+      # ${VAR} from that file at `up` time. Do NOT bake secrets into git
+      # or the image.
+      #
+      # Feedback form → GitHub Issues. See web/src/lib/github.ts and
+      # web/src/app/api/feedback/route.ts. All four are server-only.
+      GITHUB_FEEDBACK_TOKEN: ${GITHUB_FEEDBACK_TOKEN:?GITHUB_FEEDBACK_TOKEN must be set in /opt/sepsisatlas/.env}
+      GITHUB_FEEDBACK_REPO: ${GITHUB_FEEDBACK_REPO:?GITHUB_FEEDBACK_REPO must be set in /opt/sepsisatlas/.env}
+      FEEDBACK_ALLOWED_ORIGIN: ${FEEDBACK_ALLOWED_ORIGIN:?FEEDBACK_ALLOWED_ORIGIN must be set in /opt/sepsisatlas/.env}
+      FEEDBACK_MOUNT_SECRET: ${FEEDBACK_MOUNT_SECRET:?FEEDBACK_MOUNT_SECRET must be set in /opt/sepsisatlas/.env}
+      # SSR fetches from /papers and other backend routes resolve through
+      # this URL. Same compose network as the backend service, so the
+      # hostname is the service name. The client side still uses relative
+      # URLs (NEXT_PUBLIC_BACKEND_URL="") that Caddy proxies same-origin.
+      API_URL: "http://backend:8000"
+      # Next reads NODE_ENV=production from the Dockerfile already; the
+      # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - /etc/sepsisatlas/caddy-conf.d:/etc/caddy/conf.d:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [sepsis]
+
+  watchtower:
+    # nickfedor/watchtower is the actively-maintained fork of the dormant
+    # containrrr/watchtower. The upstream 1.7.1 image (last released
+    # 2023-11) ships an old Docker SDK that speaks API 1.25, which modern
+    # Docker daemons (29.x default MinAPIVersion = 1.40) reject with
+    # "client version 1.25 is too old". The fork ships a current SDK.
+    #
+    # Pinned by manifest digest (not just :1.17.1) because this container
+    # gets root-equivalent access via the bind-mounted docker socket; a
+    # mutable tag is too sharp an edge to leave on. Digest corresponds to
+    # nickfedor/watchtower:1.17.1 at pin time (2026-05-22). Bump both the
+    # tag-as-comment and the digest together when rolling forward.
+    image: nickfedor/watchtower@sha256:a0859caf70e234dcd4ac893a62b4a8b7ac08543250b85e9ccf060190a4cb847c
+    container_name: atlas-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the deploy user's docker creds (not root's). The deploy user
+      # is in the docker group and is what runs `docker login` on the VPS
+      # if the ghcr package ever goes private; root's config is empty.
+      - /home/deploy/.docker/config.json:/config.json:ro
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"   # only update containers with the label above
+      WATCHTOWER_CLEANUP: "true"        # delete old images after upgrade
+      WATCHTOWER_POLL_INTERVAL: "300"   # 5 minutes
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+    networks: [sepsis]
+
+volumes:
+  caddy_data:
+  caddy_config:

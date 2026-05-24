@@ -1,3 +1,5 @@
+"use client";
+
 /*
   EvidenceTable — sortable table view of an assistant turn's evidence
   rows. Mirrors the per-row data that EvidenceCard surfaces, laid out
@@ -270,6 +272,7 @@ export default function EvidenceTable({
               </th>
             );
           })}
+          <th scope="col">Report</th>
         </tr>
       </thead>
       <tbody>
@@ -308,6 +311,15 @@ export default function EvidenceTable({
               <td className="num">{nOf(row)}</td>
               <td className="num">{pageOf(row)}</td>
               <td className="effect">{effect}</td>
+              <td>
+                <FeedbackButton
+                  type="wrong-data"
+                  paper={row.file_name || row.paper_ref || row.study || ""}
+                  rowContext={row}
+                  label="Report"
+                  className="text-fg-muted underline hover:text-fg-soft"
+                />
+              </td>
             </tr>
           );
         })}

@@ -187,3 +187,30 @@
   font-feature-settings: "tnum";
   pointer-events: none;
 }
+
+/* Below ~640 px (mobile viewport / split-pane on tablet) the toolbar's
+   combined width of nav + zoom + search + filename runs to ~680 px, so
+   the right edge gets clipped. Allow it to wrap to a second row and
+   drop the open-file link (the URL is already in the address bar).
+   Keep this block at the END of the file so the same-specificity
+   selectors override the base rules above. */
+@media (max-width: 640px) {
+  .pdf-viewer__toolbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 36px;
+    padding: 5px 8px;
+    overflow-x: hidden;
+  }
+  .pdf-viewer__toolbar .sep {
+    display: none;
+  }
+  .pdf-viewer__open {
+    display: none;
+  }
+  .pdf-viewer__search {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 110px;
+  }
+}

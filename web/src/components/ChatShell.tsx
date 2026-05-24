@@ -192,8 +192,12 @@ function buildViewerUrl(row: EvidenceRow): string {
 function Welcome({ onChip, solo }: { onChip: (q: string) => void; solo: boolean }) {
   return (
     <motion.div
+      // Mobile: anchor near top of scrollback (mt-2 mx-auto + auto-bottom
+      // lets it grow into the page naturally). Desktop (sm:): m-auto
+      // centers the welcome card vertically and horizontally for the
+      // familiar landing-page hero feel.
       className={
-        "bg-panel border border-border rounded-md m-auto py-6 px-5 sm:py-8 sm:px-9 " +
+        "bg-panel border border-border rounded-md mt-2 mx-auto mb-auto sm:m-auto py-6 px-5 sm:py-8 sm:px-9 " +
         (solo ? "max-w-none w-full" : "max-w-[540px]")
       }
       initial={FADE_UP.initial}
@@ -236,14 +240,15 @@ export default function ChatShell() {
   const [viewerUrl, setViewerUrl] = useState("");
   const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
   const [resizing, setResizing] = useState(false);
-  // Narrow viewports can't usefully split a 50/50 chat+PDF pane — the chat
-  // collapses below ~200 px and the iframe loses any reading width. Below
-  // 768 px we keep chat full-width and open evidence rows in a new tab so
-  // the PDF gets the whole viewport without nuking chat context.
+  // Narrow viewports can't usefully split a chat+PDF pane. Even on iPad
+  // portrait (768 px) a 50/50 split leaves both panes at ~384 px — too
+  // tight for the chat column AND the PDF. Cut over at 1024 px so iPad
+  // landscape and laptops still get the side-by-side reading flow;
+  // anything smaller gets chat-only and opens evidence rows in a new tab.
   const [isNarrow, setIsNarrow] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia("(max-width: 1023px)");
     const update = () => setIsNarrow(mq.matches);
     update();
     mq.addEventListener("change", update);
@@ -764,7 +769,11 @@ export default function ChatShell() {
               placeholder="Ask about sepsis predictors, biomarkers, or outcomes..."
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onInputKeyDown}
-              className="flex-1 bg-panel border border-border rounded py-[10px] px-3 resize-none overflow-y-auto outline-none min-h-10 max-h-[132px] leading-[1.5] transition-[border-color,box-shadow] duration-[180ms] ease-out focus:border-accent focus:shadow-[0_0_0_3px_rgba(63,104,178,0.10)] placeholder:text-fg-faint placeholder:italic"
+              // `[scrollbar-width:thin]` + the webkit-button arbitrary
+              // variant suppresses Firefox / Webkit's scrollbar end-cap
+              // arrows on the textarea — without them the empty composer
+              // shows up/down buttons in the right gutter on mobile.
+              className="flex-1 bg-panel border border-border rounded py-[10px] px-3 resize-none overflow-y-auto outline-none min-h-10 max-h-[132px] leading-[1.5] transition-[border-color,box-shadow] duration-[180ms] ease-out focus:border-accent focus:shadow-[0_0_0_3px_rgba(63,104,178,0.10)] placeholder:text-fg-faint placeholder:italic [scrollbar-width:thin] [&::-webkit-scrollbar-button]:hidden"
             />
             <button
               type="submit"

@@ -236,6 +236,19 @@ export default function ChatShell() {
   const [viewerUrl, setViewerUrl] = useState("");
   const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
   const [resizing, setResizing] = useState(false);
+  // Narrow viewports can't usefully split a 50/50 chat+PDF pane — the chat
+  // collapses below ~200 px and the iframe loses any reading width. Below
+  // 768 px we keep chat full-width and open evidence rows in a new tab so
+  // the PDF gets the whole viewport without nuking chat context.
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -292,13 +305,22 @@ export default function ChatShell() {
   // ---- row click → update viewer ----------------------------------------
   // PdfViewerPane handles same-paper jumps via postMessage internally; we
   // just hand it the latest URL and let it decide between in-place jump
-  // and a full iframe reload.
-  const activateRow = useCallback((turnIdx: number, rowIdx: number, row: EvidenceRow) => {
-    const url = buildViewerUrl(row);
-    if (!url) return;
-    setActiveRowKey(`${turnIdx}:${rowIdx}`);
-    setViewerUrl(url);
-  }, []);
+  // and a full iframe reload. On narrow viewports we don't show the
+  // viewer pane at all, so route the click to a new tab where the PDF
+  // can claim the full screen.
+  const activateRow = useCallback(
+    (turnIdx: number, rowIdx: number, row: EvidenceRow) => {
+      const url = buildViewerUrl(row);
+      if (!url) return;
+      setActiveRowKey(`${turnIdx}:${rowIdx}`);
+      if (isNarrow) {
+        window.open(url, "_blank", "noopener");
+        return;
+      }
+      setViewerUrl(url);
+    },
+    [isNarrow],
+  );
 
   // ---- submit ------------------------------------------------------------
   const submit = useCallback(
@@ -479,8 +501,10 @@ export default function ChatShell() {
 
   // Viewer panel is revealed the moment the user submits the first query
   // (pending) or once any turn lands in history. Clearing chat collapses
-  // back to the centered-chat landing state.
-  const showPdf = pending || history.length > 0;
+  // back to the centered-chat landing state. On narrow viewports we
+  // never reveal the split — see isNarrow above; row clicks open the PDF
+  // in a new tab instead.
+  const showPdf = !isNarrow && (pending || history.length > 0);
 
   // Drive the grid track template via inline style so React only writes a
   // single declaration when chatPct changes; transition lives on the

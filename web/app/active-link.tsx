@@ -22,7 +22,8 @@ export default function ActiveLink({ href, exact, children }: Props) {
     ? pathname === href
     : pathname === href || pathname.startsWith(href + (href.endsWith("/") ? "" : "/"));
   const base =
-    "text-fg-muted hover:text-fg hover:no-underline px-[2px] py-1 mx-[10px] my-0 text-[13px] " +
+    "text-fg-muted hover:text-fg hover:no-underline px-[2px] py-1 mx-1 sm:mx-[10px] my-0 " +
+    "text-xs sm:text-[13px] whitespace-nowrap " +
     "border-b border-transparent transition-[color,border-color] duration-150 ease-out";
   const activeCls = active ? "!text-fg !border-b-accent" : "";
   return (

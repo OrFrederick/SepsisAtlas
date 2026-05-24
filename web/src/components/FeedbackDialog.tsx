@@ -11,7 +11,8 @@ interface FeedbackDialogProps extends FeedbackFormProps {
 // Default trigger style mirrors the topbar nav link so feedback reads as
 // part of the chrome rather than a CTA.
 const DEFAULT_TRIGGER_CLS =
-  "appearance-none bg-transparent border-0 text-fg-muted py-1 px-[2px] mx-[10px] my-0 text-[13px] " +
+  "appearance-none bg-transparent border-0 text-fg-muted py-1 px-[2px] mx-1 sm:mx-[10px] my-0 " +
+  "text-xs sm:text-[13px] whitespace-nowrap " +
   "cursor-pointer border-b border-transparent transition-[color,border-color] duration-150 ease-out hover:text-fg";
 
 export function FeedbackDialog({

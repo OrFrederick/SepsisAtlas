@@ -193,17 +193,17 @@ function Welcome({ onChip, solo }: { onChip: (q: string) => void; solo: boolean 
   return (
     <motion.div
       className={
-        "bg-panel border border-border rounded-md m-auto py-8 px-9 " +
+        "bg-panel border border-border rounded-md m-auto py-6 px-5 sm:py-8 sm:px-9 " +
         (solo ? "max-w-none w-full" : "max-w-[540px]")
       }
       initial={FADE_UP.initial}
       animate={FADE_UP.animate}
       transition={FADE_UP.transition}
     >
-      <h2 className="m-0 mb-3 text-fg text-[28px] font-medium font-serif tracking-[-0.4px] leading-[1.2]">
+      <h2 className="m-0 mb-3 text-fg text-[22px] sm:text-[28px] font-medium font-serif tracking-[-0.4px] leading-[1.2]">
         Evidence, anchored.
       </h2>
-      <p className="m-0 mb-[18px] text-fg-soft text-[15px] leading-[1.6]">
+      <p className="m-0 mb-[18px] text-fg-soft text-sm sm:text-[15px] leading-[1.6]">
         Ask about sepsis predictors, biomarkers, or outcomes. Answers are pinned to verbatim quotes
         from peer-reviewed papers; click any evidence row to inspect the cited PDF passage.
       </p>
@@ -584,15 +584,18 @@ export default function ChatShell() {
     : `flex flex-col bg-bg overflow-hidden max-w-[720px] mx-auto w-full`;
   const chatTransition = `transition-[max-width] duration-[520ms] ease-[cubic-bezier(0.2,0.7,0.2,1)]`;
 
+  // Side padding shrinks on small viewports so the Send button doesn't
+  // get clipped at the right edge. `px-9` (36 px) ate the composer's
+  // controls below ~400 px viewport width.
   const scrollbackCls = showPdf
-    ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
+    ? "flex-1 overflow-y-auto py-4 px-4 sm:py-7 sm:px-9 flex flex-col gap-[22px] overscroll-contain " +
       "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
-    : "flex-1 overflow-y-auto pt-7 pb-3 px-9 flex flex-col gap-[22px] overscroll-contain " +
+    : "flex-1 overflow-y-auto pt-4 pb-3 px-4 sm:pt-7 sm:px-9 flex flex-col gap-[22px] overscroll-contain " +
       "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent";
 
   const composerCls = showPdf
-    ? "bg-bg pt-[14px] pb-[22px] px-[22px] flex gap-[10px] items-end border-t border-border"
-    : "bg-bg pt-[14px] pb-8 px-9 flex gap-[10px] items-end";
+    ? "bg-bg pt-[14px] pb-4 px-3 sm:pb-[22px] sm:px-[22px] flex gap-[10px] items-end border-t border-border"
+    : "bg-bg pt-[14px] pb-5 px-4 sm:pb-8 sm:px-9 flex gap-[10px] items-end";
 
   return (
     <MotionConfig reducedMotion="user">
@@ -741,7 +744,7 @@ export default function ChatShell() {
             />
             <button
               type="submit"
-              className="bg-accent text-white rounded py-[10px] px-[18px] border-0 font-semibold cursor-pointer transition-[background,transform] duration-[180ms] ease-out disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-accent-hover enabled:hover:-translate-y-px"
+              className="bg-accent text-white rounded py-[10px] px-3 sm:px-[18px] border-0 font-semibold cursor-pointer transition-[background,transform] duration-[180ms] ease-out disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-accent-hover enabled:hover:-translate-y-px shrink-0"
               disabled={pending || !input.trim()}
             >
               Send

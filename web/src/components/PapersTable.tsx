@@ -98,7 +98,12 @@ export default function PapersTable({ papers, basePath }: Props) {
   };
 
   return (
-    <table className="w-full bg-panel border border-border rounded-md overflow-hidden border-collapse">
+    // Outer wrapper carries the rounded border + horizontal scroll on
+    // narrow viewports; the 9-column table can't compress below ~720 px
+    // without losing legibility, so we let it scroll within its own box
+    // instead of forcing the whole page to scroll sideways.
+    <div className="w-full overflow-x-auto bg-panel border border-border rounded-md">
+    <table className="w-full min-w-[720px] bg-panel border-collapse">
       <thead>
         <tr>
           {COLS.map((c) => {
@@ -152,5 +157,6 @@ export default function PapersTable({ papers, basePath }: Props) {
         })}
       </tbody>
     </table>
+    </div>
   );
 }

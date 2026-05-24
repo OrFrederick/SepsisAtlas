@@ -14,7 +14,8 @@ function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backe
     return <em className="text-fg-muted">No supporting rows.</em>;
   }
   return (
-    <table className="w-full text-xs border-collapse">
+    <div className="w-full overflow-x-auto">
+    <table className="w-full min-w-[560px] text-xs border-collapse">
       <thead>
         <tr>
           {["Paper", "Cohort", "Predictor", "Effect", "Page", "Anchor"].map((h) => (
@@ -50,6 +51,7 @@ function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backe
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -59,7 +61,8 @@ export default function RankTable({ rows, backendOrigin }: Props) {
     return <p className="text-fg-muted">No predictors ranked for these filters.</p>;
   }
   return (
-    <table className="w-full text-[13px] border-collapse">
+    <div className="w-full overflow-x-auto">
+    <table className="w-full min-w-[640px] text-[13px] border-collapse">
       <thead>
         <tr>
           {["#", "Predictor", "Best metric", "Best value (CI)", "# studies", "Top study", ""].map(
@@ -87,6 +90,7 @@ export default function RankTable({ rows, backendOrigin }: Props) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 

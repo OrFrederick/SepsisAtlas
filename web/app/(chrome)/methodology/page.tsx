@@ -81,8 +81,8 @@ const KIND_BADGE: Record<Stage["kind"], string> = {
 
 export default function MethodologyPage() {
   return (
-    <main className="max-w-[760px] mx-auto px-7 pt-[22px] pb-[60px]">
-      <h1 className="font-serif font-medium text-[28px] leading-[1.2] m-0 mb-3 text-fg">
+    <main className="max-w-[760px] mx-auto px-4 sm:px-7 pt-[22px] pb-[60px]">
+      <h1 className="font-serif font-medium text-2xl sm:text-[28px] leading-[1.2] m-0 mb-3 text-fg">
         How Sepsis Atlas turns PDFs into evidence
       </h1>
       <p className="text-[15px] leading-[1.6] text-fg-soft m-0 mb-[22px]">

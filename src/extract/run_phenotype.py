@@ -48,12 +48,15 @@ from sepsis_atlas.schemas import (
 
 from src.extract.anchor_resolver import build_index, resolve
 from src.extract.extractor import (
+    _cached_system,
     _check_resp,
     _json_object_format,
     _load_prompt,
+    _paper_blob,
     _schema_hint,
     _slim_paper,
     _strip_fences,
+    _usage_meta,
 )
 from src.extract.run_extract import GT_PAPERS
 from src.extract.verify_nli import run_verifier
@@ -74,25 +77,25 @@ def _run_phenotype_llm(
     model: str = MODEL_EXTRACT,
 ) -> tuple[PhenotypeExtractResponse, dict]:
     sys_prompt, prompt_id = _load_prompt("phenotype_v1.md")
-    user_payload = {
-        "paper_id": paper_id,
-        "parsed_paper": _slim_paper(paper_json),
-    }
     sys_prompt_with_schema = (
         sys_prompt
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(PhenotypeExtractResponse)
     )
     messages = [
-        {"role": "system", "content": sys_prompt_with_schema},
+        {
+            "role": "system",
+            "content": _cached_system(
+                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+            ),
+        },
         {
             "role": "user",
             "content": (
-                "Decide if this paper performs data-driven sepsis phenotyping. "
-                "If yes, emit summary + per-cluster rows. If no, emit "
-                "is_phenotype_paper=false with rationale and empty clusters. "
-                "Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]
+                "Decide if the paper in the system block performs data-driven "
+                "sepsis phenotyping. If yes, emit summary + per-cluster rows. "
+                "If no, emit is_phenotype_paper=false with rationale and empty "
+                "clusters. Return JSON."
             ),
         },
     ]
@@ -110,17 +113,7 @@ def _run_phenotype_llm(
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "phenotype_extract")
     parsed = PhenotypeExtractResponse.model_validate_json(_strip_fences(raw))
-    meta = {
-        "model": model,
-        "prompt_id": prompt_id,
-        "latency_ms": latency_ms,
-        "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
-        "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
-        "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-        ),
-    }
-    return parsed, meta
+    return parsed, _usage_meta(resp, model, prompt_id, latency_ms)
 
 
 def _insert_summary(

@@ -65,11 +65,15 @@ def get_client() -> Any:
         return _client
 
     # Default: OpenRouter via OpenAI client.
+    # max_retries=1: each retry re-uploads the full paper context (50-100k
+    # tokens for predictor_extract). 3 retries on transient errors = 4×
+    # input cost on a failed call. Cap at 1; higher-level retry policies
+    # belong in the extractor with proper dedup.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
         timeout=300.0,
-        max_retries=3,
+        max_retries=1,
         default_headers={
             "HTTP-Referer": "https://github.com/sepsis-atlas",
             "X-Title": "Sepsis Atlas",
@@ -135,11 +139,12 @@ def logged_llm_call(stage: str):
                 raise
             finally:
                 latency_ms = int((time.time() - t0) * 1000)
-                tokens_in = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) if resp else 0
-                tokens_out = getattr(getattr(resp, "usage", None), "completion_tokens", 0) if resp else 0
-                cost_usd = float(
-                    getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-                ) if resp else 0.0
+                u = getattr(resp, "usage", None) if resp else None
+                tokens_in = getattr(u, "prompt_tokens", 0) if u else 0
+                tokens_out = getattr(u, "completion_tokens", 0) if u else 0
+                cost_usd = float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0
+                cache_creation = int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0
+                cache_read = int(getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),
@@ -153,6 +158,8 @@ def logged_llm_call(stage: str):
                     "prompt_hash": prompt_hash,
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    "cache_creation_tokens": cache_creation,
+                    "cache_read_tokens": cache_read,
                     "cost_usd": cost_usd,
                     "latency_ms": latency_ms,
                     "error": err,

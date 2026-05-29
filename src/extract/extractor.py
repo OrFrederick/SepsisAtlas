@@ -103,6 +103,21 @@ def _call_predictor_extract(messages, model, **kwargs):
     )
 
 
+def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
+    """Common meta dict including cache-token fields (Anthropic via OpenRouter)."""
+    u = getattr(resp, "usage", None)
+    return {
+        "model": model,
+        "prompt_id": prompt_id,
+        "latency_ms": latency_ms,
+        "tokens_in": getattr(u, "prompt_tokens", 0) if u else 0,
+        "tokens_out": getattr(u, "completion_tokens", 0) if u else 0,
+        "cost_usd": float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0,
+        "cache_creation_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0,
+        "cache_read_tokens": int(getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Stage 1: cohort enumeration
 # ---------------------------------------------------------------------------
@@ -125,6 +140,31 @@ def _check_resp(resp, stage: str) -> str:
     return content
 
 
+def _paper_blob(paper_json: dict, paper_id: str) -> str:
+    """Serialize the slim paper for inclusion as a cacheable system block."""
+    return json.dumps(
+        {"paper_id": paper_id, "parsed_paper": _slim_paper(paper_json)}
+    )[:200_000]
+
+
+def _cached_system(sys_prompt_with_schema: str, paper_blob: str) -> list[dict]:
+    """System message split into stable instructions + cacheable paper text.
+
+    Anthropic prompt-caching keys on the prefix up to and including the
+    block marked ``cache_control: ephemeral``. The paper text is the
+    common prefix across all per-cohort calls for the same paper, so
+    cohort 1 writes the cache and cohorts 2..N read it at 0.1× input cost.
+    """
+    return [
+        {"type": "text", "text": sys_prompt_with_schema},
+        {
+            "type": "text",
+            "text": f"PAPER (full parsed JSON):\n{paper_blob}",
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
+
+
 def run_cohort_enum(
     paper_json: dict,
     *,
@@ -134,23 +174,21 @@ def run_cohort_enum(
 ) -> tuple[list[StudyCohortOut], dict]:
     """Run stage-1 cohort enumeration. Returns (cohorts, llm_meta)."""
     sys_prompt, prompt_id = _load_prompt("cohort_enum_v1.md")
-    user_payload = {
-        "paper_id": paper_id,
-        "parsed_paper": _slim_paper(paper_json),
-    }
     sys_prompt_with_schema = (
         sys_prompt
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(CohortEnumResponse)
     )
     messages = [
-        {"role": "system", "content": sys_prompt_with_schema},
+        {
+            "role": "system",
+            "content": _cached_system(
+                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+            ),
+        },
         {
             "role": "user",
-            "content": (
-                "Enumerate cohorts for the parsed paper below. Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]
-            ),
+            "content": "Enumerate cohorts from the paper in the system block. Return JSON.",
         },
     ]
     rf = _json_object_format()
@@ -167,17 +205,7 @@ def run_cohort_enum(
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "cohort_enum")
     parsed = CohortEnumResponse.model_validate_json(_strip_fences(raw))
-    meta = {
-        "model": model,
-        "prompt_id": prompt_id,
-        "latency_ms": latency_ms,
-        "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
-        "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
-        "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-        ),
-    }
-    return parsed.cohorts, meta
+    return parsed.cohorts, _usage_meta(resp, model, prompt_id, latency_ms)
 
 
 # ---------------------------------------------------------------------------
@@ -194,27 +222,32 @@ def run_predictor_extract(
     model: str = MODEL_EXTRACT,
 ) -> tuple[list[PredictorModelOut], dict]:
     sys_prompt, prompt_id = _load_prompt("predictor_extract_v1.md")
-    user_payload = {
-        "paper_id": paper_id,
-        "cohort_id": cohort.cohort_id,
-        "cohort_label": cohort.cohort_label,
-        "data_sets": cohort.data_sets,
-        "parsed_paper": _slim_paper(paper_json),
-    }
     sys_prompt_with_schema = (
         sys_prompt
         + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
         + _schema_hint(PredictorExtractResponse)
     )
+    cohort_payload = json.dumps(
+        {
+            "cohort_id": cohort.cohort_id,
+            "cohort_label": cohort.cohort_label,
+            "data_sets": cohort.data_sets,
+        }
+    )
     messages = [
-        {"role": "system", "content": sys_prompt_with_schema},
+        {
+            "role": "system",
+            "content": _cached_system(
+                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+            ),
+        },
         {
             "role": "user",
             "content": (
-                f"Extract predictor/model rows for cohort_id={cohort.cohort_id!r}. "
-                "Only emit rows whose anchor text is from the section/table reporting "
-                "this cohort. Return JSON.\n\n"
-                + json.dumps(user_payload)[:200_000]
+                f"Extract predictor/model rows for cohort_id={cohort.cohort_id!r} "
+                "from the paper in the system block. Only emit rows whose anchor "
+                "text is from the section/table reporting this cohort. Return JSON.\n\n"
+                f"Cohort context: {cohort_payload}"
             ),
         },
     ]
@@ -232,17 +265,7 @@ def run_predictor_extract(
     latency_ms = int((time.time() - t0) * 1000)
     raw = _check_resp(resp, "predictor_extract")
     parsed = PredictorExtractResponse.model_validate_json(_strip_fences(raw))
-    meta = {
-        "model": model,
-        "prompt_id": prompt_id,
-        "latency_ms": latency_ms,
-        "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
-        "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
-        "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-        ),
-    }
-    return parsed.rows, meta
+    return parsed.rows, _usage_meta(resp, model, prompt_id, latency_ms)
 
 
 def _strip_fences(s: str) -> str:
@@ -408,14 +431,21 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         "errors": [],
     }
 
-    def _bind_anchor(anchor) -> None:
+    def _bind_anchor(anchor) -> bool:
         """Replace LLM-emitted bbox+page+section with resolver lookup against
         the parsed paper. Anchor.text is left as-is (already verifier-checked).
-        Misses leave the anchor untouched and bump the missed counter."""
+        Misses leave the anchor untouched and bump the missed counter.
+
+        Returns True if the anchor resolved against the parsed paper, False
+        otherwise. Callers may use this to short-circuit the LLM verifier:
+        an unresolved anchor means the LLM cited text that isn't in the paper,
+        so the row is structurally suspect and should be marked partial
+        without paying for a Haiku call.
+        """
         hit = resolve(anchor.text or "", anchor.section, anchor_index)
         if hit is None:
             summary["anchor_missed"] += 1
-            return
+            return False
         bbox = hit.get("bbox")
         if bbox is not None:
             anchor.bbox = bbox
@@ -428,6 +458,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         if sec:
             anchor.section = sec
         summary["anchor_resolved"] += 1
+        return True
 
     # IMPORTANT: do NOT hold a session open across LLM calls. SQLite is a
     # single-writer DB; even with WAL+busy_timeout, an open transaction held
@@ -495,7 +526,18 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         summary["latency_ms_total"] += pm_meta["latency_ms"]
         row_verdicts: list[tuple] = []
         for r in rows:
-            _bind_anchor(r.anchor)
+            anchor_ok = _bind_anchor(r.anchor)
+            if not anchor_ok:
+                # Anchor doesn't resolve against parsed paper -> claim is
+                # structurally suspect. Mark partial directly; skip LLM verifier
+                # (it would just look at unresolvable text and waste a Haiku call).
+                verdict = VerifierResponse(
+                    verdict="partial", score=0.5,
+                    rationale="anchor_unresolved: anchor_text not found in parsed paper",
+                )
+                summary["verdict_counts"][verdict.verdict] += 1
+                row_verdicts.append((r, verdict))
+                continue
             try:
                 verdict, vmeta = run_verifier(
                     r.model_dump(mode="json"),
@@ -520,10 +562,18 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
 
         # Short-lived session per cohort: insert all predictor rows then close.
         if row_verdicts:
+            # Cost/tokens are per-call from a single predictor_extract;
+            # split evenly across rows so SUM(cost_usd) over rows reflects
+            # the actual call cost instead of N * call_cost.
+            n_rows = len(row_verdicts)
+            per_row_meta = dict(pm_meta)
+            for k in ("cost_usd", "tokens_in", "tokens_out"):
+                if per_row_meta.get(k):
+                    per_row_meta[k] = per_row_meta[k] / n_rows if k == "cost_usd" else per_row_meta[k] // n_rows
             with session_factory() as session:
                 for r, verdict in row_verdicts:
                     _insert_predictor(
-                        session, r, run_id=run_id, meta=pm_meta, verdict=verdict
+                        session, r, run_id=run_id, meta=per_row_meta, verdict=verdict
                     )
                     summary["n_rows"] += 1
                 session.commit()

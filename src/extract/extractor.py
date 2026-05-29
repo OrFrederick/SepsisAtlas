@@ -103,9 +103,29 @@ def _call_predictor_extract(messages, model, **kwargs):
     )
 
 
+def _cache_tokens(u) -> tuple[int, int, float]:
+    """Pull (cache_write, cache_read, cache_discount) from an OpenRouter usage.
+
+    OpenRouter's OpenAI-compatible response reports cache activity on
+    ``usage.prompt_tokens_details`` (``cache_write_tokens`` on the first
+    request that establishes the entry, ``cached_tokens`` on hits) plus a
+    top-level ``usage.cache_discount``. These are NOT the Anthropic-native
+    ``cache_{creation,read}_input_tokens`` names -- those never appear on
+    the OpenAI-compat object, so reading them always yields 0.
+    """
+    if not u:
+        return 0, 0, 0.0
+    ptd = getattr(u, "prompt_tokens_details", None)
+    write = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
+    read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
+    discount = float(getattr(u, "cache_discount", 0.0) or 0.0)
+    return write, read, discount
+
+
 def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
     """Common meta dict including cache-token fields (Anthropic via OpenRouter)."""
     u = getattr(resp, "usage", None)
+    cache_write, cache_read, cache_discount = _cache_tokens(u)
     return {
         "model": model,
         "prompt_id": prompt_id,
@@ -113,8 +133,9 @@ def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
         "tokens_in": getattr(u, "prompt_tokens", 0) if u else 0,
         "tokens_out": getattr(u, "completion_tokens", 0) if u else 0,
         "cost_usd": float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0,
-        "cache_creation_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0,
-        "cache_read_tokens": int(getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0,
+        "cache_creation_tokens": cache_write,
+        "cache_read_tokens": cache_read,
+        "cache_discount": cache_discount,
     }
 
 
@@ -147,21 +168,32 @@ def _paper_blob(paper_json: dict, paper_id: str) -> str:
     )[:200_000]
 
 
-def _cached_system(sys_prompt_with_schema: str, paper_blob: str) -> list[dict]:
-    """System message split into stable instructions + cacheable paper text.
+def _cached_system(
+    sys_prompt_with_schema: str, paper_blob: str, *, cache: bool = True
+) -> list[dict]:
+    """System message split into stable instructions + paper text.
 
-    Anthropic prompt-caching keys on the prefix up to and including the
-    block marked ``cache_control: ephemeral``. The paper text is the
-    common prefix across all per-cohort calls for the same paper, so
-    cohort 1 writes the cache and cohorts 2..N read it at 0.1× input cost.
+    When ``cache`` is True the paper block is marked
+    ``cache_control: ephemeral``. Anthropic prompt-caching keys on the
+    prefix up to and including that block, so for a stage that runs N
+    times per paper (predictor_extract, once per cohort) the first call
+    writes the cache and calls 2..N read it at ~0.1x input cost.
+
+    Caching has a write premium (Anthropic bills cache writes above
+    normal input and surfaces a negative ``cache_discount``). A stage
+    that runs only ONCE per paper (cohort_enum, phenotype_extract) would
+    pay that premium with no subsequent read, making it net more
+    expensive -- those callers pass ``cache=False``.
     """
+    paper_block: dict = {
+        "type": "text",
+        "text": f"PAPER (full parsed JSON):\n{paper_blob}",
+    }
+    if cache:
+        paper_block["cache_control"] = {"type": "ephemeral"}
     return [
         {"type": "text", "text": sys_prompt_with_schema},
-        {
-            "type": "text",
-            "text": f"PAPER (full parsed JSON):\n{paper_blob}",
-            "cache_control": {"type": "ephemeral"},
-        },
+        paper_block,
     ]
 
 
@@ -183,7 +215,9 @@ def run_cohort_enum(
         {
             "role": "system",
             "content": _cached_system(
-                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+                sys_prompt_with_schema,
+                _paper_blob(paper_json, paper_id),
+                cache=False,
             ),
         },
         {
@@ -220,6 +254,7 @@ def run_predictor_extract(
     paper_id: str,
     run_id: str,
     model: str = MODEL_EXTRACT,
+    cache: bool = True,
 ) -> tuple[list[PredictorModelOut], dict]:
     sys_prompt, prompt_id = _load_prompt("predictor_extract_v1.md")
     sys_prompt_with_schema = (
@@ -238,7 +273,9 @@ def run_predictor_extract(
         {
             "role": "system",
             "content": _cached_system(
-                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+                sys_prompt_with_schema,
+                _paper_blob(paper_json, paper_id),
+                cache=cache,
             ),
         },
         {
@@ -511,11 +548,15 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             )
         session.commit()
 
-    # Stage 2 per cohort: LLM extract + verify, then short session for insert
+    # Stage 2 per cohort: LLM extract + verify, then short session for insert.
+    # Only enable prompt caching when >1 cohort shares the paper text; a
+    # single-cohort paper would pay the cache-write premium with no read.
+    cache_predictor = len(cohorts) > 1
     for c in cohorts:
         try:
             rows, pm_meta = run_predictor_extract(
-                paper_json, c, paper_id=file_stem, run_id=run_id
+                paper_json, c, paper_id=file_stem, run_id=run_id,
+                cache=cache_predictor,
             )
         except Exception as e:
             summary["errors"].append(
@@ -562,14 +603,16 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
 
         # Short-lived session per cohort: insert all predictor rows then close.
         if row_verdicts:
-            # Cost/tokens are per-call from a single predictor_extract;
-            # split evenly across rows so SUM(cost_usd) over rows reflects
-            # the actual call cost instead of N * call_cost.
+            # Cost/tokens/latency are per-call from a single predictor_extract;
+            # split evenly across rows so SUM() over rows reflects the actual
+            # call totals instead of N * call_value.
             n_rows = len(row_verdicts)
             per_row_meta = dict(pm_meta)
-            for k in ("cost_usd", "tokens_in", "tokens_out"):
+            if per_row_meta.get("cost_usd"):
+                per_row_meta["cost_usd"] = per_row_meta["cost_usd"] / n_rows
+            for k in ("tokens_in", "tokens_out", "latency_ms"):
                 if per_row_meta.get(k):
-                    per_row_meta[k] = per_row_meta[k] / n_rows if k == "cost_usd" else per_row_meta[k] // n_rows
+                    per_row_meta[k] = per_row_meta[k] // n_rows
             with session_factory() as session:
                 for r, verdict in row_verdicts:
                     _insert_predictor(

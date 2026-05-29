@@ -86,7 +86,9 @@ def _run_phenotype_llm(
         {
             "role": "system",
             "content": _cached_system(
-                sys_prompt_with_schema, _paper_blob(paper_json, paper_id)
+                sys_prompt_with_schema,
+                _paper_blob(paper_json, paper_id),
+                cache=False,
             ),
         },
         {

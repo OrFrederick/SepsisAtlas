@@ -143,8 +143,15 @@ def logged_llm_call(stage: str):
                 tokens_in = getattr(u, "prompt_tokens", 0) if u else 0
                 tokens_out = getattr(u, "completion_tokens", 0) if u else 0
                 cost_usd = float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0
-                cache_creation = int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0
-                cache_read = int(getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0
+                # OpenRouter reports cache activity on prompt_tokens_details
+                # (cache_write_tokens on the establishing call, cached_tokens
+                # on hits) + top-level cache_discount. The Anthropic-native
+                # cache_{creation,read}_input_tokens names never appear on the
+                # OpenAI-compat usage object.
+                ptd = getattr(u, "prompt_tokens_details", None) if u else None
+                cache_creation = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
+                cache_read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
+                cache_discount = float(getattr(u, "cache_discount", 0.0) or 0.0) if u else 0.0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),
@@ -160,6 +167,7 @@ def logged_llm_call(stage: str):
                     "tokens_out": tokens_out,
                     "cache_creation_tokens": cache_creation,
                     "cache_read_tokens": cache_read,
+                    "cache_discount": cache_discount,
                     "cost_usd": cost_usd,
                     "latency_ms": latency_ms,
                     "error": err,

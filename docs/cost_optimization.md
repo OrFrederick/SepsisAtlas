@@ -52,12 +52,14 @@ Caveat: these error rates are May 7–8 only. May have shifted since.
 
 ### 1. Anthropic prompt caching on paper text
 
-Verifier (verify_llm.py) already does this. Extractor stages (cohort_enum, predictor_extract, phenotype_extract) do NOT — these are 90%+ of cost. Same paper text fed to all of them. Cache once, read on subsequent calls.
+Verifier (verify_llm.py) already does this. `predictor_extract` does NOT — it runs Sonnet once per cohort over the same paper text and is the dominant cost. Cache the paper once, read on cohorts 2..N.
+
+**Caching only pays off on stages that run >1× per paper.** `cohort_enum` and `phenotype_extract` each run exactly **once per paper**, so a cache breakpoint there only pays the write premium (Anthropic bills cache writes above normal input; OpenRouter surfaces it as a negative `cache_discount`) with no later read — net more expensive. Those stages send the paper as a plain (uncached) block. `predictor_extract` enables caching only when the paper has >1 cohort.
 
 - Pricing: cache write 1.25× input, cache read 0.1× input. TTL 5 min (cohort loop runs in seconds → guaranteed hits).
-- 3-cohort paper: ~60% off Sonnet input cost.
+- 3-cohort paper: ~60% off predictor_extract input cost.
 - 12-cohort paper (Chen_2021): ~85% off.
-- Expected impact: **median paper $0.82 → ~$0.25**.
+- Expected impact on multi-cohort papers: **median paper $0.82 → ~$0.25**.
 
 Implementation: in `src/extract/extractor.py` and `src/extract/run_phenotype.py`, restructure messages so paper text is its own content block with `cache_control: {type: "ephemeral"}`. Put system prompt + paper in cacheable prefix, cohort-specific user query after.
 
@@ -72,7 +74,7 @@ messages = [
 ]
 ```
 
-Verify via `usage.cache_creation_input_tokens` (first call) and `usage.cache_read_input_tokens` (subsequent).
+Verify via the OpenRouter usage object: `usage.prompt_tokens_details.cache_write_tokens` (first call, establishes the entry) and `usage.prompt_tokens_details.cached_tokens` (subsequent reads), plus the top-level `usage.cache_discount`. NB: the Anthropic-native `cache_creation_input_tokens` / `cache_read_input_tokens` names do NOT appear on OpenRouter's OpenAI-compatible response — reading them always returns 0.
 
 ### 2. Slim paper for predictor_extract — Results/Tables only
 
@@ -196,7 +198,7 @@ OpenRouter passes through Anthropic pricing + small markup (5%). For Anthropic-o
 
 - Audit `_LOG_PATH` resolution at run time. Likely cwd-dependent or wiped between runs.
 - Persist to DB `llm_calls` table too, not just jsonl. Adds a DB write per call but enables proper per-stage analysis.
-- Record `cache_creation_input_tokens` + `cache_read_input_tokens` separately so we can measure caching impact.
+- Record `prompt_tokens_details.cache_write_tokens` + `prompt_tokens_details.cached_tokens` (+ `cache_discount`) separately so we can measure caching impact.
 
 ### 18. Fix predictor_model.cost_usd duplication
 

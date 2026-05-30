@@ -47,22 +47,17 @@ services:
       # ${VAR} from that file at `up` time. Do NOT bake secrets into git
       # or the image.
       #
-      # REVALIDATE_TOKEN — required by app/api/revalidate/route.ts. Without
-      # it the endpoint returns 401 for every request and the route's POST
-      # handler logs the misconfiguration. Status: the receiver is live,
-      # but the Python exporter that POSTs to /api/revalidate after writing
-      # public/data/*.json is not yet implemented (tracked as a deploy
-      # follow-up). Until that lands, ISR is fed only by the per-route
-      # `revalidate = 3600` stale-while-revalidate window. Setting the
-      # token to anything is fine for now; it will become load-bearing
-      # once the exporter is wired up.
-      REVALIDATE_TOKEN: ${REVALIDATE_TOKEN:?REVALIDATE_TOKEN must be set in /opt/sepsisatlas/.env}
       # Feedback form → GitHub Issues. See web/src/lib/github.ts and
       # web/src/app/api/feedback/route.ts. All four are server-only.
       GITHUB_FEEDBACK_TOKEN: ${GITHUB_FEEDBACK_TOKEN:?GITHUB_FEEDBACK_TOKEN must be set in /opt/sepsisatlas/.env}
       GITHUB_FEEDBACK_REPO: ${GITHUB_FEEDBACK_REPO:?GITHUB_FEEDBACK_REPO must be set in /opt/sepsisatlas/.env}
       FEEDBACK_ALLOWED_ORIGIN: ${FEEDBACK_ALLOWED_ORIGIN:?FEEDBACK_ALLOWED_ORIGIN must be set in /opt/sepsisatlas/.env}
       FEEDBACK_MOUNT_SECRET: ${FEEDBACK_MOUNT_SECRET:?FEEDBACK_MOUNT_SECRET must be set in /opt/sepsisatlas/.env}
+      # SSR fetches from /papers and other backend routes resolve through
+      # this URL. Same compose network as the backend service, so the
+      # hostname is the service name. The client side still uses relative
+      # URLs (NEXT_PUBLIC_BACKEND_URL="") that Caddy proxies same-origin.
+      API_URL: "http://backend:8000"
       # Next reads NODE_ENV=production from the Dockerfile already; the
       # standalone server defaults to PORT=3000 / HOSTNAME=0.0.0.0 there.
     volumes:

@@ -18,6 +18,15 @@ const config: NextConfig = {
       { source: "/ingest_pubmed", destination: `${API_URL}/ingest_pubmed` },
       { source: "/health", destination: `${API_URL}/health` },
       { source: "/health/:path*", destination: `${API_URL}/health/:path*` },
+      // The /papers list and /papers/:stem detail are Next pages and must
+      // NOT be rewritten, or Caddy/Next would shadow them on hard navigations.
+      // SSR reaches /papers and /papers/:stem directly via process.env.API_URL.
+      //
+      // The /papers/:stem/rows rewrite is defensive: today loadRowsFor() runs
+      // server-side through API_URL and never hits this rewrite. Kept so a
+      // future client-side rows fetch (e.g. incremental loading from the
+      // detail page) works without touching this file or the Caddyfile.
+      { source: "/papers/:stem/rows", destination: `${API_URL}/papers/:stem/rows` },
       { source: "/phenotypes", destination: `${API_URL}/phenotypes` },
       { source: "/phenotypes/:path*", destination: `${API_URL}/phenotypes/:path*` },
     ];

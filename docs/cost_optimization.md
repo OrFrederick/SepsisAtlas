@@ -85,6 +85,8 @@ sys_prompt_with_schema = <predictor_extract_v1.md text>
                        + PAPER_BLOB                                # cache_control: ephemeral
 ```
 
+Note: `_cached_system()` returns this as two content blocks — `[{"type": "text", "text": sys_prompt_with_schema}, paper_block]` — with `cache_control: ephemeral` placed on the `paper_block` dict itself, not embedded inside its text. The `+` above is conceptual (byte-prefix equivalence for cache-key purposes); don't "simplify" the implementation to one concatenated string or you lose the per-block `cache_control` placement.
+
 Any of the following will silently invalidate every cached entry until the next write:
 
 - Editing `src/extract/prompts/predictor_extract_v1.md` (even a typo fix).
@@ -92,7 +94,7 @@ Any of the following will silently invalidate every cached entry until the next 
 - Pydantic version bumps that change `model_json_schema()` formatting (e.g. `$defs` ordering, `additionalProperties` defaults).
 - Touching `_schema_hint` itself, or the `"Return ONLY valid JSON..."` literal.
 
-Because the hit rate is invisible without inspecting `cache_read_tokens` in `logs/llm_calls.jsonl`, a regression here looks like a quiet 10× cost spike on `predictor_extract`. **After any of the changes above, run one multi-cohort paper (Chen_2021 is the canonical fixture, ~12 cohorts) and confirm `cache_read_tokens > 0` from cohort 2 onward** before merging.
+Because the hit rate is invisible without inspecting `cache_read_tokens` in `logs/llm_calls.jsonl`, a regression here looks like a quiet 10× cost spike on `predictor_extract`. **After any of the changes above, run one multi-cohort paper (Chen_2021 is the canonical fixture, 18 cohorts) and confirm `cache_read_tokens > 0` from cohort 2 onward** before merging. Prerequisite: item #17 (`llm_calls` logging) must be working end-to-end — the `@logged_llm_call` decorator records `cache_read_tokens` correctly, but the gate is only executable once a real extraction run actually lands rows in the JSONL log.
 
 ### 2. Slim paper for predictor_extract — Results/Tables only
 
@@ -154,9 +156,11 @@ OpenRouter request currently no max_tokens cap. Sonnet sometimes rambles preambl
 
 Switch to `response_format={"type": "json_schema", "json_schema": {...}}` where supported, drop the manual hint from system prompt.
 
-### 10. Reduce SDK max_retries from 3 → 1
+> **Procedural gate:** touching `_schema_hint` invalidates the predictor_extract cache prefix — see the *Cache-key sensitivity (runbook)* in §1 and run the Chen_2021 verification before merging.
 
-`src/sepsis_atlas/llm.py:72` sets `max_retries=3`. On rate-limit / transient errors, full request retries — that's the *whole paper* re-uploaded each retry. Cap at 1, handle higher-level retries explicitly with exponential backoff and dedup against `verifier_llm_cache`-style cache.
+### 10. Reduce SDK max_retries from 3 → 1 ✅ Done (PR #88, commit `1558045`)
+
+`src/sepsis_atlas/llm.py` sets `max_retries=1` (see comment block there for scope/rationale). Was `max_retries=3`. On rate-limit / transient errors, full request retries — that's the *whole paper* re-uploaded each retry. Capped at 1; higher-level retries should be handled explicitly with exponential backoff and dedup against `verifier_llm_cache`-style cache.
 
 ### 11. Parallelize cohort calls
 

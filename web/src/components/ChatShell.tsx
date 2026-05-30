@@ -45,7 +45,6 @@ const SLIDE_IN_RIGHT = {
   transition: { duration: 0.32, ease: [0.2, 0.7, 0.2, 1] as const },
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
-const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 const HISTORY_MAX = 50;
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
@@ -114,16 +113,6 @@ function saveHistory(h: Turn[]): void {
     /* quota errors are non-fatal */
   }
 }
-
-function loadViewerUrl(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(VIEWER_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
 
 function parseBbox(bbox: unknown): number[] | null {
   if (bbox == null) return null;
@@ -241,20 +230,8 @@ export default function ChatShell() {
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
-    const last = loadViewerUrl();
-    if (last) {
-      try {
-        const u = new URL(last);
-        const okOrigin = BACKEND_URL
-          ? u.origin === new URL(BACKEND_URL).origin
-          : u.origin === window.location.origin;
-        if (okOrigin) {
-          setViewerUrl(last);
-        }
-      } catch {
-        /* drop malformed urls silently */
-      }
-    }
+    // The viewer URL is intentionally NOT restored — the PDF pane should
+    // start collapsed and only open when the user clicks an evidence row.
     inputRef.current?.focus();
   }, []);
 
@@ -354,7 +331,6 @@ export default function ChatShell() {
   const clearAll = () => {
     try {
       localStorage.removeItem(HISTORY_KEY);
-      localStorage.removeItem(VIEWER_KEY);
     } catch {
       /* ignore */
     }
@@ -363,6 +339,11 @@ export default function ChatShell() {
     setViewerUrl("");
     setInput("");
     inputRef.current?.focus();
+  };
+
+  const closeViewer = () => {
+    setViewerUrl("");
+    setActiveRowKey(null);
   };
 
   // ---- auto-grow textarea (mirror the original behaviour) ----------------
@@ -452,10 +433,11 @@ export default function ChatShell() {
 
   const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
 
-  // Viewer panel is revealed the moment the user submits the first query
-  // (pending) or once any turn lands in history. Clearing chat collapses
-  // back to the centered-chat landing state.
-  const showPdf = pending || history.length > 0;
+  // The viewer panel is revealed only after the user clicks an evidence row
+  // (which sets viewerUrl). It collapses again when the user closes the pane
+  // (closeViewer) or clears the chat. Submitting a new query does NOT open
+  // the panel — the user has to opt in by clicking a row.
+  const showPdf = viewerUrl !== "";
 
   // Drive grid-template-columns via a CSS custom property so React only
   // touches the style object when chatPct changes. The actual track
@@ -470,7 +452,16 @@ export default function ChatShell() {
   // visual position is still mid-translate. Re-disabled instantly on
   // the reverse (Clear chat → solo). We key off the actual transitionend
   // on .viewer-wrap's transform so JS doesn't have to mirror the CSS
-  // duration — they stay in sync by construction.
+  // duration — they stay in sync by construction. A setTimeout fallback
+  // covers the cases where transitionend never fires (transition skipped
+  // because the property value didn't actually change between paints,
+  // event interrupted by a re-render, browser quirks); without the
+  // fallback, inert stays true and the PDF iframe can't be scrolled
+  // (issue #91).
+  // The fallback is set slightly above the CSS total of 600ms
+  // (transform 520ms + 80ms delay) so a real transitionend wins the race
+  // in the common case.
+  const VIEWER_REVEAL_FALLBACK_MS = 800;
   const [viewerInteractive, setViewerInteractive] = useState(false);
   useEffect(() => {
     if (!showPdf) {
@@ -494,7 +485,14 @@ export default function ChatShell() {
       }
     };
     wrap.addEventListener("transitionend", onEnd);
-    return () => wrap.removeEventListener("transitionend", onEnd);
+    const fallbackId = window.setTimeout(
+      () => setViewerInteractive(true),
+      VIEWER_REVEAL_FALLBACK_MS,
+    );
+    return () => {
+      wrap.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(fallbackId);
+    };
   }, [showPdf]);
 
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -672,7 +670,14 @@ export default function ChatShell() {
             ) : null}
           </div>
 
-          <form className="composer" onSubmit={onComposerSubmit} autoComplete="off">
+          {/* Capped width + centered so the input bar stays compact even though
+              the chat scrollback above fills the full pane (so tables can be
+              wide). Padding + flex layout still come from the .composer rule. */}
+          <form
+            className="composer mx-auto w-full max-w-[720px]"
+            onSubmit={onComposerSubmit}
+            autoComplete="off"
+          >
             <textarea
               ref={inputRef}
               rows={1}
@@ -717,7 +722,7 @@ export default function ChatShell() {
           <div className="viewer">
             <PdfViewerPane
               src={viewerUrl || null}
-              storageKey={VIEWER_KEY}
+              onClose={closeViewer}
               emptyHint="Click an evidence row to view the source PDF."
             />
           </div>

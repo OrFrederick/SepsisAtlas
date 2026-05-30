@@ -3,10 +3,7 @@ import type {
   ControllerEvent,
   ControllerOptions,
   PageEntry,
-  SearchMatch,
-  SearchSnapshot,
 } from "./types";
-import { buildPageIndex, computeMatchRects, findMatches } from "./search";
 
 type PdfjsLib = typeof import("pdfjs-dist");
 type PdfDoc = import("pdfjs-dist").PDFDocumentProxy;
@@ -29,13 +26,9 @@ export class PdfController {
   private bboxPage: number | null;
   private bboxOrigin: "tl" | "bl";
 
-  // Generation counters for stale-concurrency guards.
   // renderGen is bumped by rerenderAll(); renderPage bails after every await
   // when its snapshot no longer matches.
-  // searchGen is bumped by search() and clearSearch(); the search loop bails
-  // after every await when its snapshot no longer matches.
   private renderGen = 0;
-  private searchGen = 0;
 
   // Observers
   private renderObserver: IntersectionObserver | null = null;
@@ -43,10 +36,17 @@ export class PdfController {
   private resizeListener: (() => void) | null = null;
   private resizeTimer = 0;
 
-  // Search
-  private searchMatches: SearchMatch[] = [];
-  private searchQuery = "";
-  private searchActiveIdx = -1;
+  // Trackpad pinch / ctrl+wheel zoom: deltaY samples are accumulated
+  // between animation frames and applied as one setScale per frame so a
+  // continuous pinch doesn't trigger a rerender at 100+ Hz. We also stash
+  // the latest cursor client coords from the most recent wheel event so
+  // the rAF callback anchors to where the cursor actually is now, not
+  // where it was on the first event in the burst.
+  private wheelListener: ((e: WheelEvent) => void) | null = null;
+  private wheelRaf: number | null = null;
+  private wheelAccumDelta = 0;
+  private wheelLastX = 0;
+  private wheelLastY = 0;
 
   // Pending jump from parent (postMessage) before init() finishes
   private pendingJump: { page: number; bbox: number[] | null; origin: "tl" | "bl" } | null = null;
@@ -120,6 +120,35 @@ export class PdfController {
     this.resizeListener = onResize;
     window.addEventListener("resize", onResize);
 
+    // Trackpad pinch / ctrl+wheel zoom. Browsers fire a wheel event with
+    // ctrlKey=true for both gestures; calling preventDefault stops the
+    // browser's default page-level zoom so only the PDF scales. passive
+    // must be false for preventDefault to take effect.
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      this.userZoomLocked = true;
+      this.wheelAccumDelta += e.deltaY;
+      this.wheelLastX = e.clientX;
+      this.wheelLastY = e.clientY;
+      if (this.wheelRaf != null) return;
+      this.wheelRaf = requestAnimationFrame(() => {
+        this.wheelRaf = null;
+        const delta = this.wheelAccumDelta;
+        this.wheelAccumDelta = 0;
+        // Exponential mapping so equal-distance pinches scale by the same
+        // ratio regardless of current scale; 0.004 gives ~2% per typical
+        // pinch tick (~5px deltaY), which feels close to native.
+        const factor = Math.exp(-delta * 0.004);
+        const next = Math.max(0.5, Math.min(4, this.scale * factor));
+        if (next !== this.scale) {
+          this.setScale(next, { x: this.wheelLastX, y: this.wheelLastY });
+        }
+      });
+    };
+    this.wheelListener = onWheel;
+    this.stage.addEventListener("wheel", onWheel, { passive: false });
+
     // Flush any jump that arrived from the parent before init finished.
     if (this.pendingJump) {
       const p = this.pendingJump;
@@ -130,6 +159,8 @@ export class PdfController {
 
   destroy(): void {
     if (this.resizeListener) window.removeEventListener("resize", this.resizeListener);
+    if (this.wheelListener) this.stage.removeEventListener("wheel", this.wheelListener);
+    if (this.wheelRaf != null) cancelAnimationFrame(this.wheelRaf);
     this.renderObserver?.disconnect();
     this.visibilityObserver?.disconnect();
     this.pdfDoc?.destroy();
@@ -150,8 +181,23 @@ export class PdfController {
   next(): void { if (this.pdfDoc && this.currentPage < this.pdfDoc.numPages) this.goTo(this.currentPage + 1); }
   prev(): void { if (this.currentPage > 1) this.goTo(this.currentPage - 1); }
 
-  zoomIn(): void { this.userZoomLocked = true; this.setScale(Math.min(4, this.scale * 1.2)); }
-  zoomOut(): void { this.userZoomLocked = true; this.setScale(Math.max(0.5, this.scale / 1.2)); }
+  zoomIn(): void {
+    this.userZoomLocked = true;
+    this.setScale(Math.min(4, this.scale * 1.2), this.stageCenter());
+  }
+  zoomOut(): void {
+    this.userZoomLocked = true;
+    this.setScale(Math.max(0.5, this.scale / 1.2), this.stageCenter());
+  }
+
+  private stageCenter(): { x: number; y: number } {
+    // Synthetic cursor at the viewport's center so toolbar +/- behave like
+    // a pinch on the center of the screen: the content currently at the
+    // middle of the view stays at the middle, instead of the page top
+    // (the previous top-anchor) drifting under zoom.
+    const r = this.stage.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
   fitWidth(): void {
     if (!this.pdfDoc) return;
     this.pdfDoc.getPage(1).then(page => {
@@ -185,56 +231,144 @@ export class PdfController {
     });
   }
 
-  // ---- search ----
-
-  async search(query: string): Promise<void> {
-    // Bump searchGen before any await so a concurrent call from a later
-    // keystroke (or clearSearch) invalidates this invocation after any
-    // suspension point. Snapshot gen for our own checks.
-    this.searchGen++;
-    const gen = this.searchGen;
-
-    this.clearSearchOverlay();
-    this.searchQuery = query.toLowerCase();
-    this.searchActiveIdx = -1;
-    if (!this.searchQuery) { this.publishSearch(); return; }
-    this.emit({ type: "status", message: "searching…" });
-    for (const entry of this.pages) {
-      if (this.searchGen !== gen) return;
-      if (!entry.rendered) await this.renderPage(entry);
-      if (this.searchGen !== gen) return;
-      this.rebuildSearchForPage(entry);
-    }
-    if (this.searchGen !== gen) return;
-    this.emit({ type: "status", message: "" });
-    // Sort matches by page then position for stable navigation.
-    this.searchMatches.sort((a, b) =>
-      (a.page - b.page) || (a.startSpanIdx - b.startSpanIdx) || (a.startOffset - b.startOffset));
-    if (this.searchMatches.length > 0) this.gotoSearchHit(0);
-    else this.publishSearch();
-  }
-
-  searchNext(): void { this.gotoSearchHit(this.searchActiveIdx + 1); }
-  searchPrev(): void { this.gotoSearchHit(this.searchActiveIdx - 1); }
-
-  clearSearch(): void {
-    // Bump searchGen so any in-flight search() loop sees a stale snapshot and
-    // returns without pushing into searchMatches.
-    this.searchGen++;
-    this.clearSearchOverlay();
-    this.searchQuery = "";
-    this.searchActiveIdx = -1;
-    this.publishSearch();
-  }
-
   // ---- internals ----
 
   private emit(e: ControllerEvent): void { this.onEvent(e); }
 
-  private setScale(s: number): void {
+  private setScale(s: number, cursor?: { x: number; y: number }): void {
+    // Two scroll-anchoring modes:
+    //
+    // 1. Cursor-anchored (used by pinch / ctrl+wheel): keep the content
+    //    point under the cursor stationary so zoom feels like a magnifier
+    //    centered on the cursor. We snapshot which page wrap the cursor
+    //    sits in and the cursor's fractional (x, y) inside that wrap, then
+    //    after the rerender we adjust scrollLeft/scrollTop so the same
+    //    fractional point lands back at the same client coords.
+    //
+    // 2. Top-page (used by the toolbar +/- buttons): keep the page at the
+    //    top of the viewport in view. Snapshot the top-visible wrap and
+    //    its fractional y, restore after rerender.
+    //
+    // Without anchoring, stage.scrollTop is an absolute pixel value that
+    // lands on different content once the wraps above it grow or shrink,
+    // and the visible page appears to jump.
+    const anchor = cursor
+      ? this.captureCursorAnchor(cursor)
+      : this.captureTopAnchor();
     this.scale = s;
     this.emit({ type: "scaleChange", scale: s, scalePercent: Math.round((s / 1.5) * 100) });
-    this.rerenderAll();
+    void this.rerenderAll().then(() => {
+      if (anchor.kind === "cursor") this.restoreCursorAnchor(anchor);
+      else this.restoreTopAnchor(anchor);
+    });
+  }
+
+  private captureTopAnchor(): { kind: "top"; page: number; fraction: number } {
+    // offsetTop would only be reliable if the stage were a positioned
+    // ancestor of the page wraps — it isn't (only .pageWrap is
+    // position: relative). getBoundingClientRect sidesteps the offsetParent
+    // ambiguity entirely; we translate viewport-relative coordinates to the
+    // stage's scroll-content coordinates by adding scrollTop.
+    const stageRect = this.stage.getBoundingClientRect();
+    const top = this.stage.scrollTop;
+    for (const entry of this.pages) {
+      const wrapRect = entry.wrap.getBoundingClientRect();
+      const wrapTop = top + (wrapRect.top - stageRect.top);
+      const wrapH = wrapRect.height;
+      if (wrapTop + wrapH > top) {
+        const fraction = wrapH > 0
+          ? Math.max(0, Math.min(1, (top - wrapTop) / wrapH))
+          : 0;
+        return { kind: "top", page: entry.num, fraction };
+      }
+    }
+    return { kind: "top", page: this.currentPage, fraction: 0 };
+  }
+
+  private restoreTopAnchor(anchor: { page: number; fraction: number }): void {
+    const target = this.pages[anchor.page - 1];
+    if (!target) return;
+    const stageRect = this.stage.getBoundingClientRect();
+    const wrapRect = target.wrap.getBoundingClientRect();
+    const newTop = this.stage.scrollTop + (wrapRect.top - stageRect.top);
+    this.stage.scrollTop = newTop + anchor.fraction * wrapRect.height;
+  }
+
+  private captureCursorAnchor(cursor: { x: number; y: number }): {
+    kind: "cursor";
+    page: number;
+    fractionX: number;
+    fractionY: number;
+    cursorClientX: number;
+    cursorClientY: number;
+  } {
+    // Find the wrap the cursor sits inside. If the cursor isn't over any
+    // wrap (it's in the inter-page gutter or the padding), fall back to
+    // the nearest wrap by y so the zoom still feels stable instead of
+    // collapsing to the top of the document.
+    let inside: PageEntry | null = null;
+    let nearest: PageEntry | null = null;
+    let nearestDist = Infinity;
+    for (const entry of this.pages) {
+      const r = entry.wrap.getBoundingClientRect();
+      if (cursor.y >= r.top && cursor.y <= r.bottom) {
+        inside = entry;
+        break;
+      }
+      const dy = cursor.y < r.top ? r.top - cursor.y : cursor.y - r.bottom;
+      if (dy < nearestDist) {
+        nearestDist = dy;
+        nearest = entry;
+      }
+    }
+    const entry = inside ?? nearest ?? this.pages[this.currentPage - 1];
+    if (!entry) {
+      return {
+        kind: "cursor",
+        page: this.currentPage,
+        fractionX: 0.5,
+        fractionY: 0.5,
+        cursorClientX: cursor.x,
+        cursorClientY: cursor.y,
+      };
+    }
+    const r = entry.wrap.getBoundingClientRect();
+    const fractionX = r.width > 0
+      ? Math.max(0, Math.min(1, (cursor.x - r.left) / r.width))
+      : 0.5;
+    const fractionY = r.height > 0
+      ? Math.max(0, Math.min(1, (cursor.y - r.top) / r.height))
+      : 0.5;
+    return {
+      kind: "cursor",
+      page: entry.num,
+      fractionX,
+      fractionY,
+      cursorClientX: cursor.x,
+      cursorClientY: cursor.y,
+    };
+  }
+
+  private restoreCursorAnchor(anchor: {
+    page: number;
+    fractionX: number;
+    fractionY: number;
+    cursorClientX: number;
+    cursorClientY: number;
+  }): void {
+    const target = this.pages[anchor.page - 1];
+    if (!target) return;
+    // Wrap's actual position after the rerender — and the position it
+    // *should* be at (so the captured fractional point lands under the
+    // cursor's stored client coords). The diff is the scroll adjustment.
+    const r = target.wrap.getBoundingClientRect();
+    const desiredLeft = anchor.cursorClientX - anchor.fractionX * r.width;
+    const desiredTop = anchor.cursorClientY - anchor.fractionY * r.height;
+    const scrollLeft = this.stage.scrollLeft + (r.left - desiredLeft);
+    const scrollTop = this.stage.scrollTop + (r.top - desiredTop);
+    // Browser clamps to [0, scrollMax] automatically — no manual max needed.
+    this.stage.scrollLeft = Math.max(0, scrollLeft);
+    this.stage.scrollTop = Math.max(0, scrollTop);
   }
 
   private buildPageStub(num: number, viewport: import("pdfjs-dist").PageViewport): PageEntry {
@@ -258,12 +392,6 @@ export class PdfController {
     textLayer.style.height = `${cssH}px`;
     wrap.appendChild(textLayer);
 
-    const searchLayer = document.createElement("div");
-    searchLayer.className = "searchLayer";
-    searchLayer.style.width = `${cssW}px`;
-    searchLayer.style.height = `${cssH}px`;
-    wrap.appendChild(searchLayer);
-
     const bboxOverlay = document.createElement("div");
     bboxOverlay.className = "bboxOverlay";
     wrap.appendChild(bboxOverlay);
@@ -274,7 +402,7 @@ export class PdfController {
     wrap.appendChild(label);
 
     this.stage.appendChild(wrap);
-    return { num, wrap, canvas, textLayer, searchLayer, bboxOverlay, rendered: false, rendering: null, viewport: null };
+    return { num, wrap, canvas, textLayer, bboxOverlay, rendered: false, rendering: null, viewport: null };
   }
 
   private async renderPage(entry: PageEntry): Promise<void> {
@@ -304,8 +432,6 @@ export class PdfController {
       entry.canvas.style.height = `${cssH}px`;
       entry.textLayer.style.width = `${cssW}px`;
       entry.textLayer.style.height = `${cssH}px`;
-      entry.searchLayer.style.width = `${cssW}px`;
-      entry.searchLayer.style.height = `${cssH}px`;
 
       const ctx = entry.canvas.getContext("2d", { alpha: false })!;
       const transform = this.DPR !== 1 ? [this.DPR, 0, 0, this.DPR, 0, 0] : null;
@@ -316,7 +442,6 @@ export class PdfController {
       if (this.renderGen !== gen) return;
 
       entry.textLayer.replaceChildren();
-      entry.searchLayer.replaceChildren();
       const tl = new this.pdfjsLib!.TextLayer({
         textContentSource: page.streamTextContent(),
         container: entry.textLayer,
@@ -327,7 +452,6 @@ export class PdfController {
 
       entry.viewport = viewport;
       this.drawBbox(entry);
-      if (this.searchQuery) this.rebuildSearchForPage(entry);
       entry.rendered = true;
     })();
 
@@ -355,8 +479,16 @@ export class PdfController {
       entry.canvas.style.height = `${cssH}px`;
       entry.textLayer.style.width = `${cssW}px`;
       entry.textLayer.style.height = `${cssH}px`;
-      entry.searchLayer.style.width = `${cssW}px`;
-      entry.searchLayer.style.height = `${cssH}px`;
+      // Reposition the highlight overlay at the new scale immediately. The
+      // canvas itself only redraws when the IntersectionObserver fires
+      // renderPage (async), but the wrap has already grown/shrunk above —
+      // if we leave the overlay at its old left/top/width/height (CSS
+      // pixels frozen at the previous scale), it floats over the wrong
+      // chunk of the canvas (which the browser stretches to fit the new
+      // wrap dimensions). Updating entry.viewport gives drawBbox the
+      // right page-height for the bottom-left → top-left conversion.
+      entry.viewport = viewport;
+      this.drawBbox(entry);
       entry.rendered = false;
       // Clear the in-flight render reference too — otherwise a render started
       // before the zoom will still be reachable through `entry.rendering`, and
@@ -456,65 +588,5 @@ export class PdfController {
     overlay.style.width = `${w}px`;
     overlay.style.height = `${h}px`;
     overlay.style.display = "block";
-  }
-
-  // ---- search internals ----
-
-  private clearSearchOverlay(): void {
-    for (const entry of this.pages) entry.searchLayer.replaceChildren();
-    this.searchMatches = [];
-  }
-
-  private rebuildSearchForPage(entry: PageEntry): void {
-    this.searchMatches = this.searchMatches.filter(m => m.page !== entry.num);
-    entry.searchLayer.replaceChildren();
-    if (!this.searchQuery) return;
-    const spans = Array.from(entry.textLayer.querySelectorAll("span")) as HTMLSpanElement[];
-    if (spans.length === 0) return;
-    const index = buildPageIndex(spans);
-    const raw = findMatches(index, this.searchQuery);
-    for (const m of raw) {
-      const rects = computeMatchRects(entry.wrap, spans, m.startSpanIdx, m.endSpanIdx, m.startOffset, m.endOffset);
-      if (rects.length === 0) continue;
-      const divs = rects.map(r => {
-        const d = document.createElement("div");
-        d.className = "searchHit";
-        d.style.left = `${r.left}px`;
-        d.style.top = `${r.top}px`;
-        d.style.width = `${r.width}px`;
-        d.style.height = `${r.height}px`;
-        entry.searchLayer.appendChild(d);
-        return d;
-      });
-      this.searchMatches.push({ page: entry.num, startSpanIdx: m.startSpanIdx, startOffset: m.startOffset, divs });
-    }
-    // The global match array has been mutated in place; the previous
-    // `searchActiveIdx` no longer reliably points at the same hit. Reset
-    // it so the next Enter cycles to the first match, and republish so
-    // the toolbar updates the count.
-    this.searchActiveIdx = -1;
-    this.publishSearch();
-  }
-
-  private gotoSearchHit(idx: number): void {
-    if (this.searchMatches.length === 0) { this.publishSearch(); return; }
-    const wrapped = ((idx % this.searchMatches.length) + this.searchMatches.length) % this.searchMatches.length;
-    if (this.searchActiveIdx >= 0) {
-      for (const d of this.searchMatches[this.searchActiveIdx].divs) d.classList.remove("searchHitActive");
-    }
-    const hit = this.searchMatches[wrapped];
-    for (const d of hit.divs) d.classList.add("searchHitActive");
-    this.searchActiveIdx = wrapped;
-    hit.divs[0]?.scrollIntoView({ behavior: "smooth", block: "center" });
-    this.publishSearch();
-  }
-
-  private publishSearch(): void {
-    const snapshot: SearchSnapshot = {
-      query: this.searchQuery,
-      total: this.searchMatches.length,
-      activeIdx: this.searchMatches.length === 0 ? -1 : this.searchActiveIdx,
-    };
-    this.emit({ type: "searchChange", snapshot });
   }
 }

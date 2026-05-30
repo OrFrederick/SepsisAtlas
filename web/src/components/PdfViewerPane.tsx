@@ -7,6 +7,9 @@ type Props = {
   emptyHint?: React.ReactNode;
   storageKey?: string;
   targetOrigin?: string;
+  /** Called when the embedded PdfViewer asks to be closed (the × button in
+   *  its toolbar postMessages `sepsis-atlas:close` to this window). */
+  onClose?: () => void;
 };
 
 type ParsedHref = {
@@ -41,9 +44,25 @@ export default function PdfViewerPane({
   emptyHint = "Click an evidence row to view the source PDF.",
   storageKey,
   targetOrigin,
+  onClose,
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const currentStemRef = useRef<string | null>(null);
+
+  // Receive close requests from the embedded PdfViewer's toolbar × button.
+  // Source identity check (e.source === iframe.contentWindow) is sufficient
+  // for an action whose only effect is collapsing the local pane.
+  useEffect(() => {
+    if (!onClose) return;
+    function onMessage(e: MessageEvent) {
+      const iframe = iframeRef.current;
+      if (!iframe || e.source !== iframe.contentWindow) return;
+      const data = e.data as { type?: string } | null;
+      if (data?.type === "sepsis-atlas:close") onClose!();
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onClose]);
   // Captured once when the iframe first mounts so React renders <iframe src=...>
   // declaratively on the very first paint (no about:blank flash). All subsequent
   // src changes go through the effect's imperative path — the effect either

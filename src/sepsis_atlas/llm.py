@@ -69,6 +69,13 @@ def get_client() -> Any:
     # tokens for predictor_extract). 3 retries on transient errors = 4×
     # input cost on a failed call. Cap at 1; higher-level retry policies
     # belong in the extractor with proper dedup.
+    #
+    # Scope: this cap is process-global, so it also applies to verify_llm
+    # (Haiku, ~1.2k input) where the per-retry cost argument is much
+    # weaker. Accepted trade-off — verify_llm calls are already cached at
+    # the app level (`verifier_llm_cache`), so transient failures retry
+    # cheaply on the next paper. If a future stage needs different retry
+    # behavior, pass `max_retries=...` per-call instead of forking clients.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,

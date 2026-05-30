@@ -605,7 +605,10 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         if row_verdicts:
             # Cost/tokens/latency are per-call from a single predictor_extract;
             # split evenly across rows so SUM() over rows reflects the actual
-            # call totals instead of N * call_value.
+            # call totals instead of N * call_value. Integer floor-divide on
+            # token/latency columns is intentional — they're INTEGER in the
+            # schema and the rounding loss is at most (n_rows - 1) units per
+            # call (negligible vs the per-call totals). Don't "fix" to `/`.
             n_rows = len(row_verdicts)
             per_row_meta = dict(pm_meta)
             if per_row_meta.get("cost_usd"):

@@ -76,6 +76,24 @@ messages = [
 
 Verify via the OpenRouter usage object: `usage.prompt_tokens_details.cache_write_tokens` (first call, establishes the entry) and `usage.prompt_tokens_details.cached_tokens` (subsequent reads), plus the top-level `usage.cache_discount`. NB: the Anthropic-native `cache_creation_input_tokens` / `cache_read_input_tokens` names do NOT appear on OpenRouter's OpenAI-compatible response — reading them always returns 0.
 
+**Cache-key sensitivity (runbook).** Anthropic prompt caching keys on the *exact* byte prefix up to and including the `cache_control` block. In `extractor.py` that prefix is:
+
+```
+sys_prompt_with_schema = <predictor_extract_v1.md text>
+                       + "\n\nReturn ONLY valid JSON matching this JSON Schema:\n"
+                       + _schema_hint(PredictorExtractResponse)   # serialized model_json_schema()
+                       + PAPER_BLOB                                # cache_control: ephemeral
+```
+
+Any of the following will silently invalidate every cached entry until the next write:
+
+- Editing `src/extract/prompts/predictor_extract_v1.md` (even a typo fix).
+- Renaming/adding/reordering fields on `PredictorExtractResponse` or any nested model — `model_json_schema()` is order-sensitive in Pydantic's output, so an innocuous field reorder changes the serialized schema bytes and breaks the cache.
+- Pydantic version bumps that change `model_json_schema()` formatting (e.g. `$defs` ordering, `additionalProperties` defaults).
+- Touching `_schema_hint` itself, or the `"Return ONLY valid JSON..."` literal.
+
+Because the hit rate is invisible without inspecting `cache_read_tokens` in `logs/llm_calls.jsonl`, a regression here looks like a quiet 10× cost spike on `predictor_extract`. **After any of the changes above, run one multi-cohort paper (Chen_2021 is the canonical fixture, ~12 cohorts) and confirm `cache_read_tokens > 0` from cohort 2 onward** before merging.
+
 ### 2. Slim paper for predictor_extract — Results/Tables only
 
 `_slim_paper()` in extractor.py:111 only drops `full_text` + `offsets`. Predictor extraction only needs Results + Tables + Methods (for outcome definitions). Cohort_enum needs Abstract + Methods + Tables.

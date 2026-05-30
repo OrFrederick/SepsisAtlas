@@ -56,6 +56,36 @@ const SAMPLE_QUERIES = [
   "best AUC for 28-day mortality",
 ];
 
+// Editorial-clinical timing: same easing on every shell transition so they
+// feel like one motion language. Used by the grid / chat width / viewer
+// reveal below.
+const SPLIT_EASE = "cubic-bezier(0.2,0.7,0.2,1)";
+
+const SUMMARY_PROSE =
+  "[&>:first-child]:mt-0 [&>:last-child]:mb-0 [&_p]:my-0 [&_p]:mb-[10px] " +
+  "[&_h1]:mt-[14px] [&_h1]:mb-2 [&_h1]:text-fg [&_h1]:font-medium [&_h1]:font-serif " +
+  "[&_h1]:text-[1.3rem] [&_h1]:leading-[1.3] [&_h1]:tracking-[-0.2px] " +
+  "[&_h2]:mt-[14px] [&_h2]:mb-2 [&_h2]:text-fg [&_h2]:font-medium [&_h2]:font-serif " +
+  "[&_h2]:text-[1.18rem] [&_h2]:leading-[1.3] [&_h2]:tracking-[-0.2px] " +
+  "[&_h3]:mt-[14px] [&_h3]:mb-2 [&_h3]:text-fg [&_h3]:font-medium [&_h3]:font-serif " +
+  "[&_h3]:text-[1.05rem] [&_h3]:leading-[1.3] [&_h3]:tracking-[-0.2px] " +
+  "[&_h4]:mt-[14px] [&_h4]:mb-2 [&_h4]:text-fg [&_h4]:font-medium [&_h4]:font-serif " +
+  "[&_h4]:text-[1.05rem] [&_h4]:leading-[1.3] [&_h4]:tracking-[-0.2px] " +
+  "[&_ul]:mb-[10px] [&_ul]:pl-[22px] [&_ol]:mb-[10px] [&_ol]:pl-[22px] " +
+  "[&_li]:my-[3px] [&_li>p]:m-0 " +
+  "[&_a]:text-accent [&_a]:underline [&_a]:underline-offset-2 " +
+  "[&_code]:bg-panel-2 [&_code]:border [&_code]:border-border [&_code]:rounded " +
+  "[&_code]:py-0 [&_code]:px-1 [&_code]:text-[0.88em] [&_code]:font-mono " +
+  "[&_pre]:bg-panel-2 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-md " +
+  "[&_pre]:py-[10px] [&_pre]:px-3 [&_pre]:overflow-x-auto [&_pre]:mb-[10px] " +
+  "[&_pre_code]:bg-transparent [&_pre_code]:border-0 [&_pre_code]:p-0 " +
+  "[&_blockquote]:mb-[10px] [&_blockquote]:py-1 [&_blockquote]:px-3 " +
+  "[&_blockquote]:text-fg-muted [&_blockquote]:italic [&_blockquote]:border-l-2 [&_blockquote]:border-border " +
+  "[&_table]:mb-[10px] [&_table]:border-collapse [&_table]:text-[0.94em] [&_table]:font-sans " +
+  "[&_th]:py-[6px] [&_th]:px-[10px] [&_th]:text-left [&_th]:border [&_th]:border-border [&_th]:bg-panel-2 " +
+  "[&_td]:py-[6px] [&_td]:px-[10px] [&_td]:text-left [&_td]:border [&_td]:border-border " +
+  "[&_hr]:my-3 [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-border";
+
 type EvidenceRow = {
   paper_ref?: string;
   file_name?: string;
@@ -157,37 +187,32 @@ function buildViewerUrl(row: EvidenceRow): string {
   return url;
 }
 
-type VerdictKind = "ok" | "warn" | "fail" | "unk";
-
-function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
-  const s = String(v || "").toLowerCase();
-  if (s === "pass" || s === "ok") return { cls: "ok", glyph: "✓" };
-  if (s === "weak" || s === "warn" || s === "partial") return { cls: "warn", glyph: "~" };
-  if (s === "fail" || s === "reject") return { cls: "fail", glyph: "✗" };
-  return { cls: "unk", glyph: "?" };
-}
-
 // ---------- welcome -------------------------------------------------------
 
-function Welcome({ onChip }: { onChip: (q: string) => void }) {
+function Welcome({ onChip, solo }: { onChip: (q: string) => void; solo: boolean }) {
   return (
     <motion.div
-      className="welcome"
+      className={
+        "bg-panel border border-border rounded-md m-auto py-8 px-9 " +
+        (solo ? "max-w-none w-full" : "max-w-[540px]")
+      }
       initial={FADE_UP.initial}
       animate={FADE_UP.animate}
       transition={FADE_UP.transition}
     >
-      <h2>Evidence, anchored.</h2>
-      <p>
+      <h2 className="m-0 mb-3 text-fg text-[28px] font-medium font-serif tracking-[-0.4px] leading-[1.2]">
+        Evidence, anchored.
+      </h2>
+      <p className="m-0 mb-[18px] text-fg-soft text-[15px] leading-[1.6]">
         Ask about sepsis predictors, biomarkers, or outcomes. Answers are pinned to verbatim quotes
         from peer-reviewed papers; click any evidence row to inspect the cited PDF passage.
       </p>
-      <div className="chips">
+      <div className="flex flex-wrap gap-2">
         {SAMPLE_QUERIES.map((q, i) => (
           <motion.button
             key={q}
             type="button"
-            className="chip"
+            className="cursor-pointer py-[6px] px-[14px] rounded-full bg-panel-2 border border-border text-fg-soft text-[13px] transition-[border-color,background,color] duration-150 ease-out hover:border-accent hover:text-accent hover:bg-accent-soft"
             onClick={() => onChip(q)}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -457,12 +482,23 @@ export default function ChatShell() {
   // back to the centered-chat landing state.
   const showPdf = pending || history.length > 0;
 
-  // Drive grid-template-columns via a CSS custom property so React only
-  // touches the style object when chatPct changes. The actual track
-  // template lives in chat.css (.split / .split.active).
-  const splitStyle = useMemo(
-    () => ({ "--chat-pct": `${chatPct}%` }) as React.CSSProperties,
-    [chatPct],
+  // Drive the grid track template via inline style so React only writes a
+  // single declaration when chatPct changes; transition lives on the
+  // utility classes below.
+  const splitStyle = useMemo<React.CSSProperties>(
+    () =>
+      showPdf
+        ? {
+            gridTemplateColumns: `${chatPct}% calc(100% - ${chatPct}%)`,
+            transition: resizing
+              ? "none"
+              : `grid-template-columns 520ms ${SPLIT_EASE}`,
+          }
+        : {
+            gridTemplateColumns: "100% 0%",
+            transition: `grid-template-columns 520ms ${SPLIT_EASE}`,
+          },
+    [chatPct, resizing, showPdf],
   );
 
   // Pointer/focus stays disabled on the viewer pane until the slide-in
@@ -540,13 +576,33 @@ export default function ChatShell() {
     }
   };
 
+  // Solo (landing) tightens the chat column to a readable max-width and
+  // drops the composer top border; once the viewer reveals, the chat
+  // grows to fill the grid track.
+  const chatCls = showPdf
+    ? `flex flex-col bg-bg overflow-hidden max-w-none m-0`
+    : `flex flex-col bg-bg overflow-hidden max-w-[720px] mx-auto w-full`;
+  const chatTransition = `transition-[max-width] duration-[520ms] ease-[cubic-bezier(0.2,0.7,0.2,1)]`;
+
+  const scrollbackCls = showPdf
+    ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
+      "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
+    : "flex-1 overflow-y-auto pt-7 pb-3 px-9 flex flex-col gap-[22px] overscroll-contain " +
+      "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent";
+
+  const composerCls = showPdf
+    ? "bg-bg pt-[14px] pb-[22px] px-[22px] flex gap-[10px] items-end border-t border-border"
+    : "bg-bg pt-[14px] pb-8 px-9 flex gap-[10px] items-end";
+
   return (
     <MotionConfig reducedMotion="user">
-    <div className="chat-shell">
-      <div className="controls">
+    <main
+      className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:44px_1fr]"
+    >
+      <div className="flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg border-b border-border max-[480px]:flex-wrap max-[480px]:justify-start max-[480px]:gap-2 max-[480px]:px-3">
         <button
           type="button"
-          className="clear-btn"
+          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
           title="Clear chat history"
           onClick={clearAll}
         >
@@ -554,15 +610,16 @@ export default function ChatShell() {
         </button>
       </div>
 
-      <main
-        className={`split${resizing ? " resizing" : ""}${showPdf ? " active" : ""}`}
+      <section
+        className={`split grid h-full w-full overflow-hidden ${resizing ? "select-none cursor-col-resize" : ""}`}
         ref={splitRef}
         style={splitStyle}
       >
-        <section className="chat">
-          <div ref={scrollbackRef} className="scrollback">
+        <section className={`${chatCls} ${chatTransition} motion-reduce:transition-none`}>
+          <div ref={scrollbackRef} className={scrollbackCls}>
             {history.length === 0 && !pending ? (
               <Welcome
+                solo={!showPdf}
                 onChip={(q) => {
                   setInput(q);
                   // submit on next tick so the textarea autosize sees the new value
@@ -571,19 +628,19 @@ export default function ChatShell() {
               />
             ) : null}
             {history.map((turn, ti) => (
-              <div key={turn.ts} className="turn">
+              <div key={turn.ts} className="flex flex-col gap-[14px]">
                 <motion.div
-                  className="bubble-user"
+                  className="self-end max-w-[80%] py-[10px] px-[14px] bg-accent text-white border-0 text-[14.5px] rounded-[12px_12px_4px_12px] break-words whitespace-pre-wrap"
                   initial={SLIDE_IN_RIGHT.initial}
                   animate={SLIDE_IN_RIGHT.animate}
                   transition={SLIDE_IN_RIGHT.transition}
                 >
                   {turn.user_text}
                 </motion.div>
-                <div className="assistant">
+                <div className="self-start w-full flex flex-col gap-[14px]">
                   {turn.assistant.refused ? (
                     <motion.div
-                      className="refused"
+                      className="text-fg-muted italic py-1 px-[2px] font-serif"
                       initial={FADE_UP.initial}
                       animate={FADE_UP.animate}
                       transition={FADE_UP.transition}
@@ -594,7 +651,7 @@ export default function ChatShell() {
                     <>
                       {turn.assistant.summary ? (
                         <motion.div
-                          className="summary"
+                          className={`text-fg-soft text-[16px] pl-4 font-serif leading-[1.65] border-l-2 border-accent break-words ${SUMMARY_PROSE}`}
                           initial={FADE_UP.initial}
                           animate={FADE_UP.animate}
                           transition={{ ...FADE_UP.transition, delay: 0.08 }}
@@ -618,10 +675,10 @@ export default function ChatShell() {
                               onActivate={(ri, row) => activateRow(ti, ri, row)}
                             />
                           </motion.div>
-                          <div className="table-actions">
+                          <div className="mt-[10px] self-end inline-flex items-center gap-2">
                           <button
                             type="button"
-                            className="csv-download-btn"
+                            className="inline-flex items-center justify-center text-fg-muted border border-border rounded py-[5px] px-2 bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 [&_svg]:block"
                             onClick={() => {
                               const rows = (turn.assistant.rows || []) as Record<string, unknown>[];
                               if (rows.length === 0) return;
@@ -657,10 +714,10 @@ export default function ChatShell() {
               </div>
             ))}
             {pending ? (
-              <div className="turn">
-                <div className="assistant">
+              <div className="flex flex-col gap-[14px]">
+                <div className="self-start w-full flex flex-col gap-[14px]">
                   <motion.div
-                    className="thinking"
+                    className="text-fg-muted italic py-1 px-[2px] font-serif"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.3 }}
@@ -672,7 +729,7 @@ export default function ChatShell() {
             ) : null}
           </div>
 
-          <form className="composer" onSubmit={onComposerSubmit} autoComplete="off">
+          <form className={composerCls} onSubmit={onComposerSubmit} autoComplete="off">
             <textarea
               ref={inputRef}
               rows={1}
@@ -680,8 +737,13 @@ export default function ChatShell() {
               placeholder="Ask about sepsis predictors, biomarkers, or outcomes..."
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onInputKeyDown}
+              className="flex-1 bg-panel border border-border rounded py-[10px] px-3 resize-none overflow-y-auto outline-none min-h-10 max-h-[132px] leading-[1.5] transition-[border-color,box-shadow] duration-[180ms] ease-out focus:border-accent focus:shadow-[0_0_0_3px_rgba(63,104,178,0.10)] placeholder:text-fg-faint placeholder:italic"
             />
-            <button type="submit" className="send-btn" disabled={pending || !input.trim()}>
+            <button
+              type="submit"
+              className="bg-accent text-white rounded py-[10px] px-[18px] border-0 font-semibold cursor-pointer transition-[background,transform] duration-[180ms] ease-out disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-accent-hover enabled:hover:-translate-y-px"
+              disabled={pending || !input.trim()}
+            >
               Send
             </button>
           </form>
@@ -693,12 +755,24 @@ export default function ChatShell() {
             the reveal lands. Tabindex on the divider is therefore left at
             the static `0`; `inert` wins when set. */}
         <section
-          className="viewer-wrap"
           ref={viewerWrapRef}
           inert={!viewerInteractive}
+          // Two transition durations on purpose: opacity at 360ms, transform
+          // at 520ms — fade lands first, slide carries on. Stays in sync with
+          // the rest of the editorial-clinical motion language (520ms /
+          // SPLIT_EASE for spatial moves).
+          style={{
+            transition:
+              `opacity 360ms ${SPLIT_EASE} 80ms, transform 520ms ${SPLIT_EASE} 80ms`,
+          }}
+          className={
+            "relative h-full overflow-hidden motion-reduce:transition-none motion-reduce:transform-none " +
+            (showPdf
+              ? "opacity-100 translate-x-0"
+              : "opacity-0 translate-x-[28px]")
+          }
         >
           <div
-            className="divider"
             role="separator"
             aria-orientation="vertical"
             aria-valuemin={MIN_CHAT_PCT}
@@ -713,8 +787,25 @@ export default function ChatShell() {
             onPointerCancel={onDividerPointerCancel}
             onDoubleClick={onDividerDoubleClick}
             onKeyDown={onDividerKeyDown}
+            className={
+              "absolute top-0 bottom-0 left-0 w-2 z-[2] bg-transparent outline-none cursor-col-resize touch-none " +
+              "before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-px before:bg-border " +
+              "before:transition-[background,width] before:duration-[160ms] before:ease-out " +
+              "hover:before:bg-accent hover:before:w-[2px] " +
+              "focus-visible:before:bg-accent focus-visible:before:w-[2px] " +
+              "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] " +
+              (resizing ? "before:!bg-accent before:!w-[2px] " : "")
+            }
           />
-          <div className="viewer">
+          {/* Pointer-events shield on the iframe during drag: pointer-capture
+              on the divider should cover this on modern engines, but blocking
+              the iframe outright avoids any capture-quirk on edge cases. */}
+          <div
+            className={
+              "h-full relative z-0 bg-panel-3 [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:bg-white " +
+              (resizing ? "[&_iframe]:pointer-events-none" : "")
+            }
+          >
             <PdfViewerPane
               src={viewerUrl || null}
               storageKey={VIEWER_KEY}
@@ -722,8 +813,8 @@ export default function ChatShell() {
             />
           </div>
         </section>
-      </main>
-    </div>
+      </section>
+    </main>
     </MotionConfig>
   );
 }

@@ -86,13 +86,11 @@ describe("POST /api/feedback", () => {
 
   it("returns 400 when mount token signature is invalid", async () => {
     const good = signedMount();
-    // Flip the first char to a known-different value. Previous version
-    // (`replace(/^./, "f")`) was a no-op whenever the base64url signature
-    // happened to start with "f" (~1.5% of the time), making the test
-    // flaky depending on the per-run timestamp's HMAC output.
-    const first = good.sig[0];
-    const replacement = first === "a" ? "b" : "a";
-    const tampered = { ts: good.ts, sig: replacement + good.sig.slice(1) };
+    // Flip the first hex char to a guaranteed-different one. The previous
+    // `replace(/^./, "f")` was a no-op when the signature already started
+    // with "f" (~6% of runs), producing a flaky test.
+    const flipped = good.sig[0] === "0" ? "1" : "0";
+    const tampered = { ts: good.ts, sig: flipped + good.sig.slice(1) };
     const res = await callPost(
       { origin: "http://localhost" },
       validBody({ mount: tampered }),

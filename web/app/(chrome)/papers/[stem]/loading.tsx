@@ -4,8 +4,8 @@ export default function Loading() {
   // the last build). Roughly mirrors the eventual layout so the page
   // doesn't shift on first paint.
   return (
-    <div className="split-shell" style={{ padding: 12 }}>
-      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>Loading paper…</div>
-    </div>
+    <main className="split-shell p-3">
+      <div className="text-fg-muted text-[13px]">Loading paper…</div>
+    </main>
   );
 }

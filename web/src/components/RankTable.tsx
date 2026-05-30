@@ -11,17 +11,14 @@ type Props = {
 
 function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backendOrigin: string }) {
   if (rows.length === 0) {
-    return <em style={{ color: "var(--fg-muted)" }}>No supporting rows.</em>;
+    return <em className="text-fg-muted">No supporting rows.</em>;
   }
   return (
-    <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+    <table className="w-full text-xs border-collapse">
       <thead>
         <tr>
           {["Paper", "Cohort", "Predictor", "Effect", "Page", "Anchor"].map((h) => (
-            <th
-              key={h}
-              style={{ textAlign: "left", padding: "4px 6px", borderBottom: "1px solid #ddd" }}
-            >
+            <th key={h} className="text-left py-1 px-[6px] border-b border-border">
               {h}
             </th>
           ))}
@@ -32,13 +29,11 @@ function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backe
           const href = viewerHrefFor(backendOrigin, sr);
           return (
             <tr key={i}>
-              <td style={{ padding: "4px 6px" }}>{sr.paper_ref || "—"}</td>
-              <td style={{ padding: "4px 6px" }}>{sr.cohort_label || sr.cohort_id || "—"}</td>
-              <td style={{ padding: "4px 6px" }}>{sr.predictor || "—"}</td>
-              <td style={{ padding: "4px 6px", fontFamily: "ui-monospace, monospace" }}>
-                {effectStr(sr)}
-              </td>
-              <td style={{ padding: "4px 6px" }}>
+              <td className="py-1 px-[6px]">{sr.paper_ref || "—"}</td>
+              <td className="py-1 px-[6px]">{sr.cohort_label || sr.cohort_id || "—"}</td>
+              <td className="py-1 px-[6px]">{sr.predictor || "—"}</td>
+              <td className="py-1 px-[6px] font-mono">{effectStr(sr)}</td>
+              <td className="py-1 px-[6px]">
                 {sr.anchor_page && href ? (
                   <a href={href} target="_blank" rel="noopener">
                     p.{sr.anchor_page}
@@ -47,7 +42,7 @@ function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backe
                   "—"
                 )}
               </td>
-              <td style={{ padding: "4px 6px", color: "#555", fontStyle: "italic" }}>
+              <td className="py-1 px-[6px] text-fg-muted italic">
                 {sr.anchor_text ? String(sr.anchor_text).slice(0, 140) : ""}
               </td>
             </tr>
@@ -61,17 +56,17 @@ function SupportingTable({ rows, backendOrigin }: { rows: SupportingRow[]; backe
 export default function RankTable({ rows, backendOrigin }: Props) {
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   if (rows.length === 0) {
-    return <p style={{ color: "var(--fg-muted)" }}>No predictors ranked for these filters.</p>;
+    return <p className="text-fg-muted">No predictors ranked for these filters.</p>;
   }
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+    <table className="w-full text-[13px] border-collapse">
       <thead>
         <tr>
           {["#", "Predictor", "Best metric", "Best value (CI)", "# studies", "Top study", ""].map(
             (h) => (
               <th
                 key={h}
-                style={{ textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ccc" }}
+                className="text-left py-[6px] px-2 border-b-2 border-border-strong"
               >
                 {h}
               </th>
@@ -110,20 +105,20 @@ function Row({
 }) {
   return (
     <>
-      <tr style={{ borderBottom: "1px solid #eee" }}>
-        <td style={{ padding: "6px 8px" }}>{idx + 1}</td>
-        <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.predictor_canonical}</td>
-        <td style={{ padding: "6px 8px" }}>{row.best_metric}</td>
-        <td style={{ padding: "6px 8px", fontFamily: "ui-monospace, monospace" }}>
+      <tr className="border-b border-border">
+        <td className="py-[6px] px-2">{idx + 1}</td>
+        <td className="py-[6px] px-2 font-semibold">{row.predictor_canonical}</td>
+        <td className="py-[6px] px-2">{row.best_metric}</td>
+        <td className="py-[6px] px-2 font-mono">
           {fmtVal(row.best_metric, row.best_value, row.best_ci_lo, row.best_ci_hi)}
         </td>
-        <td style={{ padding: "6px 8px" }}>{row.n_studies}</td>
-        <td style={{ padding: "6px 8px" }}>{row.best_paper_ref || "—"}</td>
-        <td style={{ padding: "6px 8px" }}>
+        <td className="py-[6px] px-2">{row.n_studies}</td>
+        <td className="py-[6px] px-2">{row.best_paper_ref || "—"}</td>
+        <td className="py-[6px] px-2">
           <button
             type="button"
             onClick={onToggle}
-            style={{ fontSize: 12, padding: "2px 8px" }}
+            className="text-xs py-[2px] px-2 border border-border rounded bg-panel hover:bg-panel-2"
             aria-expanded={isOpen}
           >
             Details
@@ -131,8 +126,8 @@ function Row({
         </td>
       </tr>
       {isOpen && (
-        <tr style={{ background: "#f8fafc" }}>
-          <td colSpan={7} style={{ padding: "8px 12px" }}>
+        <tr className="bg-panel-2">
+          <td colSpan={7} className="py-2 px-3">
             <SupportingTable rows={row.supporting_rows} backendOrigin={backendOrigin} />
           </td>
         </tr>

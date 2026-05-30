@@ -72,6 +72,11 @@ type Props = {
   basePath: string;
 };
 
+const TH_BASE =
+  "px-3 py-[10px] text-left align-top bg-panel-2 text-fg-muted font-medium text-xs uppercase " +
+  "cursor-pointer select-none whitespace-nowrap tracking-[0.5px] border-b border-border";
+const TD_BASE = "px-3 py-[10px] text-left align-top border-b border-border";
+
 export default function PapersTable({ papers, basePath }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("last_update");
   const [sortDir, setSortDir] = useState<SortDir>(-1);
@@ -93,22 +98,27 @@ export default function PapersTable({ papers, basePath }: Props) {
   };
 
   return (
-    <table className="papers">
+    <table className="w-full bg-panel border border-border rounded-md overflow-hidden border-collapse">
       <thead>
         <tr>
           {COLS.map((c) => {
             const isActive = c.key === sortKey;
-            const cls = isActive ? (sortDir === 1 ? "sort-asc" : "sort-desc") : "";
+            const arrow = isActive ? (sortDir === 1 ? " ▲" : " ▼") : "";
             return (
               <th
                 key={c.key}
-                className={cls}
+                className={TH_BASE}
                 aria-sort={
                   isActive ? (sortDir === 1 ? "ascending" : "descending") : "none"
                 }
                 onClick={() => onHeaderClick(c.key)}
               >
                 {c.label}
+                {arrow && (
+                  <span className="text-accent" aria-hidden="true">
+                    {arrow}
+                  </span>
+                )}
               </th>
             );
           })}
@@ -118,22 +128,25 @@ export default function PapersTable({ papers, basePath }: Props) {
         {sorted.map((p) => {
           const href = `${b}papers/${encodeURIComponent(p.file_name)}/`;
           return (
-            <tr key={p.file_name}>
-              <td>
+            <tr
+              key={p.file_name}
+              className="transition-colors duration-[120ms] hover:bg-panel-2 [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:underline"
+            >
+              <td className={TD_BASE}>
                 <a href={href}>{p.file_name}</a>
               </td>
-              <td>
+              <td className={TD_BASE}>
                 <a href={href}>{p.title ?? ""}</a>
               </td>
-              <td>{paperYear(p) ?? ""}</td>
-              <td>{p.n_rows}</td>
-              <td className="col-ok">{p.verdicts?.ok ?? 0}</td>
-              <td className="col-weak">{p.verdicts?.weak ?? 0}</td>
-              <td className="col-fail">{p.verdicts?.fail ?? 0}</td>
-              <td className={`col-flag ${p.parsed ? "yes" : "no"}`}>
+              <td className={TD_BASE}>{paperYear(p) ?? ""}</td>
+              <td className={TD_BASE}>{p.n_rows}</td>
+              <td className={`${TD_BASE} text-ok tabular-nums`}>{p.verdicts?.ok ?? 0}</td>
+              <td className={`${TD_BASE} text-warn tabular-nums`}>{p.verdicts?.weak ?? 0}</td>
+              <td className={`${TD_BASE} text-fail tabular-nums`}>{p.verdicts?.fail ?? 0}</td>
+              <td className={`${TD_BASE} text-[11px] ${p.parsed ? "text-ok" : "text-fg-muted"}`}>
                 {p.parsed ? "yes" : "no"}
               </td>
-              <td>{p.last_update ?? ""}</td>
+              <td className={TD_BASE}>{p.last_update ?? ""}</td>
             </tr>
           );
         })}

@@ -28,6 +28,12 @@ function hrefFor(row: Row, basePath: string): string {
   );
 }
 
+const BADGE_BASE =
+  "inline-flex items-center justify-center py-px px-2 rounded-full text-[11px] font-semibold border tracking-[0.2px]";
+const BADGE_OK = `${BADGE_BASE} text-ok bg-ok-soft border-ok-border`;
+const BADGE_WARN = `${BADGE_BASE} text-warn bg-warn-soft border-warn-border`;
+const BADGE_FAIL = `${BADGE_BASE} text-fail bg-fail-soft border-fail-border`;
+
 export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUrl }: Props) {
   const [viewerUrl, setViewerUrl] = useState<string>(defaultViewerUrl);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
@@ -39,31 +45,28 @@ export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUr
     <SplitLayout
       left={
         <>
-          <nav className="paper-breadcrumb" style={{ marginBottom: 8, fontSize: 12 }}>
+          <nav className="mb-2 text-xs">
             <a href={`${b}papers/`}>← Papers</a>
           </nav>
-          <header
-            className="paper-header"
-            style={{ marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--border)" }}
-          >
-            <h1 style={{ margin: "0 0 4px", fontSize: 16, color: "var(--fg)" }}>
+          <header className="mb-3 pb-[10px] border-b border-border">
+            <h1 className="m-0 mb-1 text-base text-fg">
               {paper.title || paper.file_name}
             </h1>
             {subtitle && (
-              <p style={{ margin: "2px 0", color: "var(--fg-muted)", fontSize: 12 }}>{subtitle}</p>
+              <p className="my-[2px] text-fg-muted text-xs">{subtitle}</p>
             )}
-            <p style={{ margin: "6px 0 0", color: "var(--fg-muted)", fontSize: 12 }}>
+            <p className="mt-[6px] mb-0 text-fg-muted text-xs">
               <strong>{rows.length}</strong> evidence row{rows.length === 1 ? "" : "s"}
               {paper.verdicts && (
                 <>
                   {" · "}
-                  <span className="badge ok">ok {paper.verdicts.ok ?? 0}</span>{" "}
-                  <span className="badge warn">weak {paper.verdicts.weak ?? 0}</span>{" "}
-                  <span className="badge fail">fail {paper.verdicts.fail ?? 0}</span>
+                  <span className={BADGE_OK}>ok {paper.verdicts.ok ?? 0}</span>{" "}
+                  <span className={BADGE_WARN}>weak {paper.verdicts.weak ?? 0}</span>{" "}
+                  <span className={BADGE_FAIL}>fail {paper.verdicts.fail ?? 0}</span>
                 </>
               )}
             </p>
-            <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+            <p className="mt-[6px] mb-0 text-xs">
               <FeedbackButton
                 type="wrong-data"
                 paper={paper.file_name}
@@ -72,9 +75,9 @@ export default function PaperDetailPage({ paper, rows, basePath, defaultViewerUr
               />
             </p>
           </header>
-          <div className="paper-rows" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="flex flex-col gap-[10px]">
             {rows.length === 0 ? (
-              <p style={{ color: "var(--fg-muted)" }}>No extracted rows for this paper.</p>
+              <p className="text-fg-muted">No extracted rows for this paper.</p>
             ) : (
               rows.map((r) => (
                 <ResultCard

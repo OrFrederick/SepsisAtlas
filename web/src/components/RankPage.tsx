@@ -51,8 +51,8 @@ export default function RankPage({ backendUrl }: Props) {
 
   return (
     <>
-      <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>Rank predictors</h1>
-      <p style={{ color: "var(--fg-muted)", margin: "0 0 16px" }}>
+      <h1 className="m-0 mb-3 text-lg">Rank predictors</h1>
+      <p className="text-fg-muted m-0 mb-4">
         Pick an outcome and (optionally) a window. Predictors are ranked by
         best-available metric: AUC &gt; c-index &gt; OR &gt; HR &gt; RR.
       </p>
@@ -63,20 +63,11 @@ export default function RankPage({ backendUrl }: Props) {
         disabled={state.kind === "loading"}
       />
       {state.kind === "success" && state.data.fallback_note && (
-        <div
-          style={{
-            padding: "8px 12px",
-            marginBottom: 8,
-            background: "#fff7ed",
-            border: "1px solid #fed7aa",
-            borderRadius: 4,
-            fontSize: 13,
-          }}
-        >
+        <div className="py-2 px-3 mb-2 bg-warn-soft border border-warn-border rounded text-[13px] text-fg-soft">
           {state.data.fallback_note}
         </div>
       )}
-      <div style={{ fontSize: 12, color: "var(--fg-muted)", marginBottom: 8 }}>
+      <div className="text-xs text-fg-muted mb-2">
         {state.kind === "idle" && "Submit to load ranking."}
         {state.kind === "loading" && "Loading…"}
         {state.kind === "error" && state.message}

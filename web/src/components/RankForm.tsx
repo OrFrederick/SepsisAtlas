@@ -9,6 +9,10 @@ type Props = {
   disabled: boolean;
 };
 
+const LABEL = "flex flex-col gap-[2px] text-xs";
+const FIELD =
+  "bg-panel border border-border rounded px-[6px] py-1 outline-none focus:border-accent";
+
 export default function RankForm({ value, onChange, onSubmit, disabled }: Props) {
   return (
     <form
@@ -16,14 +20,14 @@ export default function RankForm({ value, onChange, onSubmit, disabled }: Props)
         e.preventDefault();
         onSubmit();
       }}
-      style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "end" }}
+      className="flex flex-wrap gap-2 mb-3 items-end"
     >
-      <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <label className={LABEL}>
         Outcome type
         <select
           value={value.outcomeType}
           onChange={(e) => onChange({ ...value, outcomeType: e.target.value })}
-          style={{ padding: "4px 6px" }}
+          className={FIELD}
         >
           {["mortality", "readmission", "los", "organ_failure", "other"].map((o) => (
             <option key={o} value={o}>
@@ -32,12 +36,12 @@ export default function RankForm({ value, onChange, onSubmit, disabled }: Props)
           ))}
         </select>
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <label className={LABEL}>
         Window (days)
         <select
           value={value.windowDays}
           onChange={(e) => onChange({ ...value, windowDays: e.target.value })}
-          style={{ padding: "4px 6px" }}
+          className={FIELD}
         >
           <option value="">any</option>
           {["28", "30", "60", "90", "180", "365"].map((d) => (
@@ -47,27 +51,27 @@ export default function RankForm({ value, onChange, onSubmit, disabled }: Props)
           ))}
         </select>
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <label className={LABEL}>
         Paper ref
         <input
           type="text"
           value={value.paperRef}
           placeholder="Schlapbach 2018"
           onChange={(e) => onChange({ ...value, paperRef: e.target.value })}
-          style={{ padding: "4px 6px" }}
+          className={FIELD}
         />
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <label className={LABEL}>
         Population contains
         <input
           type="text"
           value={value.populationContains}
           placeholder="ICU / pediatric / ..."
           onChange={(e) => onChange({ ...value, populationContains: e.target.value })}
-          style={{ padding: "4px 6px" }}
+          className={FIELD}
         />
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <label className={LABEL}>
         Top K
         <input
           type="number"
@@ -75,10 +79,14 @@ export default function RankForm({ value, onChange, onSubmit, disabled }: Props)
           max={200}
           value={value.topK}
           onChange={(e) => onChange({ ...value, topK: Number(e.target.value) || 50 })}
-          style={{ padding: "4px 6px", width: 80 }}
+          className={`${FIELD} w-20`}
         />
       </label>
-      <button type="submit" disabled={disabled} style={{ padding: "6px 14px", fontWeight: 600 }}>
+      <button
+        type="submit"
+        disabled={disabled}
+        className="bg-accent text-white border-0 py-[6px] px-[14px] rounded font-semibold cursor-pointer hover:bg-accent-hover disabled:opacity-50 disabled:cursor-default"
+      >
         Rank
       </button>
     </form>

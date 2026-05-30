@@ -34,3 +34,6 @@ pipelines/*/valves.json
 
 # Local debug scratch
 static/bbox_proof/
+
+# Local git worktrees (used by isolated dev sessions)
+.worktrees/

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "bun scripts/seed-data.mjs && bun run vendor && next build",
     "start": "next start",
     "vendor": "bun scripts/vendor-pdfjs.mjs",

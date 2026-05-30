@@ -8,6 +8,9 @@ const config: NextConfig = {
   // ship a ~30MB runtime instead of dragging the full bun-installed tree.
   // Required by docker/Dockerfile.frontend's COPY layout.
   output: "standalone",
+  // Hide the Next.js dev mode indicator (the small "N" badge in the
+  // bottom-left of every page in dev). Cosmetic only — no effect on prod.
+  devIndicators: false,
   // Mirror the Astro/Vite dev proxy so /query and friends hit FastAPI in `next dev`.
   // In prod, Caddy terminates these paths before they ever reach Node — these rules
   // exist so dev and prod use the same code path on the client side.

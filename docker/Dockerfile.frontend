@@ -109,6 +109,13 @@ COPY deploy/Caddyfile /etc/caddy/Caddyfile
 # store and force a fresh Let's Encrypt issuance — which trips LE's
 # "5 certs / 168h / exact identifier" rate limit after a few deploys and
 # falls back to ZeroSSL (or serves no cert at all).
+#
+# Pre-create /data and /config so the storage contract is visible in the
+# image itself. Without these, runs that skip the prod compose overlay
+# (local smoke tests, CI) would have Caddy silently create the dirs at
+# the container root and write certs ephemerally — the same silent-loss
+# failure mode this PR fixes, just at a different path.
+RUN mkdir -p /data /config
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \

@@ -548,12 +548,14 @@ def run_llm_judge(
         usage = getattr(resp_obj, "usage", None)
         tokens_in = getattr(usage, "prompt_tokens", 0) or 0
         tokens_out = getattr(usage, "completion_tokens", 0) or 0
-        cost_reported = float(getattr(usage, "total_cost", 0.0) or 0.0)
-        # OpenRouter's openai-compat response often omits total_cost; estimate
-        # from Haiku 4.5 list pricing as a fallback so the running total is
-        # informative. Haiku 4.5 list: $1/Mtok in, $5/Mtok out; cache reads
-        # are ~10% of input. We don't see the cache-hit ratio from the usage
-        # object so this slightly over-estimates when prompt caching helps.
+        cost_reported = float(getattr(usage, "cost", 0.0) or 0.0)
+        # OpenRouter's OpenAI-compat usage object exposes the billed cost on
+        # ``usage.cost`` (cache-adjusted, post-discount). If for some reason
+        # it's missing (e.g. a transient response shape change upstream),
+        # estimate from Haiku 4.5 list pricing -- $1/Mtok in, $5/Mtok out --
+        # so the running total stays informative. The fallback over-estimates
+        # whenever prompt caching actually helped, because we cannot infer
+        # the cache-hit ratio without ``usage.cost`` itself.
         if cost_reported > 0.0:
             cost_usd = cost_reported
         else:

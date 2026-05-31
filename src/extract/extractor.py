@@ -175,7 +175,7 @@ def run_cohort_enum(
         "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
         "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
         "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
+            getattr(getattr(resp, "usage", None), "cost", 0.0) or 0.0
         ),
     }
     return parsed.cohorts, meta
@@ -240,7 +240,7 @@ def run_predictor_extract(
         "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
         "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
         "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
+            getattr(getattr(resp, "usage", None), "cost", 0.0) or 0.0
         ),
     }
     return parsed.rows, meta

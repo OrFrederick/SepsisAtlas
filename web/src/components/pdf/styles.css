@@ -1,4 +1,23 @@
-/* web/src/components/pdf/styles.css */
+/* web/src/components/pdf/styles.css
+
+   The PDF viewer keeps its own warm/cream palette as CSS variables on
+   `.pdf-viewer` so the reader area stays visually distinct from the
+   global cool/gray Tailwind theme. Toolbar/stage JSX in PdfViewer.tsx
+   references these as arbitrary-value Tailwind utilities like
+   `bg-[var(--bg)]`; the rules below cover the page-rendering DOM that
+   PdfController builds with string class names (pageWrap, pdfCanvas,
+   textLayer, bboxOverlay, pageLabel) and therefore can't be reached by
+   inline utilities. Rule bodies use @apply where the result is
+   identical; raw CSS stays only for things without a clean utility
+   (pseudo-element selectors, the textLayer span positioning, the
+   bbox overlay's blended highlight color).
+*/
+
+/* Pull in Tailwind v4's theme + custom utility definitions so @apply
+   works inside this component-scoped CSS file. @reference loads context
+   without emitting any duplicate CSS. */
+@reference "../../styles/tailwind.css";
+
 .pdf-viewer {
   --bg: #FAFAF7;
   --panel: #FFFFFF;
@@ -14,176 +33,52 @@
   --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui,
           "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--panel-3);
-  color: var(--fg);
-  font-family: var(--sans);
 }
-.pdf-viewer__toolbar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; gap: 6px; align-items: center;
-  padding: 5px 12px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  font-family: var(--sans);
-  font-size: 12px;
-  height: 36px;
-  box-sizing: border-box;
-  /* Narrow chat-right pane: let the toolbar scroll horizontally instead
-     of overflowing into the page area. The filename link (right-aligned)
-     stays clickable by shrinking with ellipsis (see .pdf-viewer__open). */
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-.pdf-viewer__toolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
-.pdf-viewer__toolbar button {
-  background: var(--panel); color: var(--fg-soft);
-  border: 1px solid var(--border);
-  padding: 2px 9px; border-radius: 3px; cursor: pointer;
-  font: inherit; font-size: 12px; line-height: 1.4;
-  white-space: nowrap; flex-shrink: 0;
-  display: inline-flex; align-items: center; gap: 4px;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-.pdf-viewer__toolbar button:hover:not(:disabled) {
-  background: var(--panel-2);
-  border-color: var(--border-strong);
-  color: var(--fg);
-}
-.pdf-viewer__toolbar button:disabled { opacity: 0.4; cursor: default; }
-.pdf-viewer__toolbar input {
-  background: var(--panel); color: var(--fg);
-  border: 1px solid var(--border);
-  padding: 2px 6px; border-radius: 3px;
-  font: inherit; font-size: 12px; line-height: 1.4;
-  box-sizing: border-box; height: 24px;
-  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
-}
-.pdf-viewer__toolbar input:focus { outline: none; border-color: var(--accent); }
-.pdf-viewer__page-input { width: 44px; text-align: center; }
-.pdf-viewer__page-total {
-  color: var(--muted);
-  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-.pdf-viewer__zoom-info {
-  color: var(--muted); min-width: 44px; text-align: center;
-  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-.pdf-viewer__search { width: 170px; min-width: 110px; flex-shrink: 1; }
-.pdf-viewer__search-info {
-  color: var(--muted); min-width: 36px; text-align: right;
-  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-.pdf-viewer__open {
-  margin-left: auto;
-  display: inline-flex; align-items: center; gap: 4px;
-  max-width: 240px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--panel);
-  color: var(--fg-soft);
-  font: inherit; font-size: 12px; line-height: 1.4;
-  text-decoration: none;
-  white-space: nowrap;
-  flex-shrink: 1;
-  min-width: 0;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-.pdf-viewer__open:hover {
-  background: var(--panel-2);
-  border-color: var(--border-strong);
-  color: var(--fg);
-}
-.pdf-viewer__open-name {
-  font-family: var(--mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.pdf-viewer__open-arrow { color: var(--muted); flex-shrink: 0; }
-.pdf-viewer__status {
-  color: var(--muted); font-style: italic;
-  flex-shrink: 0;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pdf-viewer__stage {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 28px 16px 80px;
-  gap: 22px;
-  background: var(--panel-3);
-  overflow-y: auto;
-}
-/*
-  The controller creates page DOM with bare class names (pageWrap, pdfCanvas,
-  textLayer, searchLayer, bboxOverlay, pageLabel) because it has no knowledge
-  of the React component's scoping. We scope every rule under `.pdf-viewer`
-  here so those bare names can't collide with anything else on the page
-  (notably pdf.js's own `pdf_viewer.css`, which uses `.textLayer`).
-*/
+
 .pdf-viewer .pageWrap {
-  position: relative;
-  background: #fff;
-  border: 1px solid var(--border);
-  box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
-  /* The stage is a flex column; without flex-shrink: 0 the inline height set
+  @apply relative bg-white border border-[var(--border)] shrink-0 mx-auto;
+  /* shrink-0: the stage is a flex column; without it the inline height set
      by the controller (e.g. 1220px) collapses to ~30px because flex items
-     shrink to fit the cross axis by default. */
-  flex-shrink: 0;
+     shrink to fit the cross axis by default.
+     mx-auto: centers the wrap horizontally when it fits the stage's content
+     box, and collapses to 0 (left-aligned) when the wrap is wider than the
+     stage so the horizontal scroll reaches both edges. */
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02), 0 8px 24px rgba(26, 22, 20, 0.06);
 }
-.pdf-viewer .pdfCanvas { position: absolute; left: 0; top: 0; }
+
+.pdf-viewer .pdfCanvas {
+  @apply absolute left-0 top-0;
+}
+
 .pdf-viewer .textLayer {
-  position: absolute; left: 0; top: 0;
-  overflow: hidden;
-  line-height: 1.0;
-  user-select: text;
+  @apply absolute left-0 top-0 overflow-hidden leading-none select-text;
   forced-color-adjust: none;
 }
-.pdf-viewer .textLayer ::selection { background: rgba(15, 76, 92, 0.25); }
-.pdf-viewer .textLayer span, .pdf-viewer .textLayer br {
-  color: transparent;
-  position: absolute;
-  white-space: pre;
-  cursor: text;
+
+.pdf-viewer .textLayer ::selection {
+  background: rgba(15, 76, 92, 0.25);
+}
+
+.pdf-viewer .textLayer span,
+.pdf-viewer .textLayer br {
+  @apply absolute whitespace-pre cursor-text text-transparent;
   transform-origin: 0% 0%;
 }
-.pdf-viewer .searchLayer {
-  position: absolute; left: 0; top: 0;
-  pointer-events: none;
-}
-.pdf-viewer .searchLayer .searchHit {
-  position: absolute;
-  background: rgba(255, 226, 92, 0.55);
-  border-radius: 1px;
-  mix-blend-mode: multiply;
-}
-.pdf-viewer .searchLayer .searchHit.searchHitActive {
-  background: rgba(255, 180, 30, 0.85);
-  box-shadow: 0 0 0 1px rgba(204, 110, 16, 0.7);
-}
+
 .pdf-viewer .bboxOverlay {
-  position: absolute;
-  pointer-events: none;
+  @apply absolute pointer-events-none rounded-[1px] hidden mix-blend-multiply;
   background: rgba(255, 226, 92, 0.55);
-  mix-blend-mode: multiply;
-  border-radius: 1px;
-  display: none;
   box-shadow: 0 0 0 1px rgba(204, 150, 16, 0.55);
 }
+
 .pdf-viewer .pageLabel {
-  position: absolute; left: 10px; top: 10px;
-  color: var(--faint); font-size: 11px;
+  @apply absolute left-2.5 top-2.5 pointer-events-none tabular-nums;
+  color: var(--faint);
   font-family: var(--mono);
-  font-feature-settings: "tnum";
-  pointer-events: none;
+  font-size: 11px;
 }
+
+/* `::highlight()` rules for find-in-PDF live in PdfController via an
+   injected <style> tag (see ensureHighlightStyles). Next.js's LightningCSS
+   pipeline rejects the pseudo-element here at build time, so we sidestep
+   the parser by emitting the rules at runtime. */

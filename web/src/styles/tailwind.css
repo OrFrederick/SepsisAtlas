@@ -595,24 +595,12 @@
     pointer-events: none;
   }
 
-  /* Landing → split chat width animation. Solo mode caps the chat at a
-     readable column centered in the viewport; once the viewer panel is
-     revealed the chat fills its grid track. */
-  .split .chat {
-    @apply max-w-[720px] mx-auto w-full;
-    transition: max-width 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  }
-  .split.active .chat {
-    @apply max-w-none m-0;
-  }
-
-  /* Landing-state alignment: welcome card and composer share the same
-     inner column so their left/right edges line up. The thin top border
-     on the composer is dropped in solo mode since there is nothing
-     above it to separate. */
-  .split:not(.active) .welcome {
-    @apply max-w-none w-full;
-  }
+  /* Landing-state composer chrome: drop the top border in solo mode since
+     there's nothing above it to separate, and give it a touch more breathing
+     room. The welcome card keeps its base .chat-shell .welcome max-width
+     (~540px) in both modes — it used to be forced full-width to fill the
+     720px chat column, but the chat is no longer column-capped, so the
+     override would make the card span the whole pane. */
   .split:not(.active) .scrollback {
     padding: 28px 36px 12px;
   }

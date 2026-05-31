@@ -1,77 +1,54 @@
 import { describe, it, expect } from "vitest";
-import { buildPageIndex, findMatches, mergeRectsByLine } from "../../src/components/pdf/search";
-import type { Rect } from "../../src/components/pdf/types";
-
-function mockSpan(text: string): HTMLSpanElement {
-  const s = document.createElement("span");
-  s.textContent = text;
-  return s;
-}
+import { buildPageIndex, findHitsInPage } from "../../src/components/pdf/search";
 
 describe("buildPageIndex", () => {
-  it("concatenates span text with single-space separators and tracks offsets", () => {
-    const spans = [mockSpan("Sepsis"), mockSpan("is"), mockSpan("severe.")];
-    const idx = buildPageIndex(spans);
-    expect(idx.lower).toBe("sepsis is severe.");
-    expect(idx.spanStart).toEqual([0, 7, 10]);
-    expect(idx.spanEnd).toEqual([6, 9, 17]);
+  it("concatenates items with single-space separators and tracks offsets", () => {
+    const idx = buildPageIndex(["Sepsis", "is", "severe."]);
+    expect(idx.text).toBe("sepsis is severe.");
+    expect(idx.itemStart).toEqual([0, 7, 10]);
+    expect(idx.itemEnd).toEqual([6, 9, 17]);
+  });
+
+  it("lowercases for case-insensitive matching", () => {
+    const idx = buildPageIndex(["SEPSIS"]);
+    expect(idx.text).toBe("sepsis");
   });
 });
 
-describe("findMatches", () => {
-  it("returns each substring occurrence with its span range and offsets", () => {
-    const spans = [mockSpan("Sepsis"), mockSpan("is"), mockSpan("severe sepsis.")];
-    const idx = buildPageIndex(spans);
-    const matches = findMatches(idx, "sepsis");
-    expect(matches).toHaveLength(2);
-    expect(matches[0]).toMatchObject({ startSpanIdx: 0, startOffset: 0 });
-    expect(matches[1]).toMatchObject({ startSpanIdx: 2 });
+describe("findHitsInPage", () => {
+  it("returns one hit per substring occurrence with item coordinates", () => {
+    const items = ["Sepsis", "is", "severe sepsis."];
+    const hits = findHitsInPage(3, items, "sepsis");
+    expect(hits).toHaveLength(2);
+    expect(hits[0]).toEqual({ page: 3, startItem: 0, startOffset: 0, endItem: 0, endOffset: 6 });
+    expect(hits[1]).toEqual({ page: 3, startItem: 2, startOffset: 7, endItem: 2, endOffset: 13 });
   });
 
-  it("returns empty array on no match", () => {
-    const spans = [mockSpan("hello world")];
-    expect(findMatches(buildPageIndex(spans), "xyz")).toEqual([]);
+  it("is case-insensitive", () => {
+    const hits = findHitsInPage(1, ["Septic Shock"], "shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 7, endItem: 0, endOffset: 12 });
   });
 
-  it("handles queries that span across span boundaries (with the implicit space)", () => {
-    const spans = [mockSpan("foo"), mockSpan("bar")];
-    const matches = findMatches(buildPageIndex(spans), "foo bar");
-    expect(matches).toHaveLength(1);
-    // The cross-boundary match must report the full span range + offsets so
-    // computeMatchRects can paint the highlight over both spans, not just
-    // the first. Without these asserts a regression that drops `endSpanIdx`
-    // would silently under-highlight.
-    expect(matches[0]).toMatchObject({
-      startSpanIdx: 0,
-      startOffset: 0,
-      endSpanIdx: 1,
-      endOffset: 3,
-    });
-  });
-});
-
-describe("mergeRectsByLine", () => {
-  it("merges adjacent rects on the same line into one rect", () => {
-    const rects: Rect[] = [
-      { left: 0, top: 10, width: 20, height: 14 },
-      { left: 22, top: 10, width: 30, height: 14 },
-    ];
-    const merged = mergeRectsByLine(rects);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toEqual({ left: 0, top: 10, width: 52, height: 14 });
+  it("matches a phrase that straddles two text items", () => {
+    // Concatenated: "septic shock" — search "septic shock" should match across items.
+    const hits = findHitsInPage(2, ["septic", "shock"], "septic shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toEqual({ page: 2, startItem: 0, startOffset: 0, endItem: 1, endOffset: 5 });
   });
 
-  it("keeps rects on different lines separate", () => {
-    const rects: Rect[] = [
-      { left: 0, top: 10, width: 20, height: 14 },
-      { left: 0, top: 30, width: 30, height: 14 },
-    ];
-    expect(mergeRectsByLine(rects)).toHaveLength(2);
+  it("returns no hits for empty query", () => {
+    expect(findHitsInPage(1, ["anything"], "")).toEqual([]);
   });
 
-  it("returns input unchanged when length <= 1", () => {
-    expect(mergeRectsByLine([])).toEqual([]);
-    const single: Rect[] = [{ left: 1, top: 2, width: 3, height: 4 }];
-    expect(mergeRectsByLine(single)).toEqual(single);
+  it("returns no hits when nothing matches", () => {
+    expect(findHitsInPage(1, ["sepsis"], "covid")).toEqual([]);
+  });
+
+  it("handles overlapping potential matches by advancing past each", () => {
+    // "aaaa" with query "aa" should yield non-overlapping hits at 0 and 2.
+    const hits = findHitsInPage(1, ["aaaa"], "aa");
+    expect(hits).toHaveLength(2);
+    expect(hits.map(h => h.startOffset)).toEqual([0, 2]);
   });
 });

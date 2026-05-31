@@ -458,9 +458,11 @@ export default function ChatShell() {
   // event interrupted by a re-render, browser quirks); without the
   // fallback, inert stays true and the PDF iframe can't be scrolled
   // (issue #91).
-  // The fallback is set slightly above the CSS total of 600ms
-  // (transform 520ms + 80ms delay) so a real transitionend wins the race
-  // in the common case.
+  // The fallback is set slightly above the CSS total of 600ms so a real
+  // transitionend wins the race in the common case. The 600ms is the
+  // `.viewer-wrap` transform timing in src/styles/tailwind.css
+  // (`transform 520ms … 80ms` delay) — keep this constant above that sum if
+  // the CSS timing changes.
   const VIEWER_REVEAL_FALLBACK_MS = 800;
   const [viewerInteractive, setViewerInteractive] = useState(false);
   useEffect(() => {

@@ -50,15 +50,23 @@ export default function PdfViewerPane({
   const currentStemRef = useRef<string | null>(null);
 
   // Receive close requests from the embedded PdfViewer's toolbar × button.
-  // Source identity check (e.source === iframe.contentWindow) is sufficient
-  // for an action whose only effect is collapsing the local pane.
+  // Gate on both the source window (must be our iframe) and the origin (must
+  // match the iframe's own src) so an unrelated frame can't collapse the pane.
   useEffect(() => {
     if (!onClose) return;
+    const cb = onClose; // local binding so the closure doesn't need `onClose!`
     function onMessage(e: MessageEvent) {
       const iframe = iframeRef.current;
       if (!iframe || e.source !== iframe.contentWindow) return;
+      // Best-effort origin check: the viewer loads from exactly iframe.src's
+      // origin, so a close message must come from there. If iframe.src isn't a
+      // parseable absolute URL, fall back to the source-identity check alone.
+      let expectedOrigin: string | null = null;
+      try { expectedOrigin = new URL(iframe.src, window.location.origin).origin; }
+      catch { expectedOrigin = null; }
+      if (expectedOrigin && e.origin !== expectedOrigin) return;
       const data = e.data as { type?: string } | null;
-      if (data?.type === "sepsis-atlas:close") onClose!();
+      if (data?.type === "sepsis-atlas:close") cb();
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

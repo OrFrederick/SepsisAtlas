@@ -563,6 +563,12 @@ export class PdfController {
     wrap.dataset.page = String(num);
     wrap.style.width = `${cssW}px`;
     wrap.style.height = `${cssH}px`;
+    // pdfjs 4.x text-layer spans position themselves with
+    // `calc(var(--scale-factor) * Npx)`. If the variable is unset the
+    // calc collapses to 0 and every span stacks at the wrap's top-left,
+    // which makes the rendered text-layer (and any CSS Highlight drawn
+    // over it) line up at the top of the page instead of on the text.
+    wrap.style.setProperty("--scale-factor", String(this.scale));
 
     const canvas = document.createElement("canvas");
     canvas.className = "pdfCanvas";
@@ -613,6 +619,7 @@ export class PdfController {
 
       entry.wrap.style.width = `${cssW}px`;
       entry.wrap.style.height = `${cssH}px`;
+      entry.wrap.style.setProperty("--scale-factor", String(this.scale));
       entry.canvas.width = Math.floor(cssW * this.DPR);
       entry.canvas.height = Math.floor(cssH * this.DPR);
       entry.canvas.style.width = `${cssW}px`;
@@ -669,6 +676,11 @@ export class PdfController {
       const cssH = Math.floor(viewport.height);
       entry.wrap.style.width = `${cssW}px`;
       entry.wrap.style.height = `${cssH}px`;
+      // Update --scale-factor here too so the textLayer re-render (kicked
+      // off by the IntersectionObserver after this loop) positions its
+      // spans against the new zoom level. See buildPageStub for why this
+      // CSS variable is load-bearing.
+      entry.wrap.style.setProperty("--scale-factor", String(this.scale));
       entry.canvas.style.width = `${cssW}px`;
       entry.canvas.style.height = `${cssH}px`;
       entry.textLayer.style.width = `${cssW}px`;

@@ -8,6 +8,8 @@ import { findHitsInPage, type Hit } from "./search";
 
 type PdfjsLib = typeof import("pdfjs-dist");
 type PdfDoc = import("pdfjs-dist").PDFDocumentProxy;
+type PdfPage = import("pdfjs-dist").PDFPageProxy;
+type TextContent = Awaited<ReturnType<PdfPage["getTextContent"]>>;
 
 // Named CSS Custom Highlight registries. The paint rules are injected
 // at runtime by ensureHighlightStyles() because Next.js's LightningCSS
@@ -27,6 +29,13 @@ function ensureHighlightStyles(): void {
     ::highlight(${HL_ACTIVE}) { background-color: rgba(255, 159, 31, 0.75); }
   `;
   document.head.appendChild(style);
+}
+
+// The `str` of each text item, in item order — the array findHitsInPage
+// indexes against. Non-text items (marked-content markers) map to "" so the
+// index stays aligned with the TextLayer's textDivs.
+function textItemsToStrings(tc: TextContent): string[] {
+  return tc.items.map((it) => ("str" in it ? it.str : ""));
 }
 
 export class PdfController {
@@ -79,7 +88,10 @@ export class PdfController {
   private searchHits: Hit[] = [];
   private searchActive = -1;
   private searchGen = 0;
-  private pageTextCache = new Map<number, string[]>();
+  // One getTextContent() per page, shared by search() AND renderPage(): the
+  // TextLayer is built from this exact object, so textDivs[k] lines up with
+  // items[k] and search hits map onto the right spans (see rangeForHit).
+  private pageTextCache = new Map<number, TextContent>();
 
   constructor(opts: ControllerOptions) {
     this.stem = opts.stem;
@@ -282,6 +294,18 @@ export class PdfController {
 
   // ---- search ----
 
+  // Fetch (and cache) a page's text content. Shared by search() and
+  // renderPage() so the TextLayer is built from the same object the search
+  // indexes — keeping textDivs[k] aligned with items[k].
+  private async getTextContent(n: number): Promise<TextContent> {
+    const cached = this.pageTextCache.get(n);
+    if (cached) return cached;
+    const page = await this.pdfDoc!.getPage(n);
+    const tc = await page.getTextContent();
+    this.pageTextCache.set(n, tc);
+    return tc;
+  }
+
   async search(query: string): Promise<void> {
     // Bump first so concurrent searches (rapid typing) invalidate older
     // in-flight runs after any await.
@@ -302,16 +326,9 @@ export class PdfController {
     const hits: Hit[] = [];
     for (let n = 1; n <= total; n++) {
       if (this.searchGen !== gen) return;
-      let itemsStr = this.pageTextCache.get(n);
-      if (!itemsStr) {
-        const page = await this.pdfDoc.getPage(n);
-        if (this.searchGen !== gen) return;
-        const tc = await page.getTextContent();
-        if (this.searchGen !== gen) return;
-        itemsStr = tc.items.map((it) => ("str" in it ? it.str : ""));
-        this.pageTextCache.set(n, itemsStr);
-      }
-      hits.push(...findHitsInPage(n, itemsStr, query));
+      const tc = await this.getTextContent(n);
+      if (this.searchGen !== gen) return;
+      hits.push(...findHitsInPage(n, textItemsToStrings(tc), query));
     }
     if (this.searchGen !== gen) return;
 
@@ -366,21 +383,26 @@ export class PdfController {
     // already done it (active hit might be many pages away from current
     // scroll position).
     const ensure = entry.rendered ? Promise.resolve() : this.renderPage(entry);
-    ensure.then(() => {
-      const span = entry.textDivs?.[hit.startItem];
-      const scroller = this.stage;
-      const stageRect = scroller.getBoundingClientRect();
-      if (span) {
-        const r = span.getBoundingClientRect();
-        const targetY = scroller.scrollTop + (r.top - stageRect.top)
-                        - stageRect.height / 2 + r.height / 2;
-        scroller.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
-      } else {
-        this.scrollToPage(hit.page, "smooth");
-      }
-      // Newly-rendered page wasn't in the previous highlight pass; refresh
-      // so its hits appear and the active range paints correctly.
+    void ensure.then(() => {
+      // Paint highlights first so the active range exists on the (possibly
+      // just-rendered) page, THEN wait one frame: the text-layer spans
+      // position via calc(var(--scale-factor) * Npx), so their final rects
+      // aren't reliable to measure until the browser has done a layout pass.
+      // Measuring in the same tick is what made navigation fail to jump.
       this.refreshHighlights();
+      requestAnimationFrame(() => {
+        const span = entry.textDivs?.[hit.startItem];
+        const scroller = this.stage;
+        const stageRect = scroller.getBoundingClientRect();
+        if (span) {
+          const r = span.getBoundingClientRect();
+          const targetY = scroller.scrollTop + (r.top - stageRect.top)
+                          - stageRect.height / 2 + r.height / 2;
+          scroller.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        } else {
+          this.scrollToPage(hit.page, "smooth");
+        }
+      });
     });
   }
 
@@ -651,14 +673,21 @@ export class PdfController {
       const ctx = entry.canvas.getContext("2d", { alpha: false })!;
       const transform = this.DPR !== 1 ? [this.DPR, 0, 0, this.DPR, 0, 0] : null;
 
-      // Check again before starting the expensive GPU paint.
+      // Fetch the text content before the canvas paint so it's cached and
+      // ready; search() reuses the very same object.
+      const textContent = await this.getTextContent(entry.num);
       if (this.renderGen !== gen) return;
+
+      // Check again before starting the expensive GPU paint.
       await page.render({ canvasContext: ctx, viewport, transform: transform ?? undefined }).promise;
       if (this.renderGen !== gen) return;
 
       entry.textLayer.replaceChildren();
       const tl = new this.pdfjsLib!.TextLayer({
-        textContentSource: page.streamTextContent(),
+        // Build from the SAME TextContent object search() indexes (not a fresh
+        // streamTextContent()), so textDivs[i] corresponds to items[i] and a
+        // hit's (startItem, startOffset) lands on the right span/character.
+        textContentSource: textContent,
         container: entry.textLayer,
         viewport,
       });
@@ -668,7 +697,7 @@ export class PdfController {
       entry.viewport = viewport;
       // textDivs[i] is the DOM span for text item i — the same index
       // findHitsInPage returns coordinates against (both come from the
-      // same page.getTextContent() stream).
+      // same cached page.getTextContent()).
       entry.textDivs = tl.textDivs;
       this.drawBbox(entry);
       entry.rendered = true;

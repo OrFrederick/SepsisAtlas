@@ -3,6 +3,7 @@
 // web/src/components/pdf/PdfViewer.tsx
 import { useEffect, useRef, useState } from "react";
 import { PdfController } from "./PdfController";
+import PdfFindBar from "./PdfFindBar";
 import type { ControllerEvent } from "./types";
 import "./styles.css";
 
@@ -16,6 +17,9 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const controllerRef = useRef<PdfController | null>(null);
   const pageInputFocusedRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Debounce keystrokes → controller.search so a long PDF isn't re-scanned on
+  // every character (the old laggy/flickery-count behavior).
+  const searchDebounceRef = useRef<number | null>(null);
 
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -25,6 +29,7 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchActive, setSearchActive] = useState(-1);
+  const [findOpen, setFindOpen] = useState(false);
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
@@ -125,26 +130,76 @@ export default function PdfViewer({ stem, basePath }: Props) {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  // Ctrl/Cmd+F focuses the search input. Browser's own find-in-page
+  // Ctrl/Cmd+F opens the floating find bar. Browser's own find-in-page
   // doesn't reach the (transparent) text layer in a useful way, so we
-  // intercept the shortcut and route to our own input. Only active when
+  // intercept the shortcut and route to our own search. Only active when
   // the iframe (or standalone page) has focus.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        openFind();
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
+    // openFind is stable for the component's life; refs/setters don't change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // While the find bar is open, Escape closes it from anywhere in the viewer
+  // (not just when the input is focused) — e.g. after clicking ‹ › or
+  // scrolling the PDF.
+  useEffect(() => {
+    if (!findOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeFind();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // closeFind reads only refs/setters; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen]);
+
   // ---- handlers ----
+  const openFind = () => {
+    setFindOpen(true);
+    // The input mounts with the bar; focus on the next frame and select any
+    // existing query so a repeated Ctrl/Cmd+F just re-targets it.
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  };
+
+  const closeFind = () => {
+    if (searchDebounceRef.current !== null) {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    setSearchQuery("");
+    controllerRef.current?.clearSearch();
+    setFindOpen(false);
+  };
+
   const runSearch = (q: string) => {
     setSearchQuery(q);
-    void controllerRef.current?.search(q);
+    if (searchDebounceRef.current !== null) {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    if (!q) {
+      // Clearing should feel instant (drops highlights immediately).
+      void controllerRef.current?.search("");
+      return;
+    }
+    searchDebounceRef.current = window.setTimeout(() => {
+      void controllerRef.current?.search(q);
+      searchDebounceRef.current = null;
+    }, 120);
   };
 
   const commitPageInput = () => {
@@ -172,7 +227,7 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const sepClass = "w-px h-4 mx-1 shrink-0 bg-[var(--border)]";
 
   return (
-    <div className="pdf-viewer flex flex-col h-full text-[var(--fg)] bg-[var(--panel-3)] font-[var(--sans)]">
+    <div className="pdf-viewer relative flex flex-col h-full text-[var(--fg)] bg-[var(--panel-3)] font-[var(--sans)]">
       <div
         className={
           "sticky top-0 z-10 flex items-center gap-1.5 " +
@@ -215,46 +270,22 @@ export default function PdfViewer({ stem, basePath }: Props) {
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.zoomIn()} title="Zoom in (+)">+</button>
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.fitWidthClearLock()} title="Fit width">Fit</button>
         <span className={sepClass} />
-        <input
-          ref={searchInputRef}
-          className={`${inputClass} w-36`}
-          type="search"
-          placeholder="Find in PDF"
-          value={searchQuery}
-          onChange={(e) => runSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              if (e.shiftKey) controllerRef.current?.prevHit();
-              else controllerRef.current?.nextHit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setSearchQuery("");
-              controllerRef.current?.clearSearch();
-              e.currentTarget.blur();
-            }
-          }}
-          title="Find in PDF (Enter = next, Shift+Enter = previous, Esc = clear)"
-        />
-        <span className="shrink-0 min-w-12 text-center text-[var(--muted)] tabular-nums text-xs">
-          {searchQuery
-            ? (searchTotal > 0 ? `${searchActive + 1} / ${searchTotal}` : "0 / 0")
-            : ""}
-        </span>
         <button
           type="button"
-          className={btnClass}
-          onClick={() => controllerRef.current?.prevHit()}
-          disabled={searchTotal === 0}
-          title="Previous match (Shift+Enter)"
-        >‹</button>
-        <button
-          type="button"
-          className={btnClass}
-          onClick={() => controllerRef.current?.nextHit()}
-          disabled={searchTotal === 0}
-          title="Next match (Enter)"
-        >›</button>
+          className={
+            btnClass +
+            (findOpen ? " border-[var(--accent)] text-[var(--accent)]" : "")
+          }
+          onClick={() => (findOpen ? closeFind() : openFind())}
+          aria-pressed={findOpen}
+          aria-label="Find in PDF"
+          title="Find in PDF (Ctrl/Cmd+F)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </button>
         <span className={sepClass} />
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.jumpToBbox()} title="Jump back to highlight">↩ Highlight</button>
         {status && (
@@ -304,6 +335,18 @@ export default function PdfViewer({ stem, basePath }: Props) {
           </button>
         )}
       </div>
+      {findOpen && (
+        <PdfFindBar
+          ref={searchInputRef}
+          query={searchQuery}
+          total={searchTotal}
+          active={searchActive}
+          onChange={runSearch}
+          onNext={() => controllerRef.current?.nextHit()}
+          onPrev={() => controllerRef.current?.prevHit()}
+          onClose={closeFind}
+        />
+      )}
       <div
         // No `items-*` here: horizontal centering of page wraps happens
         // via `margin-inline: auto` on `.pageWrap` (see styles.css).

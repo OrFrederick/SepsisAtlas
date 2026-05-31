@@ -196,6 +196,10 @@ export default function ChatShell() {
   const [history, setHistory] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  // ts of the in-flight (optimistic) turn — the one showing the user's
+  // bubble immediately with a "thinking…" assistant placeholder until the
+  // response lands.
+  const [pendingTs, setPendingTs] = useState<number | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [viewerUrl, setViewerUrl] = useState("");
   const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
@@ -258,8 +262,21 @@ export default function ChatShell() {
       const text = textRaw.trim();
       if (!text || pending) return;
 
+      // Show the user's bubble right away: append an optimistic turn with an
+      // empty assistant (rendered as "thinking…"), then fill it in when the
+      // response arrives. Not persisted until then. Using the same ts as both
+      // React key and patch target keeps the bubble stable across the update
+      // (no remount / re-animation).
+      const ts = Date.now();
+      const optimistic: Turn = {
+        user_text: text,
+        assistant: { summary: "", rows: [], refused: false, refused_reason: null, meta: null },
+        ts,
+      };
       setInput("");
       setPending(true);
+      setPendingTs(ts);
+      setHistory((prev) => [...prev, optimistic]);
 
       let payload: AssistantPayload;
       try {
@@ -291,25 +308,24 @@ export default function ChatShell() {
         };
       }
 
-      const turn: Turn = {
-        user_text: text,
-        assistant: {
-          query_id: payload.query_id || undefined,
-          summary: payload.summary || "",
-          rows: Array.isArray(payload.rows) ? payload.rows : [],
-          refused: !!payload.refused,
-          refused_reason: payload.refused_reason || null,
-          meta: payload.meta || null,
-        },
-        ts: Date.now(),
+      const assistant: AssistantPayload = {
+        query_id: payload.query_id || undefined,
+        summary: payload.summary || "",
+        rows: Array.isArray(payload.rows) ? payload.rows : [],
+        refused: !!payload.refused,
+        refused_reason: payload.refused_reason || null,
+        meta: payload.meta || null,
       };
 
+      // Patch the optimistic turn in place (matched by ts) so the user bubble
+      // stays put and only the assistant content fills in. Persist now.
       setHistory((prev) => {
-        const next = [...prev, turn];
+        const next = prev.map((t) => (t.ts === ts ? { ...t, assistant } : t));
         saveHistory(next);
         return next;
       });
       setPending(false);
+      setPendingTs(null);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
     [pending],
@@ -581,7 +597,16 @@ export default function ChatShell() {
                   {turn.user_text}
                 </motion.div>
                 <div className="assistant">
-                  {turn.assistant.refused ? (
+                  {pending && turn.ts === pendingTs ? (
+                    <motion.div
+                      className="thinking"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      thinking...
+                    </motion.div>
+                  ) : turn.assistant.refused ? (
                     <motion.div
                       className="refused"
                       initial={FADE_UP.initial}
@@ -656,20 +681,6 @@ export default function ChatShell() {
                 </div>
               </div>
             ))}
-            {pending ? (
-              <div className="turn">
-                <div className="assistant">
-                  <motion.div
-                    className="thinking"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    thinking...
-                  </motion.div>
-                </div>
-              </div>
-            ) : null}
           </div>
 
           {/* Capped width + centered so the input bar stays compact even though

@@ -77,3 +77,8 @@
   font-family: var(--mono);
   font-size: 11px;
 }
+
+/* `::highlight()` rules for find-in-PDF live in PdfController via an
+   injected <style> tag (see ensureHighlightStyles). Next.js's LightningCSS
+   pipeline rejects the pseudo-element here at build time, so we sidestep
+   the parser by emitting the rules at runtime. */

@@ -15,12 +15,16 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<PdfController | null>(null);
   const pageInputFocusedRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInputValue, setPageInputValue] = useState("1");
   const [scalePercent, setScalePercent] = useState(100);
   const [status, setStatus] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchActive, setSearchActive] = useState(-1);
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
@@ -57,6 +61,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
             break;
           case "scaleChange": setScalePercent(e.scalePercent); break;
           case "status": setStatus(e.message); break;
+          case "searchChange":
+            setSearchTotal(e.total);
+            setSearchActive(e.active);
+            break;
         }
       },
     });
@@ -117,7 +125,28 @@ export default function PdfViewer({ stem, basePath }: Props) {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  // Ctrl/Cmd+F focuses the search input. Browser's own find-in-page
+  // doesn't reach the (transparent) text layer in a useful way, so we
+  // intercept the shortcut and route to our own input. Only active when
+  // the iframe (or standalone page) has focus.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   // ---- handlers ----
+  const runSearch = (q: string) => {
+    setSearchQuery(q);
+    void controllerRef.current?.search(q);
+  };
+
   const commitPageInput = () => {
     const v = parseInt(pageInputValue, 10);
     if (!Number.isFinite(v)) { setPageInputValue(String(currentPage)); return; }
@@ -185,6 +214,47 @@ export default function PdfViewer({ stem, basePath }: Props) {
         <span className="shrink-0 min-w-11 text-center text-[var(--muted)] tabular-nums">{scalePercent}%</span>
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.zoomIn()} title="Zoom in (+)">+</button>
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.fitWidthClearLock()} title="Fit width">Fit</button>
+        <span className={sepClass} />
+        <input
+          ref={searchInputRef}
+          className={`${inputClass} w-36`}
+          type="search"
+          placeholder="Find in PDF"
+          value={searchQuery}
+          onChange={(e) => runSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) controllerRef.current?.prevHit();
+              else controllerRef.current?.nextHit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setSearchQuery("");
+              controllerRef.current?.clearSearch();
+              e.currentTarget.blur();
+            }
+          }}
+          title="Find in PDF (Enter = next, Shift+Enter = previous, Esc = clear)"
+        />
+        <span className="shrink-0 min-w-12 text-center text-[var(--muted)] tabular-nums text-xs">
+          {searchQuery
+            ? (searchTotal > 0 ? `${searchActive + 1} / ${searchTotal}` : "0 / 0")
+            : ""}
+        </span>
+        <button
+          type="button"
+          className={btnClass}
+          onClick={() => controllerRef.current?.prevHit()}
+          disabled={searchTotal === 0}
+          title="Previous match (Shift+Enter)"
+        >‹</button>
+        <button
+          type="button"
+          className={btnClass}
+          onClick={() => controllerRef.current?.nextHit()}
+          disabled={searchTotal === 0}
+          title="Next match (Enter)"
+        >›</button>
         <span className={sepClass} />
         <button type="button" className={btnClass} onClick={() => controllerRef.current?.jumpToBbox()} title="Jump back to highlight">↩ Highlight</button>
         {status && (

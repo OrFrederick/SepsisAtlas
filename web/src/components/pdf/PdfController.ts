@@ -4,9 +4,30 @@ import type {
   ControllerOptions,
   PageEntry,
 } from "./types";
+import { findHitsInPage, type Hit } from "./search";
 
 type PdfjsLib = typeof import("pdfjs-dist");
 type PdfDoc = import("pdfjs-dist").PDFDocumentProxy;
+
+// Named CSS Custom Highlight registries. The paint rules are injected
+// at runtime by ensureHighlightStyles() because Next.js's LightningCSS
+// pipeline rejects `::highlight(...)` selectors in built CSS files.
+// Two layers so the active hit can paint a stronger color over the rest.
+const HL_ALL = "sa-search";
+const HL_ACTIVE = "sa-search-active";
+const HL_STYLE_ID = "sa-pdf-search-highlight-style";
+
+function ensureHighlightStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(HL_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = HL_STYLE_ID;
+  style.textContent = `
+    ::highlight(${HL_ALL}) { background-color: rgba(255, 226, 92, 0.55); }
+    ::highlight(${HL_ACTIVE}) { background-color: rgba(255, 159, 31, 0.75); }
+  `;
+  document.head.appendChild(style);
+}
 
 export class PdfController {
   readonly stem: string;
@@ -50,6 +71,15 @@ export class PdfController {
 
   // Pending jump from parent (postMessage) before init() finishes
   private pendingJump: { page: number; bbox: number[] | null; origin: "tl" | "bl" } | null = null;
+
+  // Search state. searchGen guards against an older in-flight search()
+  // overwriting state when the user types a newer query before the
+  // previous one's getTextContent() roundtrips finish.
+  private searchQuery = "";
+  private searchHits: Hit[] = [];
+  private searchActive = -1;
+  private searchGen = 0;
+  private pageTextCache = new Map<number, string[]>();
 
   constructor(opts: ControllerOptions) {
     this.stem = opts.stem;
@@ -166,6 +196,13 @@ export class PdfController {
     this.pdfDoc?.destroy();
     this.stage.replaceChildren();
     this.pages = [];
+    // CSS.highlights is window-scoped, so a stale viewer's highlight
+    // names would persist into the next mount if we didn't clear them.
+    const highlights = (typeof CSS !== "undefined"
+      ? (CSS as unknown as { highlights?: Map<string, unknown> }).highlights
+      : undefined);
+    highlights?.delete(HL_ALL);
+    highlights?.delete(HL_ACTIVE);
   }
 
   // ---- commands (called by React) ----
@@ -229,6 +266,153 @@ export class PdfController {
       if (this.bbox && this.bboxPage === nextPage) this.scrollToBbox("smooth");
       else this.scrollToPage(nextPage, "smooth");
     });
+  }
+
+  // ---- search ----
+
+  async search(query: string): Promise<void> {
+    // Bump first so concurrent searches (rapid typing) invalidate older
+    // in-flight runs after any await.
+    this.searchGen++;
+    const gen = this.searchGen;
+    this.searchQuery = query;
+
+    if (!query) {
+      this.searchHits = [];
+      this.searchActive = -1;
+      this.refreshHighlights();
+      this.emitSearch();
+      return;
+    }
+
+    if (!this.pdfDoc) return;
+    const total = this.pdfDoc.numPages;
+    const hits: Hit[] = [];
+    for (let n = 1; n <= total; n++) {
+      if (this.searchGen !== gen) return;
+      let itemsStr = this.pageTextCache.get(n);
+      if (!itemsStr) {
+        const page = await this.pdfDoc.getPage(n);
+        if (this.searchGen !== gen) return;
+        const tc = await page.getTextContent();
+        if (this.searchGen !== gen) return;
+        itemsStr = tc.items.map((it) => ("str" in it ? it.str : ""));
+        this.pageTextCache.set(n, itemsStr);
+      }
+      hits.push(...findHitsInPage(n, itemsStr, query));
+    }
+    if (this.searchGen !== gen) return;
+
+    this.searchHits = hits;
+    this.searchActive = hits.length > 0 ? 0 : -1;
+    this.refreshHighlights();
+    this.emitSearch();
+    if (this.searchActive >= 0) this.scrollToActive();
+  }
+
+  clearSearch(): void {
+    this.searchGen++;
+    this.searchQuery = "";
+    this.searchHits = [];
+    this.searchActive = -1;
+    this.refreshHighlights();
+    this.emitSearch();
+  }
+
+  nextHit(): void {
+    if (this.searchHits.length === 0) return;
+    this.searchActive = (this.searchActive + 1) % this.searchHits.length;
+    this.refreshHighlights();
+    this.emitSearch();
+    this.scrollToActive();
+  }
+
+  prevHit(): void {
+    if (this.searchHits.length === 0) return;
+    const n = this.searchHits.length;
+    this.searchActive = (this.searchActive - 1 + n) % n;
+    this.refreshHighlights();
+    this.emitSearch();
+    this.scrollToActive();
+  }
+
+  private emitSearch(): void {
+    this.emit({
+      type: "searchChange",
+      query: this.searchQuery,
+      total: this.searchHits.length,
+      active: this.searchActive,
+    });
+  }
+
+  private scrollToActive(): void {
+    const hit = this.searchHits[this.searchActive];
+    if (!hit) return;
+    const entry = this.pages[hit.page - 1];
+    if (!entry) return;
+    // Force-render the target page if the IntersectionObserver hasn't
+    // already done it (active hit might be many pages away from current
+    // scroll position).
+    const ensure = entry.rendered ? Promise.resolve() : this.renderPage(entry);
+    ensure.then(() => {
+      const span = entry.textDivs?.[hit.startItem];
+      const scroller = this.stage;
+      const stageRect = scroller.getBoundingClientRect();
+      if (span) {
+        const r = span.getBoundingClientRect();
+        const targetY = scroller.scrollTop + (r.top - stageRect.top)
+                        - stageRect.height / 2 + r.height / 2;
+        scroller.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+      } else {
+        this.scrollToPage(hit.page, "smooth");
+      }
+      // Newly-rendered page wasn't in the previous highlight pass; refresh
+      // so its hits appear and the active range paints correctly.
+      this.refreshHighlights();
+    });
+  }
+
+  private refreshHighlights(): void {
+    if (typeof CSS === "undefined") return;
+    const highlights = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
+    const HighlightCtor = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+    if (!highlights || !HighlightCtor) return;
+    ensureHighlightStyles();
+
+    highlights.delete(HL_ALL);
+    highlights.delete(HL_ACTIVE);
+    if (this.searchHits.length === 0) return;
+
+    const allRanges: Range[] = [];
+    const activeRanges: Range[] = [];
+    for (let i = 0; i < this.searchHits.length; i++) {
+      const range = this.rangeForHit(this.searchHits[i]);
+      if (!range) continue;
+      if (i === this.searchActive) activeRanges.push(range);
+      else allRanges.push(range);
+    }
+    if (allRanges.length) highlights.set(HL_ALL, new HighlightCtor(...allRanges));
+    if (activeRanges.length) highlights.set(HL_ACTIVE, new HighlightCtor(...activeRanges));
+  }
+
+  private rangeForHit(hit: Hit): Range | null {
+    const entry = this.pages[hit.page - 1];
+    if (!entry || !entry.textDivs) return null;
+    const startSpan = entry.textDivs[hit.startItem];
+    const endSpan = entry.textDivs[hit.endItem];
+    if (!startSpan || !endSpan) return null;
+    const startText = startSpan.firstChild;
+    const endText = endSpan.firstChild;
+    if (!startText || startText.nodeType !== Node.TEXT_NODE) return null;
+    if (!endText || endText.nodeType !== Node.TEXT_NODE) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(startText, Math.min(hit.startOffset, (startText as Text).length));
+      range.setEnd(endText, Math.min(hit.endOffset, (endText as Text).length));
+      return range;
+    } catch {
+      return null;
+    }
   }
 
   // ---- internals ----
@@ -402,7 +586,10 @@ export class PdfController {
     wrap.appendChild(label);
 
     this.stage.appendChild(wrap);
-    return { num, wrap, canvas, textLayer, bboxOverlay, rendered: false, rendering: null, viewport: null };
+    return {
+      num, wrap, canvas, textLayer, bboxOverlay,
+      rendered: false, rendering: null, viewport: null, textDivs: null,
+    };
   }
 
   private async renderPage(entry: PageEntry): Promise<void> {
@@ -451,8 +638,15 @@ export class PdfController {
       if (this.renderGen !== gen) return;
 
       entry.viewport = viewport;
+      // textDivs[i] is the DOM span for text item i — the same index
+      // findHitsInPage returns coordinates against (both come from the
+      // same page.getTextContent() stream).
+      entry.textDivs = tl.textDivs;
       this.drawBbox(entry);
       entry.rendered = true;
+      // The page might already have matches from an earlier search; show
+      // them now that the spans exist. No-op if no search is active.
+      this.refreshHighlights();
     })();
 
     try { await entry.rendering; }
@@ -495,7 +689,15 @@ export class PdfController {
       // a fresh renderPage() call would join it and complete at the OLD
       // scale, locking the page at stale geometry until another rerender.
       entry.rendering = null;
+      // The current textDivs reference spans whose inline left/top were
+      // set at the old scale; renderPage will replaceChildren and create
+      // fresh spans. Drop the stale reference so refreshHighlights skips
+      // this page until the new spans exist.
+      entry.textDivs = null;
     }
+    // Drop highlights that referenced spans we just orphaned. They'll be
+    // rebuilt as each page re-renders.
+    this.refreshHighlights();
     if (this.renderObserver) {
       for (const entry of this.pages) {
         this.renderObserver.unobserve(entry.wrap);

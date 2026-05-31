@@ -42,3 +42,6 @@ static/bbox_proof/
 graphify-out/manifest.json
 graphify-out/cost.json
 graphify-out/cache/
+
+# Brainstorming visual-companion mockups (disposable design scratch)
+.superpowers/

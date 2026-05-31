@@ -1,5 +1,7 @@
 # Graph Report - .  (2026-05-30)
 
+> Generated artifact, consumed locally via graphify (`graphify query/path/explain`). The `[[_COMMUNITY_...]]` entries are Obsidian-style wiki-links — they render as plain text on github.com, not as links. View in graphify or Obsidian for navigation.
+
 ## Corpus Check
 - Large corpus: 191 files · ~513,311 words. Semantic extraction will be expensive (many Claude tokens). Consider running on a subfolder.
 

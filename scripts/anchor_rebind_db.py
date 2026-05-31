@@ -138,7 +138,20 @@ def main() -> int:
                 json.dumps(new_bbox) if isinstance(new_bbox, list) else None
             )
 
-            bbox_changed = (old_bbox or None) != (new_bbox_json or None)
+            old_bbox_norm = old_bbox if old_bbox not in (None, "null", "") else None
+            # Never let the rebind overwrite a stored bbox with NULL. The
+            # resolver can return hits with bbox=None (e.g. body offsets that
+            # to_flat_bbox couldn't normalize); writing that back would destroy
+            # a previously-good bbox, which is the exact opposite of this
+            # script's purpose. Skip the bbox field of the UPDATE in that case
+            # but still let page/section corrections through.
+            if old_bbox_norm is not None and new_bbox_json is None:
+                counters[f"{table}.preserved_old_bbox"] += 1
+                effective_bbox_json = old_bbox_norm
+                bbox_changed = False
+            else:
+                effective_bbox_json = new_bbox_json
+                bbox_changed = (old_bbox_norm or None) != (new_bbox_json or None)
             page_changed = old_page != new_page
             section_changed = (old_section or "") != (new_section or "")
 
@@ -151,7 +164,7 @@ def main() -> int:
                         f"UPDATE {table} SET anchor_bbox = ?, anchor_page = ?, "
                         "anchor_section = ? "
                         f"WHERE {pk} = ?",
-                        (new_bbox_json, new_page, new_section, r[pk]),
+                        (effective_bbox_json, new_page, new_section, r[pk]),
                     )
             else:
                 counters[f"{table}.unchanged"] += 1

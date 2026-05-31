@@ -829,6 +829,48 @@ def test_r5_demote_helper_partial_when_resolved_false():
     assert demoted.score == 0.98
 
 
+def test_numeric_regex_matches_verifier():
+    """``anchor_resolver._NUMERIC_RE`` is copy-pasted from ``verify_nli._NUM_RE``.
+
+    The duplication is intentional (keeps the resolver dependency-free), but
+    nothing keeps the two in lock-step. If one is tightened — European
+    decimals, sign handling, thousands-grouping — the resolver's R2 tier and
+    the verifier will silently disagree about which numbers a row contains,
+    which defeats the comment's "match the same notion of a number" promise.
+
+    Assert the two patterns tokenize the same fixture into the same set so
+    drift fails loudly here instead of as a quiet R2 quality regression.
+    """
+    from src.extract import anchor_resolver, verify_nli
+
+    fixtures = [
+        # Plain integers, decimals, signed values.
+        "Age 65, BMI 28.4, ratio -1.20 (95% CI -1.50 to -0.90)",
+        # CI tuples — verifier's lookbehind avoids capturing the dash as sign.
+        "AUC 0.829 (0.791-0.868)",
+        # Thousands grouping with commas and spaces.
+        "Cohort n=12,345 controls 1 234 deaths 234,567",
+        # Mixed numeric/text — pipe-delimited table row.
+        "Lactate | 1.04 | 0.91 to 1.17 | 0.5785",
+        # Edge cases the resolver's R2 cares about.
+        "0.80 vs 0.8, sample sizes 1000 and 1,000",
+    ]
+    for fx in fixtures:
+        resolver_tokens = {
+            m.group().replace(",", "").replace(" ", "")
+            for m in anchor_resolver._NUMERIC_RE.finditer(fx)
+        }
+        verifier_tokens = {
+            m.group().replace(",", "").replace(" ", "")
+            for m in verify_nli._NUM_RE.finditer(fx)
+        }
+        assert resolver_tokens == verifier_tokens, (
+            f"Numeric token drift between anchor_resolver and verify_nli "
+            f"on fixture {fx!r}: resolver={resolver_tokens} "
+            f"verifier={verifier_tokens}"
+        )
+
+
 @pytest.mark.skipif(not ZHANG.exists(), reason="Zhang_2021.json not available")
 def test_resolver_bbox_top_left_after_resolve():
     """A resolved Zhang-2021 anchor should expose a TOPLEFT (y0 < y1) bbox."""

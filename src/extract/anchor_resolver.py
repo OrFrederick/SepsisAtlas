@@ -460,6 +460,42 @@ def _numeric_tokens(text: str) -> set[str]:
     return out
 
 
+# Matches a "Table N" / "Table Na" token in a normalized string (already
+# lowercased by _norm). The optional suffix letter handles "Table 2a".
+_TABLE_NUM_RE = re.compile(r"\btable\s+(\d+[a-z]?)\b")
+
+
+def _table_num(norm_text: str) -> str | None:
+    m = _TABLE_NUM_RE.search(norm_text)
+    return m.group(1) if m else None
+
+
+def _section_matches_caption(sec_norm: str, cap_norm: str) -> bool:
+    """Strict section-to-caption equivalence on normalized strings.
+
+    Both inputs are already ``_norm()``'d. The naive bidirectional substring
+    used to scope ``"Table 1"`` to the wrong table because ``"table 1"`` is a
+    prefix of ``"table 10 | ..."``; it also miscategorized body-text sections
+    like ``"Results"`` as captions whenever a caption happened to contain the
+    word. We avoid both by extracting the ``Table N`` token from each side:
+
+    * if both name a Table N, they match only when N is identical;
+    * if exactly one names a Table N, they never match (body section vs.
+      caption);
+    * if neither names a Table N (e.g. captions like ``"Figure 1: ..."`` or
+      caption-less rows), fall back to the older substring comparison.
+    """
+    if not sec_norm or not cap_norm:
+        return False
+    sec_num = _table_num(sec_norm)
+    cap_num = _table_num(cap_norm)
+    if sec_num is not None and cap_num is not None:
+        return sec_num == cap_num
+    if sec_num is not None or cap_num is not None:
+        return False
+    return sec_norm == cap_norm or sec_norm in cap_norm or cap_norm in sec_norm
+
+
 def _is_table_caption_section(
     anchor_section: str | None, index: Iterable[dict]
 ) -> bool:
@@ -479,9 +515,7 @@ def _is_table_caption_section(
         if e.get("kind") not in ("table_cell", "table_row"):
             continue
         cap_norm = _norm(e.get("section") or "")
-        if not cap_norm:
-            continue
-        if sec_norm == cap_norm or sec_norm in cap_norm or cap_norm in sec_norm:
+        if _section_matches_caption(sec_norm, cap_norm):
             return True
     return False
 
@@ -493,9 +527,8 @@ def _section_scope(
 
     Returns ``None`` when scoping cannot be applied (no section, no matching
     entries) — callers should then fall back to the full index. Section match
-    is bidirectional substring on the normalized strings so that
-    ``"Table 1"`` matches the parsed caption ``"TABLE 1 | demographics"``
-    and vice versa.
+    uses :func:`_section_matches_caption`, which anchors ``Table N`` tokens
+    so that ``"Table 1"`` does **not** scope into ``"TABLE 10 | ..."``.
     """
     if not anchor_section:
         return None
@@ -505,8 +538,7 @@ def _section_scope(
     scoped = [
         e
         for e in index
-        if (cap := _norm(e.get("section") or ""))
-        and (sec_norm == cap or sec_norm in cap or cap in sec_norm)
+        if _section_matches_caption(sec_norm, _norm(e.get("section") or ""))
     ]
     return scoped or None
 
@@ -700,9 +732,13 @@ def resolve(
        winner.
 
     When ``anchor_section`` names a table caption present in the index (R3),
-    tiers 5-9 operate on the subset of entries belonging to that caption
-    rather than the whole index. Body-text sections (Methods, Results, …)
-    do not trigger scoping.
+    tiers 8-9 (R1 N-row union and R2 numeric fingerprint) operate on the
+    subset of entries belonging to that caption rather than the whole index.
+    Tiers 1-7 always run unscoped — they were not changed by issue #96 and
+    scoping them would regress previously-resolved anchors. Body-text sections
+    (Methods, Results, …) do not trigger scoping at all; R1 falls back to a
+    single-table-only pool (see :func:`_row_union_hits` callsite) and R2 is
+    skipped entirely.
 
     Returns ``None`` if every tier fails.
     """
@@ -753,8 +789,19 @@ def resolve(
         scoped = _section_scope(index, anchor_section)
 
     # Tier 8 (R1): N-row union for multi-row LLM concatenations.
+    # Unscoped pool would group table_rows across different tables in
+    # _row_union_hits and let _disambiguate pick by shortest text rather
+    # than by table — wrong-table union risk. Restrict the unscoped fallback
+    # to papers whose table_rows live in a single caption.
     if not hits:
-        hits = _row_union_hits(anchor_text, scoped if scoped else index)
+        if scoped:
+            hits = _row_union_hits(anchor_text, scoped)
+        else:
+            captions = {
+                e.get("section") for e in index if e.get("kind") == "table_row"
+            }
+            if len(captions) <= 1:
+                hits = _row_union_hits(anchor_text, index)
 
     # Tier 9 (R2): numeric fingerprint — only run when scoped to a table
     # caption. Running unscoped would cross-table-match on common figures.

@@ -163,16 +163,28 @@ export class PdfController {
       this.wheelLastY = e.clientY;
       if (this.wheelRaf != null) return;
       this.wheelRaf = requestAnimationFrame(() => {
-        this.wheelRaf = null;
-        const delta = this.wheelAccumDelta;
-        this.wheelAccumDelta = 0;
-        // Exponential mapping so equal-distance pinches scale by the same
-        // ratio regardless of current scale; 0.004 gives ~2% per typical
-        // pinch tick (~5px deltaY), which feels close to native.
-        const factor = Math.exp(-delta * 0.004);
-        const next = Math.max(0.5, Math.min(4, this.scale * factor));
-        if (next !== this.scale) {
-          this.setScale(next, { x: this.wheelLastX, y: this.wheelLastY });
+        // Clear wheelRaf in finally (not as the first statement) so a throw
+        // anywhere below still resets it — otherwise it stays non-null and
+        // every later wheel event short-circuits at the guard above, freezing
+        // zoom until destroy().
+        try {
+          const delta = this.wheelAccumDelta;
+          this.wheelAccumDelta = 0;
+          // Sign convention: for ctrl+wheel / trackpad pinch, Chrome, Firefox
+          // and Safari all report deltaY < 0 for a zoom-in (pinch-out) and
+          // deltaY > 0 for zoom-out — same as ordinary wheel scroll (down =
+          // positive). Negating delta below makes pinch-out grow the scale. If
+          // a future browser or touchpad inverts this, flip the sign here.
+          // Exponential mapping so equal-distance pinches scale by the same
+          // ratio regardless of current scale; 0.004 gives ~2% per typical
+          // pinch tick (~5px deltaY), which feels close to native.
+          const factor = Math.exp(-delta * 0.004);
+          const next = Math.max(0.5, Math.min(4, this.scale * factor));
+          if (next !== this.scale) {
+            this.setScale(next, { x: this.wheelLastX, y: this.wheelLastY });
+          }
+        } finally {
+          this.wheelRaf = null;
         }
       });
     };
@@ -441,7 +453,16 @@ export class PdfController {
       : this.captureTopAnchor();
     this.scale = s;
     this.emit({ type: "scaleChange", scale: s, scalePercent: Math.round((s / 1.5) * 100) });
-    void this.rerenderAll().then(() => {
+    // rerenderAll() bumps renderGen synchronously before its first await, so
+    // reading it back here pins *this* zoom's generation. zoomIn/zoomOut/
+    // fitWidth aren't rAF-throttled like the wheel path, so two can be in
+    // flight at once; if a newer zoom supersedes us while we're suspended in
+    // the rerender, skip the stale restore so its resolved-late callback
+    // doesn't stomp the newer scroll position. Mirrors renderPage's guard.
+    const p = this.rerenderAll();
+    const gen = this.renderGen;
+    void p.then(() => {
+      if (this.renderGen !== gen) return;
       if (anchor.kind === "cursor") this.restoreCursorAnchor(anchor);
       else this.restoreTopAnchor(anchor);
     });

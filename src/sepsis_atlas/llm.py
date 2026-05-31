@@ -69,6 +69,16 @@ def get_client() -> Any:
     # tokens for predictor_extract). 3 retries on transient errors = 4×
     # input cost on a failed call. Cap at 1; higher-level retry policies
     # belong in the extractor with proper dedup.
+    #
+    # Scope: this cap is process-global, so it also applies to verify_llm
+    # (Haiku, ~1.2k input) — tier-2 only, invoked by verify_nli for
+    # low-confidence rows. Most verify_llm calls hit `verifier_llm_cache`
+    # (SQLite, keyed on input hash, success-responses only — see
+    # `_cache_put` in verify_llm.py). A transient SDK failure on a novel
+    # row is NOT cached and falls through to verdict=partial without
+    # retry; accepted given Haiku's per-call cost. If a future stage
+    # needs different retry behavior, pass `max_retries=...` per-call
+    # instead of forking clients.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,

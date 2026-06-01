@@ -22,6 +22,7 @@ import sys
 from typing import Any, Iterable
 
 from sepsis_atlas.config import DB_PATH
+from src.extract.verify_llm import _open_cache
 from src.extract.verify_nli import run_verifier
 
 
@@ -157,6 +158,13 @@ def reverify_table(
     n_cache_hits = 0
     n_errors = 0
 
+    # One verifier_llm_cache connection shared by every row's tier-2 judge
+    # call. Without this every cache-miss row opens its own SQLite write
+    # connection and contends with the per-row UPDATE — exactly the
+    # contention the cache_con plumbing was added to eliminate. Plumbed
+    # through `kwargs["cache_con"]`; verify_nli forwards to run_llm_judge.
+    cache_con = _open_cache()
+
     # Batched updates: we accumulate (verdict, score, rationale, pk) tuples
     # and run a single executemany at the end. Per-row UPDATE inside the
     # loop holds an implicit transaction that fights for the SQLite write
@@ -191,6 +199,7 @@ def reverify_table(
         kwargs: dict = {
             "skip_nli": skip_nli,
             "paper_id": paper_id,
+            "cache_con": cache_con,
         }
         if not use_llm:
             kwargs["skip_llm"] = True
@@ -249,6 +258,8 @@ def reverify_table(
             pending_updates,
         )
         con.commit()
+
+    cache_con.close()
 
     return {
         "table": table,

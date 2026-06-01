@@ -217,6 +217,12 @@ export class PdfController {
     if (this.wheelRaf != null) cancelAnimationFrame(this.wheelRaf);
     this.renderObserver?.disconnect();
     this.visibilityObserver?.disconnect();
+    for (const entry of this.pages) {
+      if (entry.renderTask) {
+        try { entry.renderTask.cancel(); } catch { /* already settled */ }
+        entry.renderTask = null;
+      }
+    }
     this.pdfDoc?.destroy();
     this.stage.replaceChildren();
     this.pages = [];
@@ -637,7 +643,7 @@ export class PdfController {
     this.stage.appendChild(wrap);
     return {
       num, wrap, canvas, textLayer, bboxOverlay,
-      rendered: false, rendering: null, viewport: null, textDivs: null,
+      rendered: false, rendering: null, renderTask: null, viewport: null, textDivs: null,
     };
   }
 
@@ -678,8 +684,24 @@ export class PdfController {
       const textContent = await this.getTextContent(entry.num);
       if (this.renderGen !== gen) return;
 
-      // Check again before starting the expensive GPU paint.
-      await page.render({ canvasContext: ctx, viewport, transform: transform ?? undefined }).promise;
+      // Check again before starting the expensive GPU paint. Keep the
+      // RenderTask on the entry so rerenderAll can cancel it if the user
+      // zooms again before this paint finishes — otherwise pdfjs sees a
+      // second render() on the same canvas and throws.
+      const renderTask = page.render({ canvasContext: ctx, viewport, transform: transform ?? undefined });
+      entry.renderTask = renderTask;
+      try {
+        await renderTask.promise;
+      } catch (err) {
+        // pdfjs throws a RenderingCancelledException when .cancel() is
+        // called; swallow it so a zoom-mid-paint doesn't surface as an
+        // unhandled rejection. Any other error still propagates.
+        const name = (err as { name?: string } | null)?.name;
+        if (name !== "RenderingCancelledException") throw err;
+        return;
+      } finally {
+        if (entry.renderTask === renderTask) entry.renderTask = null;
+      }
       if (this.renderGen !== gen) return;
 
       entry.textLayer.replaceChildren();
@@ -746,6 +768,16 @@ export class PdfController {
       entry.viewport = viewport;
       this.drawBbox(entry);
       entry.rendered = false;
+      // Cancel any in-flight pdfjs RenderTask before we let renderPage start
+      // a fresh paint — without this, pdfjs throws
+      // "Cannot use the same canvas during multiple render() operations"
+      // because the old task still holds the canvas. cancel() rejects the
+      // old promise with RenderingCancelledException, which renderPage now
+      // swallows.
+      if (entry.renderTask) {
+        try { entry.renderTask.cancel(); } catch { /* already settled */ }
+        entry.renderTask = null;
+      }
       // Clear the in-flight render reference too — otherwise a render started
       // before the zoom will still be reachable through `entry.rendering`, and
       // a fresh renderPage() call would join it and complete at the OLD

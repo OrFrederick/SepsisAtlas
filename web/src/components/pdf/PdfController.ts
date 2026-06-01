@@ -215,6 +215,17 @@ export class PdfController {
     if (this.resizeListener) window.removeEventListener("resize", this.resizeListener);
     if (this.wheelListener) this.stage.removeEventListener("wheel", this.wheelListener);
     if (this.wheelRaf != null) cancelAnimationFrame(this.wheelRaf);
+    // Pending debounced fitWidth would otherwise fire ~120ms after teardown
+    // and call into the (already-destroyed) pdfDoc.
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = 0;
+    }
+    // Bump searchGen so an in-flight search()'s per-page getTextContent loop
+    // bails on its next gen check instead of refreshHighlights()-ing into a
+    // CSS.highlights registry we just cleared (re-polluting it for the next
+    // mount with ranges pointing at detached DOM).
+    this.searchGen++;
     this.renderObserver?.disconnect();
     this.visibilityObserver?.disconnect();
     for (const entry of this.pages) {
@@ -224,6 +235,10 @@ export class PdfController {
       }
     }
     this.pdfDoc?.destroy();
+    // Null the field so every `if (!this.pdfDoc) return` guard (renderPage,
+    // applyJump, fitWidth, search) actually short-circuits — otherwise an
+    // in-flight async passes the guard and calls into a destroyed doc.
+    this.pdfDoc = null;
     this.stage.replaceChildren();
     this.pages = [];
     // CSS.highlights is window-scoped, so a stale viewer's highlight

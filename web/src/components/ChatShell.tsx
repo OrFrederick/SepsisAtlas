@@ -379,6 +379,9 @@ export default function ChatShell() {
     setHistory([]);
     setActiveRowKey(null);
     setViewerUrl("");
+    // Matches closeViewer: a full "clear everything" shouldn't leave the
+    // chat collapsed when the next evidence row reopens the viewer.
+    setChatHidden(false);
     setInput("");
     inputRef.current?.focus();
   };
@@ -596,11 +599,10 @@ export default function ChatShell() {
     }
   };
 
-  // Solo (landing) tightens the chat column to a readable max-width and
-  // drops the composer top border; once the viewer reveals, the chat
-  // grows to fill the grid track.
+  // Chat column fills the grid track in both solo and split modes; width
+  // animation is driven by the parent grid's track template (splitStyle),
+  // not by a max-width transition on this column.
   const chatCls = `flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
-  const chatTransition = `transition-[max-width] duration-[520ms] ease-[cubic-bezier(0.2,0.7,0.2,1)]`;
 
   const scrollbackCls = showPdf
     ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
@@ -643,7 +645,7 @@ export default function ChatShell() {
         ref={splitRef}
         style={splitStyle}
       >
-        <section className={`${chatCls} ${chatTransition} motion-reduce:transition-none`}>
+        <section inert={chatHidden} className={chatCls}>
           <div ref={scrollbackRef} className={scrollbackCls}>
             {history.length === 0 && !pending ? (
               <Welcome
@@ -795,6 +797,10 @@ export default function ChatShell() {
               : "opacity-0 translate-x-[28px]")
           }
         >
+          {/* Divider is meaningless while the chat is hidden (chat track
+              pinned to 0%). Stripping handlers + focus prevents silent
+              chatPct writes (and localStorage churn) from drags or
+              arrow-keys the user can't even see. */}
           <div
             role="separator"
             aria-orientation="vertical"
@@ -803,20 +809,24 @@ export default function ChatShell() {
             aria-valuenow={Math.round(chatPct)}
             aria-valuetext={`${Math.round(chatPct)}%`}
             aria-label="Resize chat pane (arrow keys; Shift+arrow for 10% steps; Home/End for min/max; Enter or double-click to reset)"
-            tabIndex={0}
-            onPointerDown={onDividerPointerDown}
-            onPointerMove={onDividerPointerMove}
-            onPointerUp={endDividerDrag}
-            onPointerCancel={onDividerPointerCancel}
-            onDoubleClick={onDividerDoubleClick}
-            onKeyDown={onDividerKeyDown}
+            aria-hidden={chatHidden}
+            tabIndex={chatHidden ? -1 : 0}
+            onPointerDown={chatHidden ? undefined : onDividerPointerDown}
+            onPointerMove={chatHidden ? undefined : onDividerPointerMove}
+            onPointerUp={chatHidden ? undefined : endDividerDrag}
+            onPointerCancel={chatHidden ? undefined : onDividerPointerCancel}
+            onDoubleClick={chatHidden ? undefined : onDividerDoubleClick}
+            onKeyDown={chatHidden ? undefined : onDividerKeyDown}
             className={
-              "absolute top-0 bottom-0 left-0 w-2 z-[2] bg-transparent outline-none cursor-col-resize touch-none " +
+              "absolute top-0 bottom-0 left-0 w-2 z-[2] bg-transparent outline-none touch-none " +
+              (chatHidden ? "pointer-events-none cursor-default " : "cursor-col-resize ") +
               "before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-px before:bg-border " +
               "before:transition-[background,width] before:duration-[160ms] before:ease-out " +
-              "hover:before:bg-accent hover:before:w-[2px] " +
-              "focus-visible:before:bg-accent focus-visible:before:w-[2px] " +
-              "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] " +
+              (chatHidden
+                ? ""
+                : "hover:before:bg-accent hover:before:w-[2px] " +
+                  "focus-visible:before:bg-accent focus-visible:before:w-[2px] " +
+                  "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] ") +
               (resizing ? "before:!bg-accent before:!w-[2px] " : "")
             }
           />

@@ -65,11 +65,25 @@ def get_client() -> Any:
         return _client
 
     # Default: OpenRouter via OpenAI client.
+    # max_retries=1: each retry re-uploads the full paper context (50-100k
+    # tokens for predictor_extract). 3 retries on transient errors = 4×
+    # input cost on a failed call. Cap at 1; higher-level retry policies
+    # belong in the extractor with proper dedup.
+    #
+    # Scope: this cap is process-global, so it also applies to verify_llm
+    # (Haiku, ~1.2k input) — tier-2 only, invoked by verify_nli for
+    # low-confidence rows. Most verify_llm calls hit `verifier_llm_cache`
+    # (SQLite, keyed on input hash, success-responses only — see
+    # `_cache_put` in verify_llm.py). A transient SDK failure on a novel
+    # row is NOT cached and falls through to verdict=partial without
+    # retry; accepted given Haiku's per-call cost. If a future stage
+    # needs different retry behavior, pass `max_retries=...` per-call
+    # instead of forking clients.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
         timeout=300.0,
-        max_retries=3,
+        max_retries=1,
         default_headers={
             "HTTP-Referer": "https://github.com/sepsis-atlas",
             "X-Title": "Sepsis Atlas",
@@ -135,11 +149,19 @@ def logged_llm_call(stage: str):
                 raise
             finally:
                 latency_ms = int((time.time() - t0) * 1000)
-                tokens_in = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) if resp else 0
-                tokens_out = getattr(getattr(resp, "usage", None), "completion_tokens", 0) if resp else 0
-                cost_usd = float(
-                    getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-                ) if resp else 0.0
+                u = getattr(resp, "usage", None) if resp else None
+                tokens_in = getattr(u, "prompt_tokens", 0) if u else 0
+                tokens_out = getattr(u, "completion_tokens", 0) if u else 0
+                cost_usd = float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0
+                # OpenRouter reports cache activity on prompt_tokens_details
+                # (cache_write_tokens on the establishing call, cached_tokens
+                # on hits) + top-level cache_discount. The Anthropic-native
+                # cache_{creation,read}_input_tokens names never appear on the
+                # OpenAI-compat usage object.
+                ptd = getattr(u, "prompt_tokens_details", None) if u else None
+                cache_creation = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
+                cache_read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
+                cache_discount = float(getattr(u, "cache_discount", 0.0) or 0.0) if u else 0.0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),
@@ -153,6 +175,9 @@ def logged_llm_call(stage: str):
                     "prompt_hash": prompt_hash,
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    "cache_creation_tokens": cache_creation,
+                    "cache_read_tokens": cache_read,
+                    "cache_discount": cache_discount,
                     "cost_usd": cost_usd,
                     "latency_ms": latency_ms,
                     "error": err,

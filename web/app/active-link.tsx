@@ -21,8 +21,12 @@ export default function ActiveLink({ href, exact, children }: Props) {
   const active = isExact
     ? pathname === href
     : pathname === href || pathname.startsWith(href + (href.endsWith("/") ? "" : "/"));
+  const base =
+    "text-fg-muted hover:text-fg hover:no-underline px-[2px] py-1 mx-[10px] my-0 text-[13px] " +
+    "border-b border-transparent transition-[color,border-color] duration-150 ease-out";
+  const activeCls = active ? "!text-fg !border-b-accent" : "";
   return (
-    <Link href={href} className={active ? "active" : ""} prefetch={false}>
+    <Link href={href} className={`${base} ${activeCls}`.trim()} prefetch={false}>
       {children}
     </Link>
   );

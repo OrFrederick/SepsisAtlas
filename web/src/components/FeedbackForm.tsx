@@ -23,6 +23,14 @@ const TYPE_LABELS: Record<FeedbackType, string> = {
   other: "Other",
 };
 
+const LABEL_CLS = "flex flex-col gap-1";
+const FIELD_LABEL_CLS =
+  "text-[11px] font-medium text-fg-faint uppercase tracking-[0.5px]";
+const INPUT_CLS =
+  "w-full bg-panel border border-border rounded-md px-[10px] py-2 text-sm outline-none " +
+  "transition-[border-color,box-shadow] duration-150 ease-out " +
+  "focus:border-accent focus:shadow-[0_0_0_3px_rgba(63,104,178,0.10)]";
+
 export function FeedbackForm(props: FeedbackFormProps) {
   const [mount, setMount] = useState<MountTokenInput | null>(null);
   const [type, setType] = useState<FeedbackType>(props.initialType ?? "bug");
@@ -96,19 +104,22 @@ export function FeedbackForm(props: FeedbackFormProps) {
 
   if (status.kind === "success") {
     return (
-      <div className="feedback-success">
-        <h2>Thanks — feedback received</h2>
+      <div className="text-center py-3 px-[6px]">
+        <h2 className="text-[19px] font-medium text-ok m-0 mb-2 font-serif">
+          Thanks — feedback received
+        </h2>
       </div>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="feedback-form">
-      <label className="field">
-        <span className="field-label">Type</span>
+    <form onSubmit={onSubmit} className="flex flex-col gap-[14px]">
+      <label className={LABEL_CLS}>
+        <span className={FIELD_LABEL_CLS}>Type</span>
         <select
           value={type}
           onChange={(e) => setType(e.target.value as FeedbackType)}
+          className={INPUT_CLS}
         >
           {FEEDBACK_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -119,20 +130,25 @@ export function FeedbackForm(props: FeedbackFormProps) {
       </label>
 
       {props.initialPaper && (
-        <span className="paper-pill">
-          About paper: <code>{props.initialPaper}</code>
+        <span className="self-start text-xs text-fg-soft bg-accent-soft rounded-full py-[2px] px-[10px] border border-border-strong">
+          About paper:{" "}
+          <code className="text-xs text-accent font-mono">{props.initialPaper}</code>
         </span>
       )}
 
       {rowContextPreview && (
-        <details className="row-context">
-          <summary>Row context (sent with your report)</summary>
-          <pre>{rowContextPreview}</pre>
+        <details className="border border-border rounded-md bg-panel-2 py-2 px-[10px]">
+          <summary className="cursor-pointer text-fg-soft text-[13px] select-none">
+            Row context (sent with your report)
+          </summary>
+          <pre className="mt-2 mb-0 mx-0 p-2 bg-panel border border-border rounded text-xs text-fg-soft overflow-x-auto font-mono max-h-40">
+            {rowContextPreview}
+          </pre>
         </details>
       )}
 
-      <label className="field">
-        <span className="field-label">Title</span>
+      <label className={LABEL_CLS}>
+        <span className={FIELD_LABEL_CLS}>Title</span>
         <input
           type="text"
           value={title}
@@ -141,11 +157,12 @@ export function FeedbackForm(props: FeedbackFormProps) {
           maxLength={120}
           required
           placeholder="Short summary"
+          className={INPUT_CLS}
         />
       </label>
 
-      <label className="field">
-        <span className="field-label">Details</span>
+      <label className={LABEL_CLS}>
+        <span className={FIELD_LABEL_CLS}>Details</span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
@@ -154,21 +171,23 @@ export function FeedbackForm(props: FeedbackFormProps) {
           required
           rows={6}
           placeholder="What happened, what did you expect, anything we should know?"
+          className={`${INPUT_CLS} resize-y min-h-[110px]`}
         />
       </label>
 
-      <label className="field">
-        <span className="field-label">Email (optional, for follow-up)</span>
+      <label className={LABEL_CLS}>
+        <span className={FIELD_LABEL_CLS}>Email (optional, for follow-up)</span>
         <input
           type="email"
           value={contact}
           onChange={(e) => setContact(e.target.value)}
           placeholder="you@example.com"
+          className={INPUT_CLS}
         />
       </label>
 
       {/* Honeypot — hidden from humans and assistive tech, bots fill it. */}
-      <div aria-hidden="true" style={{ position: "absolute", left: "-9999px" }}>
+      <div aria-hidden="true" className="absolute -left-[9999px]">
         <label>
           Website
           <input
@@ -183,26 +202,29 @@ export function FeedbackForm(props: FeedbackFormProps) {
       </div>
 
       {status.kind === "error" && (
-        <p role="alert" className="alert-error">
+        <p
+          role="alert"
+          className="m-0 py-[10px] px-3 bg-fail-soft rounded-md text-fail text-[13px] border border-fail-border"
+        >
           Couldn&apos;t submit. Please try again, or email the maintainers.
         </p>
       )}
 
-      <div className="actions">
+      <div className="flex justify-end gap-2 mt-1">
         {props.onCancel && (
           <button
             type="button"
-            className="btn-ghost"
             onClick={props.onCancel}
             disabled={status.kind === "submitting"}
+            className="bg-transparent text-fg-soft border border-border py-2 px-[14px] rounded-md text-[13px] cursor-pointer transition-[background,border-color] duration-150 ease-out hover:bg-panel-2 hover:border-border-strong disabled:opacity-50 disabled:cursor-default"
           >
             Cancel
           </button>
         )}
         <button
           type="submit"
-          className="btn-primary"
           disabled={status.kind === "submitting"}
+          className="bg-accent text-white border-0 py-2 px-[18px] rounded-md font-semibold text-[13px] cursor-pointer transition-[background] duration-150 ease-out hover:bg-accent-hover disabled:opacity-50 disabled:cursor-default"
         >
           {status.kind === "submitting" ? "Submitting…" : "Send feedback"}
         </button>

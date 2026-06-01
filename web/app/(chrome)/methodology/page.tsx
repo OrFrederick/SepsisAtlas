@@ -71,55 +71,86 @@ const KIND_LABEL: Record<Stage["kind"], string> = {
   hybrid: "hybrid",
 };
 
+const KIND_BADGE: Record<Stage["kind"], string> = {
+  deterministic:
+    "text-fg-muted border-border bg-panel-2",
+  llm: "text-accent border-accent-soft bg-accent-soft",
+  "local-llm": "text-ok border-ok-border bg-ok-soft",
+  hybrid: "text-warn border-warn-border bg-warn-soft",
+};
+
 export default function MethodologyPage() {
   return (
-    <article className="method">
-      <h1 className="method__h1">How Sepsis Atlas turns PDFs into evidence</h1>
-      <p className="method__lede">
+    <main className="max-w-[760px] mx-auto px-7 pt-[22px] pb-[60px]">
+      <h1 className="font-serif font-medium text-[28px] leading-[1.2] m-0 mb-3 text-fg">
+        How Sepsis Atlas turns PDFs into evidence
+      </h1>
+      <p className="text-[15px] leading-[1.6] text-fg-soft m-0 mb-[22px]">
         Every row in the chat started as a sentence in a PDF. A fixed pipeline
         gets it from one to the other. Deterministic code handles parsing,
         anchoring, storage, and rendering. LLMs only do the judgment work, in
         narrow stages, with their output reconciled against the source.
       </p>
 
-      <h2 className="method__h2" id="pipeline">Pipeline</h2>
-      <p className="method__p">
+      <h2
+        id="pipeline"
+        className="font-serif font-medium text-xl mt-8 mb-[10px] pt-4 border-t border-border text-fg"
+      >
+        Pipeline
+      </h2>
+      <p className="m-0 mb-4 text-fg-soft">
         Stages run in order. Each stage&apos;s output is persisted before the
         next stage starts. No in-memory hand-off between an LLM and the next
         consumer.
       </p>
-      <ol className="method__stages">
+      <ol className="list-none p-0 m-0 flex flex-col gap-2">
         {STAGES.map((s) => (
-          <li className="method__stage" data-kind={s.kind} key={s.n}>
-            <div className="method__stage-n">{s.n}</div>
-            <div className="method__stage-body">
-              <div className="method__stage-head">
-                <span className="method__stage-name">{s.name}</span>
-                <span className="method__stage-kind" data-kind={s.kind}>
+          <li
+            key={s.n}
+            className="grid grid-cols-[36px_1fr] gap-3 items-start bg-panel border border-border rounded-lg py-3 px-[14px]"
+          >
+            <div className="font-serif text-lg text-fg-muted text-right pr-1">{s.n}</div>
+            <div>
+              <div className="flex items-baseline gap-[10px] mb-[2px]">
+                <span className="font-serif text-base font-medium text-fg">{s.name}</span>
+                <span
+                  className={`text-[10px] uppercase tracking-[0.5px] py-px px-[6px] rounded-full border ${KIND_BADGE[s.kind]}`}
+                >
                   {KIND_LABEL[s.kind]}
                 </span>
               </div>
-              <div className="method__stage-module">{s.module}</div>
-              <p className="method__stage-role">{s.role}</p>
+              <div className="font-mono text-xs text-fg-muted mb-[6px]">{s.module}</div>
+              <p className="m-0 text-sm leading-[1.55] text-fg-soft">{s.role}</p>
             </div>
           </li>
         ))}
       </ol>
 
-      <h2 className="method__h2" id="invariants">What keeps it honest</h2>
-      <ul className="method__invariants">
+      <h2
+        id="invariants"
+        className="font-serif font-medium text-xl mt-8 mb-[10px] pt-4 border-t border-border text-fg"
+      >
+        What keeps it honest
+      </h2>
+      <ul className="list-none p-0 m-0 flex flex-col gap-1">
         {INVARIANTS.map((line) => (
-          <li className="method__invariant" key={line}>
+          <li
+            key={line}
+            className="relative py-[6px] pl-[22px] text-sm leading-[1.55] text-fg-soft border-t border-border first:border-t-0 before:content-[''] before:absolute before:left-1 before:top-[14px] before:w-[6px] before:h-[6px] before:rounded-full before:bg-accent"
+          >
             {line}
           </li>
         ))}
       </ul>
 
-      <p className="method__foot">
-        Source repository: <code>docs/pipeline.md</code> walks every stage
-        (including storage, audit logging, and the validation harness) with
-        diagrams and code pointers.
+      <p className="mt-6 text-[13px] text-fg-muted">
+        Source repository:{" "}
+        <code className="font-mono text-xs bg-panel-2 py-px px-[5px] rounded">
+          docs/pipeline.md
+        </code>{" "}
+        walks every stage (including storage, audit logging, and the validation
+        harness) with diagrams and code pointers.
       </p>
-    </article>
+    </main>
   );
 }

@@ -51,6 +51,15 @@ type SortKey =
 
 type SortDir = 1 | -1;
 
+const VERDICT_PIP_BASE =
+  "inline-flex items-center justify-center rounded-full font-bold leading-none p-0 normal-case border w-5 h-5 text-[11px]";
+const VERDICT_PIP: Record<VerdictKind, string> = {
+  ok: "bg-ok-soft text-ok border-ok-border",
+  warn: "bg-warn-soft text-warn border-warn-border",
+  fail: "bg-fail-soft text-fail border-fail-border",
+  unk: "bg-panel-2 text-fg-muted border-border",
+};
+
 function isGenericCohort(label: unknown): boolean {
   if (!label) return true;
   const s = String(label).trim().toLowerCase();
@@ -190,6 +199,14 @@ function compareRows(
   return 0;
 }
 
+const TH_BASE =
+  "text-left py-[10px] px-3 text-[11px] font-medium uppercase text-fg-faint bg-panel-2 " +
+  "cursor-pointer select-none whitespace-nowrap tracking-[0.5px] border-b border-border " +
+  "transition-colors duration-150 ease-out hover:text-fg";
+
+const TD_BASE =
+  "py-[10px] px-3 text-fg-soft align-middle whitespace-nowrap border-t border-border";
+
 export default function EvidenceTable({
   rows,
   turnIdx,
@@ -231,7 +248,7 @@ export default function EvidenceTable({
     ? [...indexedRows].sort((a, b) => compareRows(a.row, b.row, sortKey, sortDir))
     : indexedRows;
 
-  const columns: [SortKey, string, string][] = [
+  const columns: [SortKey, string, "num" | "verdict" | ""][] = [
     ["verdict", "✓", "verdict"],
     ["paper", "Paper · Cohort", ""],
     ["predictor", "Predictor", ""],
@@ -243,22 +260,24 @@ export default function EvidenceTable({
   columns.push(["effect", "Effect", ""]);
 
   return (
-    <div className="evidence-table-scroll">
-    <table className="evidence-table">
+    <div className="w-full overflow-x-auto border border-border rounded-md bg-panel">
+    <table className="bg-panel border-collapse text-[13.5px] w-max min-w-full">
       <thead>
         <tr>
           {columns.map(([key, label, klass]) => {
             const isActive = sortKey === key;
-            const dirCls = isActive ? (sortDir === 1 ? "sort-asc" : "sort-desc") : "";
+            const arrow = isActive ? (sortDir === 1 ? " ▲" : " ▼") : "";
             const ariaSort = isActive
               ? sortDir === 1
                 ? "ascending"
                 : "descending"
               : "none";
+            const alignCls =
+              klass === "num" ? "text-right" : klass === "verdict" ? "text-center w-9" : "";
             return (
               <th
                 key={key}
-                className={[klass, dirCls].filter(Boolean).join(" ")}
+                className={`${TH_BASE} ${alignCls}`}
                 aria-sort={ariaSort}
                 tabIndex={0}
                 onClick={() => onHeaderClick(key)}
@@ -270,10 +289,17 @@ export default function EvidenceTable({
                 }}
               >
                 {label}
+                {arrow && (
+                  <span className="text-accent" aria-hidden="true">
+                    {arrow}
+                  </span>
+                )}
               </th>
             );
           })}
-          <th scope="col">Report</th>
+          <th scope="col" className={TH_BASE}>
+            Report
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -286,33 +312,41 @@ export default function EvidenceTable({
           const predictor = predictorOf(row);
           const outcome = outcomeOf(row);
           const effect = effectOf(row);
+          const rowCls =
+            "cursor-pointer outline-none transition-colors duration-150 ease-out hover:bg-panel-2 " +
+            "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] " +
+            (active ? "active bg-accent-soft shadow-[inset_3px_0_0_var(--color-accent)]" : "");
           return (
             <tr
               key={k}
-              className={active ? "active" : ""}
+              className={rowCls}
               tabIndex={0}
               title={anchor}
               onClick={() => onActivate(ri, row)}
               onKeyDown={(e) => handleKey(e, ri, row)}
             >
-              <td className="verdict">
+              <td className={`${TD_BASE} text-center`}>
                 <span
-                  className={`badge ${verdict.cls}`}
+                  className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[verdict.cls]}`}
                   title={`verdict: ${row.verifier_verdict || row.verifier || "unverified"}`}
                 >
                   {verdict.glyph}
                 </span>
               </td>
-              <td className="paper" title={paper}>{paper}</td>
-              <td className="predictor" title={predictor}>{predictor}</td>
-              <td className="outcome" title={outcome}>{outcome}</td>
+              <td className={`${TD_BASE} text-fg text-[14.5px] font-serif`} title={paper}>
+                {paper}
+              </td>
+              <td className={TD_BASE} title={predictor}>{predictor}</td>
+              <td className={TD_BASE} title={outcome}>{outcome}</td>
               {showRankedColumn ? (
-                <td className="num" title={rankedByOf(row)}>{rankedByOf(row)}</td>
+                <td className={`${TD_BASE} text-right text-[13px] font-mono tabular-nums`} title={rankedByOf(row)}>
+                  {rankedByOf(row)}
+                </td>
               ) : null}
-              <td className="num">{nOf(row)}</td>
-              <td className="num">{pageOf(row)}</td>
-              <td className="effect">{effect}</td>
-              <td>
+              <td className={`${TD_BASE} text-right text-[13px] font-mono tabular-nums`}>{nOf(row)}</td>
+              <td className={`${TD_BASE} text-right text-[13px] font-mono tabular-nums`}>{pageOf(row)}</td>
+              <td className={TD_BASE}>{effect}</td>
+              <td className={TD_BASE}>
                 <FeedbackButton
                   type="wrong-data"
                   paper={row.file_name || row.paper_ref || row.study || ""}

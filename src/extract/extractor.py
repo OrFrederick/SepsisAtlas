@@ -3,9 +3,10 @@
 All LLM calls go through the shared `@logged_llm_call` decorator so we get the
 audit trail in `logs/llm_calls.jsonl` and the matching DB row in `llm_calls`.
 
-Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). Defaults to
-`anthropic/claude-sonnet-4.5` for extract and `anthropic/claude-haiku-4.5` for
-verify (see `sepsis_atlas.config`). OpenRouter forwards the
+Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). `.env` is
+authoritative at runtime; the code-side fallbacks in `sepsis_atlas.config`
+(`anthropic/claude-opus-4.7` for extract, `anthropic/claude-sonnet-4.6` for
+verify) only kick in when the env var is unset. OpenRouter forwards the
 `response_format={"type":"json_schema", ...}` payload to Anthropic Sonnet/Haiku
 4.5+ which support structured outputs natively.
 """
@@ -108,18 +109,19 @@ def _cache_tokens(u) -> tuple[int, int, float]:
 
     OpenRouter's OpenAI-compatible response reports cache activity on
     ``usage.prompt_tokens_details`` (``cache_write_tokens`` on the first
-    request that establishes the entry, ``cached_tokens`` on hits) plus a
-    top-level ``usage.cache_discount``. These are NOT the Anthropic-native
-    ``cache_{creation,read}_input_tokens`` names -- those never appear on
-    the OpenAI-compat object, so reading them always yields 0.
+    request that establishes the entry, ``cached_tokens`` on hits). The
+    cache discount is already folded into ``usage.cost`` (PR #94), so we
+    return 0.0 for discount to keep the tuple shape stable; callers that
+    need an audit-only number for the log should treat it as informational.
+    These are NOT the Anthropic-native ``cache_{creation,read}_input_tokens``
+    names -- those never appear on the OpenAI-compat object.
     """
     if not u:
         return 0, 0, 0.0
     ptd = getattr(u, "prompt_tokens_details", None)
     write = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
     read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
-    discount = float(getattr(u, "cache_discount", 0.0) or 0.0)
-    return write, read, discount
+    return write, read, 0.0
 
 
 def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
@@ -132,7 +134,7 @@ def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
         "latency_ms": latency_ms,
         "tokens_in": getattr(u, "prompt_tokens", 0) if u else 0,
         "tokens_out": getattr(u, "completion_tokens", 0) if u else 0,
-        "cost_usd": float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0,
+        "cost_usd": float(getattr(u, "cost", 0.0) or 0.0) if u else 0.0,
         "cache_creation_tokens": cache_write,
         "cache_read_tokens": cache_read,
         "cache_discount": cache_discount,

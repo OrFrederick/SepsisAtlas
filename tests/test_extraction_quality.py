@@ -536,7 +536,7 @@ def test_verifier_matches_hand_grade(label, claim, span, cohort_context, expecte
     msg = types.SimpleNamespace(content=json.dumps(fake_payload), refusal=None)
     fake = types.SimpleNamespace(
         choices=[types.SimpleNamespace(message=msg)],
-        usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_cost=0.0),
+        usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=5, cost=0.0),
     )
 
     with patch.object(verify_llm, "_call_verify_llm", return_value=fake):

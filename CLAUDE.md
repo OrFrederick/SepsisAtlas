@@ -6,6 +6,11 @@
 - Use Conventional-Commits-ish summary lines but free-form bodies are fine. Focus on the *why* over the *what*.
 - One logical change per commit. Don't bundle unrelated edits.
 
+## Pull requests
+
+- **Default base branch is `dev`, not `main`.** Open PRs against `dev` unless explicitly told otherwise. `main` is reserved for release merges from `dev`. When using `gh pr create`, pass `--base dev`.
+- Known exception: PR #90 (`fix/eugene-followups-pr88`) was opened against `main` intentionally and should stay there.
+
 ## Caveman mode
 
 User runs the `caveman` plugin globally. Caveman applies to chat/text replies — **NOT** to commit messages, PR descriptions, code comments, or docs. Those stay in normal English.

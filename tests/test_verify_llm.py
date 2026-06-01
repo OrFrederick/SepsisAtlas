@@ -32,14 +32,14 @@ from src.extract.verify_llm import (
 # ---------------------------------------------------------------------------
 
 
-def _fake_completion(payload: dict, *, prompt_tokens: int = 100, completion_tokens: int = 50, total_cost: float = 0.0023):
+def _fake_completion(payload: dict, *, prompt_tokens: int = 100, completion_tokens: int = 50, cost: float = 0.0023):
     """Mimic the openai ChatCompletion shape used by extractor.py."""
     msg = types.SimpleNamespace(content=json.dumps(payload), refusal=None)
     choice = types.SimpleNamespace(message=msg)
     usage = types.SimpleNamespace(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        total_cost=total_cost,
+        cost=cost,
     )
     return types.SimpleNamespace(choices=[choice], usage=usage)
 

@@ -3,7 +3,7 @@ export default function Loading() {
   // viewer hydrates. Don't add a topbar or chrome here; this page is shown
   // inside an iframe in chat / paper-detail shells.
   return (
-    <div style={{ height: "100vh", display: "grid", placeItems: "center", color: "var(--fg-muted)" }}>
+    <div className="h-screen grid place-items-center text-fg-muted">
       Loading PDF…
     </div>
   );

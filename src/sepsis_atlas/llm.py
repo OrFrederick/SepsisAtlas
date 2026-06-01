@@ -65,11 +65,25 @@ def get_client() -> Any:
         return _client
 
     # Default: OpenRouter via OpenAI client.
+    # max_retries=1: each retry re-uploads the full paper context (50-100k
+    # tokens for predictor_extract). 3 retries on transient errors = 4×
+    # input cost on a failed call. Cap at 1; higher-level retry policies
+    # belong in the extractor with proper dedup.
+    #
+    # Scope: this cap is process-global, so it also applies to verify_llm
+    # (Haiku, ~1.2k input) — tier-2 only, invoked by verify_nli for
+    # low-confidence rows. Most verify_llm calls hit `verifier_llm_cache`
+    # (SQLite, keyed on input hash, success-responses only — see
+    # `_cache_put` in verify_llm.py). A transient SDK failure on a novel
+    # row is NOT cached and falls through to verdict=partial without
+    # retry; accepted given Haiku's per-call cost. If a future stage
+    # needs different retry behavior, pass `max_retries=...` per-call
+    # instead of forking clients.
     _client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
         timeout=300.0,
-        max_retries=3,
+        max_retries=1,
         default_headers={
             "HTTP-Referer": "https://github.com/sepsis-atlas",
             "X-Title": "Sepsis Atlas",
@@ -140,12 +154,20 @@ def logged_llm_call(stage: str):
                 tokens_out = getattr(u, "completion_tokens", 0) if u else 0
                 # OpenRouter's OpenAI-compat usage object exposes the billed
                 # cost on `u.cost` (cache-adjusted, post-discount). The legacy
-                # `total_cost` / `cache_discount` names were never part of the
-                # response shape; code that read them silently always returned
-                # 0. langfuse.openai already reads `u.cost` natively, which is
-                # why the Langfuse UI showed real costs while our manifests
-                # under-reported.
+                # `total_cost` name was never part of the response shape;
+                # code that read it silently always returned 0. langfuse.openai
+                # already reads `u.cost` natively, which is why the Langfuse
+                # UI showed real costs while our manifests under-reported.
                 cost_usd = float(getattr(u, "cost", 0.0) or 0.0) if u else 0.0
+                # OpenRouter cache activity rides on prompt_tokens_details:
+                # `cache_write_tokens` on the establishing call,
+                # `cached_tokens` on hits. cache_discount is folded into
+                # `u.cost` already, so we record it as 0 here just to keep
+                # the log-record shape stable for downstream consumers.
+                ptd = getattr(u, "prompt_tokens_details", None) if u else None
+                cache_creation = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
+                cache_read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
+                cache_discount = 0.0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),
@@ -159,6 +181,9 @@ def logged_llm_call(stage: str):
                     "prompt_hash": prompt_hash,
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    "cache_creation_tokens": cache_creation,
+                    "cache_read_tokens": cache_read,
+                    "cache_discount": cache_discount,
                     "cost_usd": cost_usd,
                     "latency_ms": latency_ms,
                     "error": err,

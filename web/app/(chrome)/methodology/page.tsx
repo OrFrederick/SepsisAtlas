@@ -56,14 +56,6 @@ const STAGES: Stage[] = [
   },
 ];
 
-const INVARIANTS = [
-  "anchor_text must be a verbatim substring of the parsed PDF, or the row is rejected.",
-  "Numbers come from the SQLite row, not the model. effect_size_str is verbatim. Numeric fields are regex-derived.",
-  "Stage 3 runs locally. No API call, no network.",
-  "Every model call is logged append-only with stage, prompt hash, tokens, cost, latency.",
-  "Held-out set (Gai 2022, Seymour 2016, Wang 2023, Zhang 2021) is never used for prompt tuning.",
-];
-
 const KIND_LABEL: Record<Stage["kind"], string> = {
   deterministic: "deterministic",
   llm: "LLM",
@@ -125,23 +117,6 @@ export default function MethodologyPage() {
           </li>
         ))}
       </ol>
-
-      <h2
-        id="invariants"
-        className="font-serif font-medium text-xl mt-8 mb-[10px] pt-4 border-t border-border text-fg"
-      >
-        What keeps it honest
-      </h2>
-      <ul className="list-none p-0 m-0 flex flex-col gap-1">
-        {INVARIANTS.map((line) => (
-          <li
-            key={line}
-            className="relative py-[6px] pl-[22px] text-sm leading-[1.55] text-fg-soft border-t border-border first:border-t-0 before:content-[''] before:absolute before:left-1 before:top-[14px] before:w-[6px] before:h-[6px] before:rounded-full before:bg-accent"
-          >
-            {line}
-          </li>
-        ))}
-      </ul>
 
       <p className="mt-6 text-[13px] text-fg-muted">
         Source repository:{" "}

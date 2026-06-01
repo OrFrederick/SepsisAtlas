@@ -9,6 +9,11 @@ export interface PageEntry {
   bboxOverlay: HTMLDivElement;
   rendered: boolean;
   rendering: Promise<void> | null;
+  // In-flight pdfjs RenderTask, kept so rerenderAll can cancel a paint that
+  // is still locking the canvas — pdfjs throws "Cannot use the same canvas
+  // during multiple render() operations" if a second render starts before
+  // the first one finishes or is cancelled.
+  renderTask: import("pdfjs-dist").RenderTask | null;
   viewport: import("pdfjs-dist").PageViewport | null;
   // Filled after each successful renderPage(); cleared by rerenderAll
   // because the underlying spans get replaced when the page re-renders

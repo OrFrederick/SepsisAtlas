@@ -229,6 +229,7 @@ export default function ChatShell() {
   const [viewerUrl, setViewerUrl] = useState("");
   const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
   const [resizing, setResizing] = useState(false);
+  const [chatHidden, setChatHidden] = useState(false);
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -385,6 +386,7 @@ export default function ChatShell() {
   const closeViewer = () => {
     setViewerUrl("");
     setActiveRowKey(null);
+    setChatHidden(false);
   };
 
   // ---- auto-grow textarea (mirror the original behaviour) ----------------
@@ -487,7 +489,9 @@ export default function ChatShell() {
     () =>
       showPdf
         ? {
-            gridTemplateColumns: `${chatPct}% calc(100% - ${chatPct}%)`,
+            gridTemplateColumns: chatHidden
+              ? `0% 100%`
+              : `${chatPct}% calc(100% - ${chatPct}%)`,
             transition: resizing
               ? "none"
               : `grid-template-columns 520ms ${SPLIT_EASE}`,
@@ -496,7 +500,7 @@ export default function ChatShell() {
             gridTemplateColumns: "100% 0%",
             transition: `grid-template-columns 520ms ${SPLIT_EASE}`,
           },
-    [chatPct, resizing, showPdf],
+    [chatPct, resizing, showPdf, chatHidden],
   );
 
   // Pointer/focus stays disabled on the viewer pane until the slide-in
@@ -595,9 +599,7 @@ export default function ChatShell() {
   // Solo (landing) tightens the chat column to a readable max-width and
   // drops the composer top border; once the viewer reveals, the chat
   // grows to fill the grid track.
-  const chatCls = showPdf
-    ? `flex flex-col bg-bg overflow-hidden max-w-none m-0`
-    : `flex flex-col bg-bg overflow-hidden max-w-[720px] mx-auto w-full`;
+  const chatCls = `flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
   const chatTransition = `transition-[max-width] duration-[520ms] ease-[cubic-bezier(0.2,0.7,0.2,1)]`;
 
   const scrollbackCls = showPdf
@@ -616,6 +618,16 @@ export default function ChatShell() {
       className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:44px_1fr]"
     >
       <div className="flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg border-b border-border max-[480px]:flex-wrap max-[480px]:justify-start max-[480px]:gap-2 max-[480px]:px-3">
+        {showPdf ? (
+          <button
+            type="button"
+            className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
+            title={chatHidden ? "Show chat pane" : "Hide chat pane"}
+            onClick={() => setChatHidden((v) => !v)}
+          >
+            {chatHidden ? "Show chat" : "Hide chat"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"

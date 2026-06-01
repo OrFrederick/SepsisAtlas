@@ -66,7 +66,7 @@ class _Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    total_cost: float = 0.0
+    cost: float = 0.0
 
 
 @dataclass
@@ -215,7 +215,7 @@ class ClaudeCLIClient:
             completion_tokens=int(usage_raw.get("output_tokens", 0)),
             total_tokens=int(usage_raw.get("input_tokens", 0))
             + int(usage_raw.get("output_tokens", 0)),
-            total_cost=float(envelope.get("total_cost_usd", 0.0) or 0.0),
+            cost=float(envelope.get("total_cost_usd", 0.0) or 0.0),
         )
         return _ChatCompletion(
             id=str(envelope.get("session_id") or uuid.uuid4()),

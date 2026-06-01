@@ -135,11 +135,17 @@ def logged_llm_call(stage: str):
                 raise
             finally:
                 latency_ms = int((time.time() - t0) * 1000)
-                tokens_in = getattr(getattr(resp, "usage", None), "prompt_tokens", 0) if resp else 0
-                tokens_out = getattr(getattr(resp, "usage", None), "completion_tokens", 0) if resp else 0
-                cost_usd = float(
-                    getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
-                ) if resp else 0.0
+                u = getattr(resp, "usage", None) if resp else None
+                tokens_in = getattr(u, "prompt_tokens", 0) if u else 0
+                tokens_out = getattr(u, "completion_tokens", 0) if u else 0
+                # OpenRouter's OpenAI-compat usage object exposes the billed
+                # cost on `u.cost` (cache-adjusted, post-discount). The legacy
+                # `total_cost` / `cache_discount` names were never part of the
+                # response shape; code that read them silently always returned
+                # 0. langfuse.openai already reads `u.cost` natively, which is
+                # why the Langfuse UI showed real costs while our manifests
+                # under-reported.
+                cost_usd = float(getattr(u, "cost", 0.0) or 0.0) if u else 0.0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),

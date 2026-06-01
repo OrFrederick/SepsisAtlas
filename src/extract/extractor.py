@@ -3,9 +3,10 @@
 All LLM calls go through the shared `@logged_llm_call` decorator so we get the
 audit trail in `logs/llm_calls.jsonl` and the matching DB row in `llm_calls`.
 
-Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). Defaults to
-`anthropic/claude-sonnet-4.5` for extract and `anthropic/claude-haiku-4.5` for
-verify (see `sepsis_atlas.config`). OpenRouter forwards the
+Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). `.env` is
+authoritative at runtime; the code-side fallbacks in `sepsis_atlas.config`
+(`anthropic/claude-opus-4.7` for extract, `anthropic/claude-sonnet-4.6` for
+verify) only kick in when the env var is unset. OpenRouter forwards the
 `response_format={"type":"json_schema", ...}` payload to Anthropic Sonnet/Haiku
 4.5+ which support structured outputs natively.
 """
@@ -174,7 +175,7 @@ def run_cohort_enum(
         "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
         "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
         "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
+            getattr(getattr(resp, "usage", None), "cost", 0.0) or 0.0
         ),
     }
     return parsed.cohorts, meta
@@ -239,7 +240,7 @@ def run_predictor_extract(
         "tokens_in": getattr(getattr(resp, "usage", None), "prompt_tokens", 0),
         "tokens_out": getattr(getattr(resp, "usage", None), "completion_tokens", 0),
         "cost_usd": float(
-            getattr(getattr(resp, "usage", None), "total_cost", 0.0) or 0.0
+            getattr(getattr(resp, "usage", None), "cost", 0.0) or 0.0
         ),
     }
     return parsed.rows, meta

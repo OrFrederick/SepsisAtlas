@@ -300,6 +300,7 @@ def build_index(parsed: dict, file_stem: str | None = None) -> list[dict]:
                         "bbox": row_bbox,
                         "kind": "table_row",
                         "section": caption,
+                        "row_idx": row_idx,
                     }
                 )
 
@@ -437,6 +438,225 @@ def _disambiguate(
     return min(hits, key=lambda e: len(e.get("text") or ""))
 
 
+# Numeric tokens for the fingerprint tier. Mirrors verify_nli._NUM_RE so the
+# resolver matches the same notion of "a number" the verifier uses. We do not
+# import from verify_nli to keep anchor_resolver dependency-free.
+_NUMERIC_RE = re.compile(r"(?<![\d.])-?\d+(?:[ ,]\d{3})*(?:\.\d+)?")
+
+
+def _numeric_tokens(text: str) -> set[str]:
+    """Return the set of numeric tokens in ``text`` after normalization.
+
+    Tokens are kept as strings (with thousands separators stripped) so that
+    "0.80" and "0.8" remain distinct — fingerprint matching wants exact
+    reported figures, not float-equal approximations.
+    """
+    if not text:
+        return set()
+    out: set[str] = set()
+    for m in _NUMERIC_RE.finditer(text):
+        s = m.group().replace(",", "").replace(" ", "")
+        out.add(s)
+    return out
+
+
+# Matches a "Table N" / "Table Na" token in a normalized string (already
+# lowercased by _norm). The optional suffix letter handles "Table 2a".
+_TABLE_NUM_RE = re.compile(r"\btable\s+(\d+[a-z]?)\b")
+
+
+def _table_num(norm_text: str) -> str | None:
+    m = _TABLE_NUM_RE.search(norm_text)
+    return m.group(1) if m else None
+
+
+def _section_matches_caption(sec_norm: str, cap_norm: str) -> bool:
+    """Strict section-to-caption equivalence on normalized strings.
+
+    Both inputs are already ``_norm()``'d. The naive bidirectional substring
+    used to scope ``"Table 1"`` to the wrong table because ``"table 1"`` is a
+    prefix of ``"table 10 | ..."``; it also miscategorized body-text sections
+    like ``"Results"`` as captions whenever a caption happened to contain the
+    word. We avoid both by extracting the ``Table N`` token from each side:
+
+    * if both name a Table N, they match only when N is identical;
+    * if exactly one names a Table N, they never match (body section vs.
+      caption);
+    * if neither names a Table N (e.g. captions like ``"Figure 1: ..."`` or
+      caption-less rows), fall back to the older substring comparison.
+    """
+    if not sec_norm or not cap_norm:
+        return False
+    sec_num = _table_num(sec_norm)
+    cap_num = _table_num(cap_norm)
+    if sec_num is not None and cap_num is not None:
+        return sec_num == cap_num
+    if sec_num is not None or cap_num is not None:
+        return False
+    return sec_norm == cap_norm or sec_norm in cap_norm or cap_norm in sec_norm
+
+
+def _is_table_caption_section(
+    anchor_section: str | None, index: Iterable[dict]
+) -> bool:
+    """Return True if ``anchor_section`` names a caption present on a table
+    entry in the index.
+
+    Used by R3 to decide whether the scoped tiers should fire — body-text
+    sections (Methods, Results, Discussion) are not table captions and
+    should fall through to the unscoped tiers.
+    """
+    if not anchor_section:
+        return False
+    sec_norm = _norm(anchor_section)
+    if not sec_norm:
+        return False
+    for e in index:
+        if e.get("kind") not in ("table_cell", "table_row"):
+            continue
+        cap_norm = _norm(e.get("section") or "")
+        if _section_matches_caption(sec_norm, cap_norm):
+            return True
+    return False
+
+
+def _section_scope(
+    index: list[dict], anchor_section: str | None
+) -> list[dict] | None:
+    """Return the subset of ``index`` whose section matches ``anchor_section``.
+
+    Returns ``None`` when scoping cannot be applied (no section, no matching
+    entries) — callers should then fall back to the full index. Section match
+    uses :func:`_section_matches_caption`, which anchors ``Table N`` tokens
+    so that ``"Table 1"`` does **not** scope into ``"TABLE 10 | ..."``.
+    """
+    if not anchor_section:
+        return None
+    sec_norm = _norm(anchor_section)
+    if not sec_norm:
+        return None
+    scoped = [
+        e
+        for e in index
+        if _section_matches_caption(sec_norm, _norm(e.get("section") or ""))
+    ]
+    return scoped or None
+
+
+def _row_union_hits(
+    anchor_text: str,
+    pool: list[dict],
+    max_n: int = 3,
+    min_coverage: float = 0.8,
+) -> list[dict]:
+    """R1 — match anchor against consecutive table_row unions (N=2..max_n).
+
+    Groups table_row entries by (page, section caption), sorts by row_idx,
+    walks consecutive windows of size N. A window is accepted when either
+
+    * the normalized anchor_text is a substring of the normalized window text, or
+    * the window's token set covers >= ``min_coverage`` of the anchor's tokens.
+
+    Returns synthetic union entries with the min/max envelope bbox. Smallest N
+    wins on tie — prefer 2-row to 3-row to keep the highlight tight.
+    """
+    rows = [
+        e
+        for e in pool
+        if e.get("kind") == "table_row" and e.get("row_idx") is not None
+    ]
+    if not rows:
+        return []
+    needle_tokens = _tokens(anchor_text)
+    if not needle_tokens:
+        return []
+    needle_norm = _norm(anchor_text)
+
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        key = (r.get("section") or "", r.get("page"))
+        groups.setdefault(key, []).append(r)
+
+    by_n: dict[int, list[dict]] = {}
+    for group_rows in groups.values():
+        group_rows = sorted(group_rows, key=lambda e: e.get("row_idx"))
+        for n in range(2, max_n + 1):
+            for i in range(len(group_rows) - n + 1):
+                slab = group_rows[i : i + n]
+                idxs = [s.get("row_idx") for s in slab]
+                if not all(b - a == 1 for a, b in zip(idxs, idxs[1:])):
+                    continue
+                slab_text = " ".join(s.get("text") or "" for s in slab)
+                slab_norm = _norm(slab_text)
+                if needle_norm and needle_norm in slab_norm:
+                    coverage = 1.0
+                else:
+                    slab_tokens = _tokens(slab_text)
+                    coverage = len(needle_tokens & slab_tokens) / len(needle_tokens)
+                if coverage < min_coverage:
+                    continue
+                bboxes = [s["bbox"] for s in slab if s.get("bbox")]
+                if not bboxes:
+                    continue
+                envelope = [
+                    min(b[0] for b in bboxes),
+                    min(b[1] for b in bboxes),
+                    max(b[2] for b in bboxes),
+                    max(b[3] for b in bboxes),
+                ]
+                by_n.setdefault(n, []).append(
+                    {
+                        "text": slab_text,
+                        "page": slab[0].get("page"),
+                        "bbox": envelope,
+                        "kind": "table_row_union",
+                        "section": slab[0].get("section"),
+                    }
+                )
+    if not by_n:
+        return []
+    return by_n[min(by_n)]
+
+
+def _numeric_fingerprint_hits(
+    anchor_text: str,
+    pool: list[dict],
+    min_overlap: int = 3,
+) -> list[dict]:
+    """R2 — pick the table row whose numeric tokens cover the anchor's.
+
+    Precision-first. Requires:
+
+    * at least ``min_overlap`` numeric tokens in the anchor;
+    * the candidate row's numeric tokens form a superset of the anchor's;
+    * a unique winner — ties are dropped to ``[]`` to avoid wrong-table hits.
+
+    Operates on ``table_row`` entries only (not individual cells) so we score
+    against the row's full numeric content.
+    """
+    anchor_nums = _numeric_tokens(anchor_text)
+    if len(anchor_nums) < min_overlap:
+        return []
+    rows = [e for e in pool if e.get("kind") == "table_row"]
+    best: dict | None = None
+    best_overlap = 0
+    tied = False
+    for r in rows:
+        row_nums = _numeric_tokens(r.get("text") or "")
+        if not anchor_nums.issubset(row_nums):
+            continue
+        overlap = len(anchor_nums)  # by definition since anchor ⊆ row
+        if overlap > best_overlap:
+            best = r
+            best_overlap = overlap
+            tied = False
+        elif overlap == best_overlap and r is not best:
+            tied = True
+    if best is None or tied:
+        return []
+    return [best]
+
+
 def _pipe_probe_hits(anchor_text: str, haystack: Iterable[dict]) -> list[dict]:
     """Match pipe-delimited table-row anchors via the first pipe segment.
 
@@ -500,6 +720,25 @@ def resolve(
        ``>= 60`` whose first 60 normalized characters appear *uniquely* in
        exactly one index entry, accept that entry. Ambiguous (>1) hits are
        ignored to keep precision up.
+    7. **Table-row label** — match a leading text label across table cells
+       when the label is unique across pages.
+    8. **N-row union** (R1) — concatenate 2 or 3 consecutive table_row entries
+       within the same caption and match the anchor against the union;
+       returns a synthetic entry with the envelope bbox. Handles
+       LLM-concatenated multi-row anchors.
+    9. **Numeric fingerprint** (R2) — last resort, scoped to the anchor's
+       table caption: pick the single row whose numeric tokens are a
+       superset of the anchor's. Gated on >=3 numeric matches and unique
+       winner.
+
+    When ``anchor_section`` names a table caption present in the index (R3),
+    tiers 8-9 (R1 N-row union and R2 numeric fingerprint) operate on the
+    subset of entries belonging to that caption rather than the whole index.
+    Tiers 1-7 always run unscoped — they were not changed by issue #96 and
+    scoping them would regress previously-resolved anchors. Body-text sections
+    (Methods, Results, …) do not trigger scoping at all; R1 falls back to a
+    single-table-only pool (see :func:`_row_union_hits` callsite) and R2 is
+    skipped entirely.
 
     Returns ``None`` if every tier fails.
     """
@@ -539,6 +778,35 @@ def resolve(
     # Tier 7: table-row label match — only when label is unique across pages.
     if not hits:
         hits = _table_row_label_hits(anchor_text, index)
+
+    # R3 — scope tiers 8 and 9 to the anchor's table caption when applicable.
+    # We intentionally restrict scoping to the NEW tiers (R1, R2) so previously
+    # resolved anchors keep their existing bbox. Body-text sections (no matching
+    # table caption in the index) fall back to the full index for R1 and skip
+    # R2 entirely.
+    scoped: list[dict] | None = None
+    if _is_table_caption_section(anchor_section, index):
+        scoped = _section_scope(index, anchor_section)
+
+    # Tier 8 (R1): N-row union for multi-row LLM concatenations.
+    # Unscoped pool would group table_rows across different tables in
+    # _row_union_hits and let _disambiguate pick by shortest text rather
+    # than by table — wrong-table union risk. Restrict the unscoped fallback
+    # to papers whose table_rows live in a single caption.
+    if not hits:
+        if scoped:
+            hits = _row_union_hits(anchor_text, scoped)
+        else:
+            captions = {
+                e.get("section") for e in index if e.get("kind") == "table_row"
+            }
+            if len(captions) <= 1:
+                hits = _row_union_hits(anchor_text, index)
+
+    # Tier 9 (R2): numeric fingerprint — only run when scoped to a table
+    # caption. Running unscoped would cross-table-match on common figures.
+    if not hits and scoped is not None:
+        hits = _numeric_fingerprint_hits(anchor_text, scoped)
 
     if not hits:
         return None

@@ -408,14 +408,19 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         "errors": [],
     }
 
-    def _bind_anchor(anchor) -> None:
+    def _bind_anchor(anchor) -> bool:
         """Replace LLM-emitted bbox+page+section with resolver lookup against
         the parsed paper. Anchor.text is left as-is (already verifier-checked).
-        Misses leave the anchor untouched and bump the missed counter."""
+        Misses leave the anchor untouched and bump the missed counter.
+
+        Returns True when the resolver found a hit, False otherwise. Callers
+        use the boolean to enforce the CLAUDE.md anchor contract — rows whose
+        bbox cannot be resolved must not carry a verifier verdict of ``ok``.
+        """
         hit = resolve(anchor.text or "", anchor.section, anchor_index)
         if hit is None:
             summary["anchor_missed"] += 1
-            return
+            return False
         bbox = hit.get("bbox")
         if bbox is not None:
             anchor.bbox = bbox
@@ -428,6 +433,25 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         if sec:
             anchor.section = sec
         summary["anchor_resolved"] += 1
+        return True
+
+    def _demote_if_anchor_missed(
+        verdict: VerifierResponse, resolved: bool
+    ) -> VerifierResponse:
+        """Enforce anchor contract: an unresolved anchor cannot back an `ok`
+        verdict. Demote to `partial` and tag the rationale so downstream
+        consumers can audit the reason."""
+        if resolved or verdict.verdict != "ok":
+            return verdict
+        rationale = (verdict.rationale or "").rstrip()
+        tag = "anchor_unresolved"
+        if tag not in rationale:
+            rationale = f"{rationale} | {tag}" if rationale else tag
+        return VerifierResponse(
+            verdict="partial",
+            score=verdict.score,
+            rationale=rationale,
+        )
 
     # IMPORTANT: do NOT hold a session open across LLM calls. SQLite is a
     # single-writer DB; even with WAL+busy_timeout, an open transaction held
@@ -450,7 +474,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
     # Verify each cohort (may include LLM call inside verify_llm cache miss)
     cohort_verdicts: list[tuple] = []
     for c in cohorts:
-        _bind_anchor(c.anchor)
+        resolved = _bind_anchor(c.anchor)
         try:
             verdict, vmeta = run_verifier(
                 c.model_dump(mode="json"),
@@ -466,6 +490,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                 rationale=f"verifier_error: {e!r}",
             )
             vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+        verdict = _demote_if_anchor_missed(verdict, resolved)
         summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
         summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
         summary["verdict_counts"][verdict.verdict] += 1
@@ -495,7 +520,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         summary["latency_ms_total"] += pm_meta["latency_ms"]
         row_verdicts: list[tuple] = []
         for r in rows:
-            _bind_anchor(r.anchor)
+            resolved = _bind_anchor(r.anchor)
             try:
                 verdict, vmeta = run_verifier(
                     r.model_dump(mode="json"),
@@ -513,6 +538,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                     rationale=f"verifier_error: {e!r}",
                 )
                 vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+            verdict = _demote_if_anchor_missed(verdict, resolved)
             summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
             summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
             summary["verdict_counts"][verdict.verdict] += 1

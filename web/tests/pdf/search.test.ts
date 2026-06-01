@@ -2,11 +2,18 @@ import { describe, it, expect } from "vitest";
 import { buildPageIndex, findHitsInPage } from "../../src/components/pdf/search";
 
 describe("buildPageIndex", () => {
-  it("concatenates items with single-space separators and tracks offsets", () => {
+  it("concatenates items with single-space separators and maps each char to its source", () => {
     const idx = buildPageIndex(["Sepsis", "is", "severe."]);
     expect(idx.text).toBe("sepsis is severe.");
-    expect(idx.itemStart).toEqual([0, 7, 10]);
-    expect(idx.itemEnd).toEqual([6, 9, 17]);
+    // Every real character points back to (item, offset-in-item); synthetic
+    // separators carry item -1 so a match can't start/end on them.
+    expect(idx.srcItem[0]).toBe(0); // 's' of "Sepsis"
+    expect(idx.srcOffset[0]).toBe(0);
+    expect(idx.srcItem[6]).toBe(-1); // the inserted separator space
+    expect(idx.srcItem[7]).toBe(1); // 'i' of "is"
+    expect(idx.srcOffset[7]).toBe(0);
+    expect(idx.srcItem[10]).toBe(2); // 's' of "severe."
+    expect(idx.srcOffset[10]).toBe(0);
   });
 
   it("lowercases for case-insensitive matching", () => {
@@ -31,7 +38,6 @@ describe("findHitsInPage", () => {
   });
 
   it("matches a phrase that straddles two text items", () => {
-    // Concatenated: "septic shock" — search "septic shock" should match across items.
     const hits = findHitsInPage(2, ["septic", "shock"], "septic shock");
     expect(hits).toHaveLength(1);
     expect(hits[0]).toEqual({ page: 2, startItem: 0, startOffset: 0, endItem: 1, endOffset: 5 });
@@ -46,9 +52,35 @@ describe("findHitsInPage", () => {
   });
 
   it("handles overlapping potential matches by advancing past each", () => {
-    // "aaaa" with query "aa" should yield non-overlapping hits at 0 and 2.
     const hits = findHitsInPage(1, ["aaaa"], "aa");
     expect(hits).toHaveLength(2);
     expect(hits.map(h => h.startOffset)).toEqual([0, 2]);
+  });
+
+  // --- normalization (the "misses matches" bug) ---
+
+  it("matches across a hyphenated line break (item ends with '-', next continues the word)", () => {
+    // pdfjs splits a hyphenated word at the line break into two items.
+    const hits = findHitsInPage(5, ["inflamma-", "tory response"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 1, endOffset: 4 });
+  });
+
+  it("collapses runs of whitespace so a query with one space matches several", () => {
+    const hits = findHitsInPage(1, ["septic    shock"], "septic shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 0, endOffset: 15 });
+  });
+
+  it("ignores soft hyphens embedded in the text", () => {
+    const hits = findHitsInPage(1, ["mor­tality"], "mortality");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, endItem: 0 });
+  });
+
+  it("normalizes whitespace in the query too", () => {
+    const hits = findHitsInPage(1, ["septic shock"], "  septic   shock  ");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 0, endOffset: 12 });
   });
 });

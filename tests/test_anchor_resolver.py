@@ -621,6 +621,92 @@ def test_resolve_r1_row_union_matches_concatenated_anchor():
     assert (bb[3] - bb[1]) >= 20
 
 
+def test_resolve_r1_row_union_spans_table_continued_page_boundary():
+    """A "Table X continued" anchor whose rows straddle pages N and N+1 must
+    union across the page boundary even when Docling appended "(continued)"
+    to the caption on page N+1 — captions are byte-different but bucket
+    together via the continuation-suffix normalization."""
+    caption_p5 = "TABLE 4 | predictors"
+    caption_p6 = "TABLE 4 | predictors (continued)"
+    table_p5 = {
+        "self_ref": "#/tables/0",
+        "page": 5,
+        "bbox": _bbox(page=5),
+        "n_rows": 1,
+        "n_cols": 1,
+        "caption": caption_p5,
+        "cells": [
+            {
+                "row": 0,
+                "col": 0,
+                "text": "Age 1.04 0.91 1.17 0.5785",
+                "bbox": _bbox(l=0, t=200, r=400, b=180, page=5),
+            },
+        ],
+    }
+    # Continuation table on page 6: caption differs, row_idx restarts at 0.
+    table_p6 = {
+        "self_ref": "#/tables/1",
+        "page": 6,
+        "bbox": _bbox(page=6),
+        "n_rows": 1,
+        "n_cols": 1,
+        "caption": caption_p6,
+        "cells": [
+            {
+                "row": 0,
+                "col": 0,
+                "text": "Sex 0.88 0.79 0.98 0.0231",
+                "bbox": _bbox(l=0, t=750, r=400, b=730, page=6),
+            },
+        ],
+    }
+    parsed = _make_parsed(
+        full_text="",
+        offsets=[],
+        tables=[table_p5, table_p6],
+    )
+    idx = build_index(parsed)
+    needle = "Age 1.04 0.91 1.17 0.5785 Sex 0.88 0.79 0.98 0.0231"
+    hit = resolve(needle, caption_p5, idx)
+    assert hit is not None
+    assert hit["kind"] == "table_row_union"
+    # Primary page is the first (where coverage begins); bbox lives there.
+    assert hit["page"] == 5
+    # Both pages contributed to the slab text — proves the cross-page union
+    # actually fired rather than a single-page match.
+    assert "Age" in hit["text"]
+    assert "Sex" in hit["text"]
+    # Synthetic envelope is a valid [l, t, r, b] over the page-5 row only
+    # (geometry across a page break would be nonsense).
+    bb = hit["bbox"]
+    assert isinstance(bb, list) and len(bb) == 4
+    assert bb[2] > bb[0]  # positive width
+    assert bb[3] != bb[1]  # non-degenerate height (origin-agnostic)
+
+
+def test_canonical_section_for_continuation_strips_common_suffixes():
+    from src.extract.anchor_resolver import _canonical_section_for_continuation
+
+    base = "TABLE 4 | predictors"
+    variants = [
+        "TABLE 4 | predictors",
+        "TABLE 4 | predictors (continued)",
+        "TABLE 4 | predictors (cont.)",
+        "TABLE 4 | predictors (cont)",
+        "TABLE 4 | predictors continued",
+        "TABLE 4 | predictors, continued",
+        "TABLE 4 | predictors; cont.",
+        "TABLE 4 | predictors   (Continued)   ",
+    ]
+    expected = _canonical_section_for_continuation(base)
+    for v in variants:
+        assert _canonical_section_for_continuation(v) == expected, v
+    # Different tables must NOT collapse onto the same key.
+    other = _canonical_section_for_continuation("TABLE 5 | demographics")
+    assert other != expected
+
+
 def test_resolve_r1_row_union_requires_consecutive_rows():
     """Non-adjacent rows must not union — guards against cross-row hallucinations."""
     table = {

@@ -66,6 +66,21 @@ describe("findHitsInPage", () => {
     expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 1, endOffset: 4 });
   });
 
+  it("matches across a hyphenated line break with a whitespace-only item between halves", () => {
+    // pdfjs frequently emits a bare whitespace item between the two halves
+    // of a hyphenated word: ["inflamma-", " ", "tory"]. The join must skip
+    // that item so the index does not contain an internal space.
+    const hits = findHitsInPage(5, ["inflamma-", " ", "tory"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 2, endOffset: 4 });
+  });
+
+  it("matches across a hyphenated line break with multi-char whitespace item between halves", () => {
+    const hits = findHitsInPage(5, ["inflamma-", "   ", "tory"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 2, endOffset: 4 });
+  });
+
   it("collapses runs of whitespace so a query with one space matches several", () => {
     const hits = findHitsInPage(1, ["septic    shock"], "septic shock");
     expect(hits).toHaveLength(1);

@@ -61,11 +61,14 @@ export function buildPageIndex(itemsStr: string[]): PageIndex {
   for (let i = 0; i < itemsStr.length; i++) {
     const item = itemsStr[i];
 
+    // After a hyphen-join, skip any whitespace-only items pdfjs interleaved
+    // between the two halves (`["inflamma-", " ", "tory"]`). Otherwise the
+    // whitespace item would push a separator inside the joined word.
+    if (prevHyphenJoined && /^\s*$/.test(item)) continue;
+
     // A trailing "-" whose next non-whitespace item continues with a letter
     // is treated as a line-break hyphenation: drop the hyphen and suppress
-    // the separator so "inflamma-" + "tory" reads as "inflammatory". pdfjs
-    // often interleaves an empty/whitespace-only item between the parts
-    // (`["inflamma-", " ", "tory"]`), so we scan past those before checking.
+    // the separator so "inflamma-" + "tory" reads as "inflammatory".
     let hyphenJoin = false;
     if (item.endsWith("-")) {
       let j = i + 1;

@@ -345,7 +345,21 @@ export default function ChatShell() {
 
       // Patch the optimistic turn in place (matched by ts) so the user bubble
       // stays put and only the assistant content fills in. Persist now.
+      // If the optimistic turn is no longer in history (e.g. some future code
+      // path drops it mid-flight), bail rather than silently writing the
+      // mapped-but-unchanged array back to storage. The Clear button is
+      // gated against this case, so this branch is defensive — we log so a
+      // future regression that bypasses the gate is at least visible in
+      // devtools rather than vanishing silently.
       setHistory((prev) => {
+        if (!prev.some((t) => t.ts === ts)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[chat] dropping assistant response for ts=%s — optimistic turn no longer in history",
+            ts,
+          );
+          return prev;
+        }
         const next = prev.map((t) => (t.ts === ts ? { ...t, assistant } : t));
         saveHistory(next);
         return next;
@@ -371,6 +385,12 @@ export default function ChatShell() {
 
   // ---- clear -------------------------------------------------------------
   const clearAll = () => {
+    // Single source of truth for "don't wipe history mid-flight" so a
+    // future Cmd+K shortcut, viewer event, or programmatic reset path
+    // that calls clearAll directly still respects the in-flight submit.
+    // The button's `disabled={pending}` is the user-visible cue; this
+    // is the structural guard.
+    if (pending) return;
     try {
       localStorage.removeItem(HISTORY_KEY);
     } catch {
@@ -632,9 +652,10 @@ export default function ChatShell() {
         ) : null}
         <button
           type="button"
-          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
-          title="Clear chat history"
+          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-transparent"
+          title={pending ? "Wait for the current response to finish" : "Clear chat history"}
           onClick={clearAll}
+          disabled={pending}
         >
           Clear chat
         </button>

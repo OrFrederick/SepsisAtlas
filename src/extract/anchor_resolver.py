@@ -543,6 +543,23 @@ def _section_scope(
     return scoped or None
 
 
+# Strip a trailing continuation marker so "TABLE 4 | predictors" and
+# "TABLE 4 | predictors (continued)" bucket together for the cross-page row
+# union fallback. Tolerates the common shapes Docling emits:
+# "(continued)", "(cont.)", "(cont)", ", continued", "; continued",
+# bare " continued" / " cont.". Case-insensitive; trailing whitespace is
+# trimmed. Captures only the suffix — the table number / caption body is
+# preserved so different tables stay in different buckets.
+_CONTINUATION_SUFFIX_RE = re.compile(
+    r"[\s,;:\-]*\(?\s*cont(?:inued)?\.?\s*\)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _canonical_section_for_continuation(section: str) -> str:
+    return _CONTINUATION_SUFFIX_RE.sub("", section).strip().lower()
+
+
 def _row_union_hits(
     anchor_text: str,
     pool: list[dict],
@@ -613,6 +630,91 @@ def _row_union_hits(
                         "section": slab[0].get("section"),
                     }
                 )
+
+    # Cross-page fallback — anchors over "Table X continued" pages land in
+    # two (section, page) groups and the in-group consecutive-row walk above
+    # never sees both halves. When nothing matched, re-group by section only,
+    # sort by (page, row_idx), and accept a window whose adjacent items are
+    # either same-page-row_idx-consecutive or a forward page transition
+    # (row_idx may restart on the continued page). To keep the synthetic
+    # entry renderable, the envelope and page come from the first page only;
+    # rows on the continued page contribute to the text/coverage check.
+    #
+    # The bucketing key is the section caption with any trailing
+    # "(continued)" / "cont." / "continued" suffix stripped: Docling
+    # typically appends one of those to the caption on the continuation
+    # page, so a raw-string bucket would never merge the two halves. Rows
+    # with no section (None or "") are excluded so two unrelated unlabeled
+    # tables on consecutive pages can't synthesize a fake continuation.
+    if not by_n:
+        section_groups: dict[str, list[dict]] = {}
+        for r in rows:
+            sec = r.get("section")
+            if not sec:
+                continue
+            key = _canonical_section_for_continuation(sec)
+            section_groups.setdefault(key, []).append(r)
+        for sec_rows in section_groups.values():
+            sec_rows = sorted(
+                sec_rows,
+                key=lambda e: (e.get("page") or 0, e.get("row_idx") or 0),
+            )
+            for n in range(2, max_n + 1):
+                for i in range(len(sec_rows) - n + 1):
+                    slab = sec_rows[i : i + n]
+                    pages = {s.get("page") for s in slab}
+                    if len(pages) < 2:
+                        continue  # already covered by the main loop
+                    valid = True
+                    for a, b in zip(slab, slab[1:]):
+                        pa, pb = a.get("page"), b.get("page")
+                        ra, rb = a.get("row_idx"), b.get("row_idx")
+                        if pa == pb:
+                            if rb is None or ra is None or rb - ra != 1:
+                                valid = False
+                                break
+                        elif pb is not None and pa is not None and pb == pa + 1:
+                            continue
+                        else:
+                            valid = False
+                            break
+                    if not valid:
+                        continue
+                    slab_text = " ".join(s.get("text") or "" for s in slab)
+                    slab_norm = _norm(slab_text)
+                    if needle_norm and needle_norm in slab_norm:
+                        coverage = 1.0
+                    else:
+                        slab_tokens = _tokens(slab_text)
+                        coverage = (
+                            len(needle_tokens & slab_tokens) / len(needle_tokens)
+                        )
+                    if coverage < min_coverage:
+                        continue
+                    primary_page = slab[0].get("page")
+                    primary_bboxes = [
+                        s["bbox"]
+                        for s in slab
+                        if s.get("page") == primary_page and s.get("bbox")
+                    ]
+                    if not primary_bboxes:
+                        continue
+                    envelope = [
+                        min(b[0] for b in primary_bboxes),
+                        min(b[1] for b in primary_bboxes),
+                        max(b[2] for b in primary_bboxes),
+                        max(b[3] for b in primary_bboxes),
+                    ]
+                    by_n.setdefault(n, []).append(
+                        {
+                            "text": slab_text,
+                            "page": primary_page,
+                            "bbox": envelope,
+                            "kind": "table_row_union",
+                            "section": slab[0].get("section"),
+                        }
+                    )
+
     if not by_n:
         return []
     return by_n[min(by_n)]

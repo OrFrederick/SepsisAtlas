@@ -1,129 +1,138 @@
 // web/src/components/pdf/search.ts
-import type { Rect, SearchMatch } from "./types";
+//
+// Substring search over a page's text content. Operates on the raw `str`
+// array returned by pdfjs' `page.getTextContent()` — the SAME array the
+// `TextLayer` is built from (see PdfController.renderPage), so a hit's
+// `startItem` index corresponds directly to `textLayer.textDivs[startItem]`
+// and the per-item offsets index into that span's original text node.
+//
+// The searchable text is normalized (lowercased, whitespace collapsed, soft
+// hyphens and line-break hyphens dropped) so queries still match real prose
+// where pdfjs splits words across items or breaks them with a hyphen at the
+// end of a line. To keep highlight ranges correct despite that normalization,
+// every character in the normalized text records the (item, offset) of the
+// ORIGINAL character it came from; dropped characters simply leave no entry,
+// and synthetic separators carry item -1 so a match never starts or ends on
+// one.
 
-export interface PageTextIndex {
-  lower: string;
-  spans: HTMLSpanElement[];
-  spanStart: number[];
-  spanEnd: number[];
+export interface Hit {
+  page: number;
+  startItem: number;
+  startOffset: number;
+  endItem: number;
+  endOffset: number;
 }
 
-/** Build a substring-searchable index for one page's text layer. */
-export function buildPageIndex(spans: HTMLSpanElement[]): PageTextIndex {
-  const spanStart: number[] = [];
-  const spanEnd: number[] = [];
+export interface PageIndex {
+  text: string; // normalized, lowercased searchable text
+  srcItem: number[]; // per-char source item index (-1 for synthetic separators)
+  srcOffset: number[]; // per-char offset within the original item string
+}
+
+const SOFT_HYPHEN = "­";
+
+function isWhitespace(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === " ";
+}
+
+export function buildPageIndex(itemsStr: string[]): PageIndex {
   let text = "";
-  for (let i = 0; i < spans.length; i++) {
-    spanStart.push(text.length);
-    text += spans[i].textContent ?? "";
-    spanEnd.push(text.length);
-    if (i < spans.length - 1) text += " ";
+  const srcItem: number[] = [];
+  const srcOffset: number[] = [];
+
+  // Push one normalized character, collapsing runs of whitespace into a
+  // single space and never emitting a leading space.
+  const push = (ch: string, item: number, off: number): void => {
+    if (ch === SOFT_HYPHEN) return; // invisible; ignore entirely
+    if (isWhitespace(ch)) {
+      if (text.length === 0) return; // no leading whitespace
+      if (text[text.length - 1] === " ") return; // collapse
+      text += " ";
+      srcItem.push(item);
+      srcOffset.push(off);
+      return;
+    }
+    text += ch.toLowerCase();
+    srcItem.push(item);
+    srcOffset.push(off);
+  };
+
+  let prevHyphenJoined = false;
+  for (let i = 0; i < itemsStr.length; i++) {
+    const item = itemsStr[i];
+
+    // After a hyphen-join, skip any whitespace-only items pdfjs interleaved
+    // between the two halves (`["inflamma-", " ", "tory"]`). Otherwise the
+    // whitespace item would push a separator inside the joined word.
+    if (prevHyphenJoined && /^\s*$/.test(item)) continue;
+
+    // A trailing "-" whose next non-whitespace item continues with a letter
+    // is treated as a line-break hyphenation: drop the hyphen and suppress
+    // the separator so "inflamma-" + "tory" reads as "inflammatory".
+    let hyphenJoin = false;
+    if (item.endsWith("-")) {
+      let j = i + 1;
+      while (j < itemsStr.length && /^\s*$/.test(itemsStr[j])) j++;
+      const next = itemsStr[j];
+      if (next !== undefined && /^[a-zA-Z]/.test(next)) hyphenJoin = true;
+    }
+
+    if (i > 0 && !prevHyphenJoined) push(" ", -1, -1);
+
+    const stop = hyphenJoin ? item.length - 1 : item.length;
+    for (let o = 0; o < stop; o++) push(item[o], i, o);
+
+    prevHyphenJoined = hyphenJoin;
   }
-  return { lower: text.toLowerCase(), spans, spanStart, spanEnd };
+
+  return { text, srcItem, srcOffset };
 }
 
-/** Find every occurrence of `query` (already lowercased) within `index`. */
-export function findMatches(
-  index: PageTextIndex,
+// Normalize a query the same way the index is normalized: lowercase, drop soft
+// hyphens, collapse internal whitespace, trim the ends.
+function normalizeQuery(query: string): string {
+  return query
+    .replace(new RegExp(SOFT_HYPHEN, "g"), "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function findHitsInPage(
+  page: number,
+  itemsStr: string[],
   query: string,
-): Array<Omit<SearchMatch, "page" | "divs"> & { endSpanIdx: number; endOffset: number }> {
-  if (!query) return [];
-  const out: Array<Omit<SearchMatch, "page" | "divs"> & { endSpanIdx: number; endOffset: number }> = [];
-  const { lower, spans, spanStart, spanEnd } = index;
+): Hit[] {
+  const q = normalizeQuery(query);
+  if (!q) return [];
+
+  const idx = buildPageIndex(itemsStr);
+  const out: Hit[] = [];
   let from = 0;
   while (true) {
-    const i = lower.indexOf(query, from);
+    const i = idx.text.indexOf(q, from);
     if (i < 0) break;
-    const end = i + query.length;
-    let startSpan = -1;
-    let endSpan = -1;
-    let startOffset = 0;
-    let endOffset = 0;
-    for (let k = 0; k < spans.length; k++) {
-      if (spanEnd[k] > i && startSpan < 0) {
-        startSpan = k;
-        startOffset = Math.max(0, i - spanStart[k]);
-      }
-      if (spanStart[k] < end) {
-        endSpan = k;
-        const len = spans[k].textContent?.length ?? 0;
-        endOffset = Math.min(len, end - spanStart[k]);
-      }
-    }
-    if (startSpan >= 0 && endSpan >= 0) {
-      out.push({ startSpanIdx: startSpan, startOffset, endSpanIdx: endSpan, endOffset });
-    }
-    from = i + Math.max(1, query.length);
-  }
-  return out;
-}
+    const end = i + q.length;
 
-/**
- * Merge rectangles that sit on roughly the same baseline into a single
- * rectangle per line. Tolerance is 40% of the rectangle's height; rectangles
- * with the same top within that tolerance get merged horizontally.
- */
-export function mergeRectsByLine(rects: Rect[]): Rect[] {
-  if (rects.length <= 1) return rects.slice();
-  const sorted = [...rects].sort((a, b) => (a.top - b.top) || (a.left - b.left));
-  const lines: Rect[] = [];
-  for (const r of sorted) {
-    const last = lines[lines.length - 1];
-    const tol = Math.max(2, r.height * 0.4);
-    if (last && Math.abs(last.top - r.top) < tol) {
-      const left = Math.min(last.left, r.left);
-      const right = Math.max(last.left + last.width, r.left + r.width);
-      const top = Math.min(last.top, r.top);
-      const bottom = Math.max(last.top + last.height, r.top + r.height);
-      last.left = left; last.top = top;
-      last.width = right - left; last.height = bottom - top;
-    } else {
-      lines.push({ ...r });
-    }
-  }
-  return lines;
-}
+    // Skip over any synthetic separator chars at the match boundaries so the
+    // hit's start/end land on real characters with a real source span.
+    let s = i;
+    while (s < end && idx.srcItem[s] < 0) s++;
+    let e = end - 1;
+    while (e >= i && idx.srcItem[e] < 0) e--;
 
-/**
- * Given the page wrap element and the four match locators, return a list of
- * line-merged CSS-px rectangles (relative to the page wrap) using
- * `Range.getClientRects()` so widths are character-precise. Designed to be
- * called by the controller after a page render completes.
- */
-export function computeMatchRects(
-  pageWrap: HTMLDivElement,
-  spans: HTMLSpanElement[],
-  startSpanIdx: number,
-  endSpanIdx: number,
-  startOffset: number,
-  endOffset: number,
-): Rect[] {
-  const pageRect = pageWrap.getBoundingClientRect();
-  const out: Rect[] = [];
-  for (let i = startSpanIdx; i <= endSpanIdx; i++) {
-    const span = spans[i];
-    const text = span?.firstChild;
-    if (!text || text.nodeType !== Node.TEXT_NODE) continue;
-    const len = (text as Text).length;
-    const from = i === startSpanIdx ? Math.min(startOffset, len) : 0;
-    const to = i === endSpanIdx ? Math.min(endOffset, len) : len;
-    if (from >= to) continue;
-    const range = document.createRange();
-    try {
-      range.setStart(text, from);
-      range.setEnd(text, to);
-    } catch {
-      continue;
-    }
-    for (const r of Array.from(range.getClientRects())) {
-      if (r.width <= 0 || r.height <= 0) continue;
+    if (s <= e && idx.srcItem[s] >= 0 && idx.srcItem[e] >= 0) {
       out.push({
-        left: r.left - pageRect.left,
-        top: r.top - pageRect.top,
-        width: r.width,
-        height: r.height,
+        page,
+        startItem: idx.srcItem[s],
+        startOffset: idx.srcOffset[s],
+        endItem: idx.srcItem[e],
+        endOffset: idx.srcOffset[e] + 1,
       });
     }
+    // Advance past this match. Floor of 1 guards against a zero-length match
+    // looping forever (shouldn't happen since q is non-empty).
+    from = i + Math.max(1, q.length);
   }
-  return mergeRectsByLine(out);
+  return out;
 }

@@ -234,3 +234,86 @@ describe("ChatShell — divider pointer drag", () => {
     expect(localStorage.getItem(CHAT_WIDTH_KEY)).toBeNull();
   });
 });
+
+// Regression coverage for issue #91 — "Cannot scroll PDF in the chat view".
+// The reveal effect's primary signal is a transitionend on .viewer-wrap's
+// transform, but in production that event can fail to fire (e.g. the
+// transition is skipped because computed style didn't change between paints,
+// or interrupted by an unrelated re-render). When that happens the inert
+// attribute on .viewer-wrap stays set and the iframe inside it becomes
+// non-interactive, so the user can't scroll the PDF. A setTimeout fallback
+// must flip viewerInteractive on regardless.
+describe("ChatShell — viewer reveal fallback (issue #91)", () => {
+  beforeEach(() => {
+    // Override the outer beforeEach's matchMedia mock so prefers-reduced-motion
+    // does NOT match. This routes the reveal effect through the production
+    // transitionend + setTimeout path instead of the synchronous shortcut.
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn((q: string) => ({
+        matches: false,
+        media: q,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      })),
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("flips inert off via setTimeout fallback when transitionend never fires", async () => {
+    // Seed a turn with one row so the EvidenceTable renders and we can
+    // simulate a row click — the row click is what now drives showPdf=true
+    // (the PDF pane no longer opens on history existing alone).
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([
+        {
+          user_text: "x",
+          assistant: {
+            summary: "s",
+            rows: [{ paper_ref: "TestPaper_2024", anchor_page: 1 }],
+          },
+          ts: 1,
+        },
+      ]),
+    );
+
+    render(<ChatShell />);
+    const sep = await screen.findByRole("separator");
+    const viewerWrap = sep.closest(".viewer-wrap") as HTMLElement;
+    // Before any row click: the wrap is in DOM but the reveal effect has
+    // showPdf=false, so the fallback timer hasn't been scheduled. inert is
+    // true (the static initial state). Advancing timers here would not flip
+    // it — that path is exercised after the row click below.
+    expect(viewerWrap.hasAttribute("inert")).toBe(true);
+
+    // Click any row in the table to set viewerUrl and trigger the reveal.
+    const u = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const firstRow = document.querySelector(
+      "table tbody tr",
+    ) as HTMLElement | null;
+    if (!firstRow) throw new Error("expected an evidence row to be rendered");
+    await u.click(firstRow);
+
+    // Right after the click: showPdf flipped true, reveal effect ran,
+    // fallback timer scheduled but not yet fired. inert still true.
+    expect(viewerWrap.hasAttribute("inert")).toBe(true);
+
+    // Advance past the fallback duration. The transitionend listener never
+    // fires in jsdom, so this is the only path that can flip inert off.
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+
+    expect(viewerWrap.hasAttribute("inert")).toBe(false);
+  });
+});

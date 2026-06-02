@@ -1,0 +1,6 @@
+# graphify writes graphify-out/graph.json wholesale on every `graphify update .`.
+# Union-merge it so concurrent branches don't collide on the generated JSON.
+# Register the driver once per clone (see CLAUDE.md "## graphify"):
+#   git config merge.graphify-union.name  "graphify graph.json union merge"
+#   git config merge.graphify-union.driver "graphify merge-driver %O %A %B"
+graphify-out/graph.json merge=graphify-union

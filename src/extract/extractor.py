@@ -3,9 +3,10 @@
 All LLM calls go through the shared `@logged_llm_call` decorator so we get the
 audit trail in `logs/llm_calls.jsonl` and the matching DB row in `llm_calls`.
 
-Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). Defaults to
-`anthropic/claude-sonnet-4.5` for extract and `anthropic/claude-haiku-4.5` for
-verify (see `sepsis_atlas.config`). OpenRouter forwards the
+Models: configurable via env (`MODEL_EXTRACT`, `MODEL_VERIFY`). `.env` is
+authoritative at runtime; the code-side fallbacks in `sepsis_atlas.config`
+(`anthropic/claude-opus-4.7` for extract, `anthropic/claude-sonnet-4.6` for
+verify) only kick in when the env var is unset. OpenRouter forwards the
 `response_format={"type":"json_schema", ...}` payload to Anthropic Sonnet/Haiku
 4.5+ which support structured outputs natively.
 """
@@ -58,6 +59,26 @@ from src.extract.verify_nli import run_verifier
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
 
+def demote_if_anchor_missed(
+    verdict: VerifierResponse, resolved: bool
+) -> VerifierResponse:
+    """Enforce the CLAUDE.md anchor contract: an unresolved anchor cannot
+    back an ``ok`` verdict. Demote to ``partial`` and tag the rationale so
+    downstream consumers can audit the reason. Other verdicts pass through.
+    """
+    if resolved or verdict.verdict != "ok":
+        return verdict
+    rationale = (verdict.rationale or "").rstrip()
+    tag = "anchor_unresolved"
+    if tag not in rationale:
+        rationale = f"{rationale} | {tag}" if rationale else tag
+    return VerifierResponse(
+        verdict="partial",
+        score=verdict.score,
+        rationale=rationale,
+    )
+
+
 def _load_prompt(name: str) -> tuple[str, str]:
     """Return (text, prompt_id) where prompt_id = '<name>@<sha8>'."""
     p = _PROMPT_DIR / name
@@ -108,18 +129,19 @@ def _cache_tokens(u) -> tuple[int, int, float]:
 
     OpenRouter's OpenAI-compatible response reports cache activity on
     ``usage.prompt_tokens_details`` (``cache_write_tokens`` on the first
-    request that establishes the entry, ``cached_tokens`` on hits) plus a
-    top-level ``usage.cache_discount``. These are NOT the Anthropic-native
-    ``cache_{creation,read}_input_tokens`` names -- those never appear on
-    the OpenAI-compat object, so reading them always yields 0.
+    request that establishes the entry, ``cached_tokens`` on hits). The
+    cache discount is already folded into ``usage.cost`` (PR #94), so we
+    return 0.0 for discount to keep the tuple shape stable; callers that
+    need an audit-only number for the log should treat it as informational.
+    These are NOT the Anthropic-native ``cache_{creation,read}_input_tokens``
+    names -- those never appear on the OpenAI-compat object.
     """
     if not u:
         return 0, 0, 0.0
     ptd = getattr(u, "prompt_tokens_details", None)
     write = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
     read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
-    discount = float(getattr(u, "cache_discount", 0.0) or 0.0)
-    return write, read, discount
+    return write, read, 0.0
 
 
 def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
@@ -132,7 +154,7 @@ def _usage_meta(resp, model: str, prompt_id: str, latency_ms: int) -> dict:
         "latency_ms": latency_ms,
         "tokens_in": getattr(u, "prompt_tokens", 0) if u else 0,
         "tokens_out": getattr(u, "completion_tokens", 0) if u else 0,
-        "cost_usd": float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0,
+        "cost_usd": float(getattr(u, "cost", 0.0) or 0.0) if u else 0.0,
         "cache_creation_tokens": cache_write,
         "cache_read_tokens": cache_read,
         "cache_discount": cache_discount,
@@ -473,11 +495,12 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         the parsed paper. Anchor.text is left as-is (already verifier-checked).
         Misses leave the anchor untouched and bump the missed counter.
 
-        Returns True if the anchor resolved against the parsed paper, False
-        otherwise. Callers may use this to short-circuit the LLM verifier:
-        an unresolved anchor means the LLM cited text that isn't in the paper,
-        so the row is structurally suspect and should be marked partial
-        without paying for a Haiku call.
+        Returns True when the resolver found a hit, False otherwise. Callers
+        use the boolean to enforce the CLAUDE.md anchor contract: a row whose
+        bbox cannot be resolved must not carry an ``ok`` verdict. Predictor
+        rows short-circuit the LLM verifier on a miss (saves a Haiku call);
+        cohorts still run the verifier and demote ``ok`` via
+        ``demote_if_anchor_missed``.
         """
         hit = resolve(anchor.text or "", anchor.section, anchor_index)
         if hit is None:
@@ -518,7 +541,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
     # Verify each cohort (may include LLM call inside verify_llm cache miss)
     cohort_verdicts: list[tuple] = []
     for c in cohorts:
-        _bind_anchor(c.anchor)
+        resolved = _bind_anchor(c.anchor)
         try:
             verdict, vmeta = run_verifier(
                 c.model_dump(mode="json"),
@@ -534,6 +557,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                 rationale=f"verifier_error: {e!r}",
             )
             vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+        verdict = demote_if_anchor_missed(verdict, resolved)
         summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
         summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
         summary["verdict_counts"][verdict.verdict] += 1
@@ -567,8 +591,8 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         summary["latency_ms_total"] += pm_meta["latency_ms"]
         row_verdicts: list[tuple] = []
         for r in rows:
-            anchor_ok = _bind_anchor(r.anchor)
-            if not anchor_ok:
+            resolved = _bind_anchor(r.anchor)
+            if not resolved:
                 # Anchor doesn't resolve against parsed paper -> claim is
                 # structurally suspect. Mark partial directly; skip LLM verifier
                 # (it would just look at unresolvable text and waste a Haiku call).
@@ -596,6 +620,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                     rationale=f"verifier_error: {e!r}",
                 )
                 vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+            verdict = demote_if_anchor_missed(verdict, resolved)
             summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
             summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
             summary["verdict_counts"][verdict.verdict] += 1

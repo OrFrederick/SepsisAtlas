@@ -35,7 +35,7 @@ def _fake_resp(verdict: str, *, contradicted: list[str] | None = None,
     }
     msg = types.SimpleNamespace(content=json.dumps(payload), refusal=None)
     choice = types.SimpleNamespace(message=msg)
-    usage = types.SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_cost=0.0)
+    usage = types.SimpleNamespace(prompt_tokens=10, completion_tokens=5, cost=0.0)
     return types.SimpleNamespace(choices=[choice], usage=usage)
 
 

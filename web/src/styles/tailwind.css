@@ -75,4 +75,13 @@
   body:has(.chat-shell) {
     @apply overflow-hidden;
   }
+
+  /* The Next.js base reset (`body main { margin: 1em auto; max-width: 70em; }`)
+     wraps every <main> in an auto-centered 70em box. The chat shell's <main>
+     fills the viewport itself, so override here. From #91 — also unblocks
+     PDF interactivity by removing the spurious margin that pushed the
+     iframe out of its expected hit-test box. */
+  .chat-shell main {
+    @apply m-0 max-w-none p-0;
+  }
 }

@@ -57,6 +57,7 @@ from src.extract.extractor import (
     _slim_paper,
     _strip_fences,
     _usage_meta,
+    demote_if_anchor_missed,
 )
 from src.extract.run_extract import GT_PAPERS
 from src.extract.verify_nli import run_verifier
@@ -242,11 +243,13 @@ def extract_phenotype_paper(
         "errors": [],
     }
 
-    def _bind_anchor(anchor) -> None:
+    def _bind_anchor(anchor) -> bool:
+        """Resolve+rewrite anchor fields. Returns True on hit so the caller
+        can enforce the anchor contract via ``demote_if_anchor_missed``."""
         hit = resolve(anchor.text or "", anchor.section, anchor_index)
         if hit is None:
             summary["anchor_missed"] += 1
-            return
+            return False
         bbox = hit.get("bbox")
         if bbox is not None:
             anchor.bbox = bbox
@@ -259,6 +262,7 @@ def extract_phenotype_paper(
         if sec:
             anchor.section = sec
         summary["anchor_resolved"] += 1
+        return True
 
     try:
         parsed, meta = _run_phenotype_llm(
@@ -282,29 +286,61 @@ def extract_phenotype_paper(
     summary_id = str(uuid.uuid4())
     summary["summary_id"] = summary_id
 
-    with session_factory() as session:
-        # Summary row
-        s = parsed.summary
-        _bind_anchor(s.anchor)
+    # Mirror extractor.extract_paper: do every verifier (LLM) call before
+    # opening any session. SQLite is single-writer; holding a transaction
+    # across a 5-30s Haiku call serializes every other worker on db.sqlite
+    # and produces "database is locked" errors under concurrency.
+    s = parsed.summary
+    s_resolved = _bind_anchor(s.anchor)
+    try:
+        s_verdict, vmeta = run_verifier(
+            s.model_dump(mode="json"),
+            s.anchor.text or "",
+            paper_id=file_stem,
+            run_id=run_id,
+            row_id=f"phenotype_summary::{file_stem}",
+        )
+    except Exception as e:
+        summary["errors"].append(f"verify_summary: {e!r}")
+        s_verdict = VerifierResponse(
+            verdict="partial",
+            score=0.5,
+            rationale=f"verifier_error: {e!r}",
+        )
+        vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+    s_verdict = demote_if_anchor_missed(s_verdict, s_resolved)
+    summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
+    summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
+    summary["verdict_counts"][s_verdict.verdict] += 1
+
+    cluster_verdicts: list[tuple] = []
+    for c in parsed.clusters:
+        c_resolved = _bind_anchor(c.anchor)
         try:
-            verdict, vmeta = run_verifier(
-                s.model_dump(mode="json"),
-                s.anchor.text or "",
+            v_c, vmeta = run_verifier(
+                c.model_dump(mode="json"),
+                c.anchor.text or "",
                 paper_id=file_stem,
                 run_id=run_id,
-                row_id=f"phenotype_summary::{file_stem}",
+                row_id=f"phenotype_cluster::{file_stem}::{c.cluster_label}",
             )
         except Exception as e:
-            summary["errors"].append(f"verify_summary: {e!r}")
-            verdict = VerifierResponse(
+            summary["errors"].append(f"verify_cluster {c.cluster_label}: {e!r}")
+            v_c = VerifierResponse(
                 verdict="partial",
                 score=0.5,
                 rationale=f"verifier_error: {e!r}",
             )
             vmeta = {"cost_usd": 0.0, "latency_ms": 0}
+        v_c = demote_if_anchor_missed(v_c, c_resolved)
         summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
         summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
-        summary["verdict_counts"][verdict.verdict] += 1
+        summary["verdict_counts"][v_c.verdict] += 1
+        cluster_verdicts.append((c, v_c))
+
+    # Short-lived session: bulk-insert summary + clusters after every LLM
+    # call has settled.
+    with session_factory() as session:
         _insert_summary(
             session,
             s,
@@ -312,31 +348,9 @@ def extract_phenotype_paper(
             paper_id=file_stem,
             run_id=run_id,
             meta=meta,
-            verdict=verdict,
+            verdict=s_verdict,
         )
-
-        # Cluster rows
-        for c in parsed.clusters:
-            _bind_anchor(c.anchor)
-            try:
-                v_c, vmeta = run_verifier(
-                    c.model_dump(mode="json"),
-                    c.anchor.text or "",
-                    paper_id=file_stem,
-                    run_id=run_id,
-                    row_id=f"phenotype_cluster::{file_stem}::{c.cluster_label}",
-                )
-            except Exception as e:
-                summary["errors"].append(f"verify_cluster {c.cluster_label}: {e!r}")
-                v_c = VerifierResponse(
-                    verdict="partial",
-                    score=0.5,
-                    rationale=f"verifier_error: {e!r}",
-                )
-                vmeta = {"cost_usd": 0.0, "latency_ms": 0}
-            summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
-            summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
-            summary["verdict_counts"][v_c.verdict] += 1
+        for c, v_c in cluster_verdicts:
             _insert_cluster(
                 session,
                 c,
@@ -346,7 +360,6 @@ def extract_phenotype_paper(
                 meta=meta,
                 verdict=v_c,
             )
-
         session.commit()
 
     return summary

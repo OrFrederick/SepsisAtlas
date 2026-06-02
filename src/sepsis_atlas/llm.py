@@ -152,16 +152,22 @@ def logged_llm_call(stage: str):
                 u = getattr(resp, "usage", None) if resp else None
                 tokens_in = getattr(u, "prompt_tokens", 0) if u else 0
                 tokens_out = getattr(u, "completion_tokens", 0) if u else 0
-                cost_usd = float(getattr(u, "total_cost", 0.0) or 0.0) if u else 0.0
-                # OpenRouter reports cache activity on prompt_tokens_details
-                # (cache_write_tokens on the establishing call, cached_tokens
-                # on hits) + top-level cache_discount. The Anthropic-native
-                # cache_{creation,read}_input_tokens names never appear on the
-                # OpenAI-compat usage object.
+                # OpenRouter's OpenAI-compat usage object exposes the billed
+                # cost on `u.cost` (cache-adjusted, post-discount). The legacy
+                # `total_cost` name was never part of the response shape;
+                # code that read it silently always returned 0. langfuse.openai
+                # already reads `u.cost` natively, which is why the Langfuse
+                # UI showed real costs while our manifests under-reported.
+                cost_usd = float(getattr(u, "cost", 0.0) or 0.0) if u else 0.0
+                # OpenRouter cache activity rides on prompt_tokens_details:
+                # `cache_write_tokens` on the establishing call,
+                # `cached_tokens` on hits. cache_discount is folded into
+                # `u.cost` already, so we record it as 0 here just to keep
+                # the log-record shape stable for downstream consumers.
                 ptd = getattr(u, "prompt_tokens_details", None) if u else None
                 cache_creation = int(getattr(ptd, "cache_write_tokens", 0) or 0) if ptd else 0
                 cache_read = int(getattr(ptd, "cached_tokens", 0) or 0) if ptd else 0
-                cache_discount = float(getattr(u, "cache_discount", 0.0) or 0.0) if u else 0.0
+                cache_discount = 0.0
                 record = {
                     "call_id": call_id,
                     "ts": time.time(),

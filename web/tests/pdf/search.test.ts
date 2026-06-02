@@ -1,77 +1,101 @@
 import { describe, it, expect } from "vitest";
-import { buildPageIndex, findMatches, mergeRectsByLine } from "../../src/components/pdf/search";
-import type { Rect } from "../../src/components/pdf/types";
-
-function mockSpan(text: string): HTMLSpanElement {
-  const s = document.createElement("span");
-  s.textContent = text;
-  return s;
-}
+import { buildPageIndex, findHitsInPage } from "../../src/components/pdf/search";
 
 describe("buildPageIndex", () => {
-  it("concatenates span text with single-space separators and tracks offsets", () => {
-    const spans = [mockSpan("Sepsis"), mockSpan("is"), mockSpan("severe.")];
-    const idx = buildPageIndex(spans);
-    expect(idx.lower).toBe("sepsis is severe.");
-    expect(idx.spanStart).toEqual([0, 7, 10]);
-    expect(idx.spanEnd).toEqual([6, 9, 17]);
+  it("concatenates items with single-space separators and maps each char to its source", () => {
+    const idx = buildPageIndex(["Sepsis", "is", "severe."]);
+    expect(idx.text).toBe("sepsis is severe.");
+    // Every real character points back to (item, offset-in-item); synthetic
+    // separators carry item -1 so a match can't start/end on them.
+    expect(idx.srcItem[0]).toBe(0); // 's' of "Sepsis"
+    expect(idx.srcOffset[0]).toBe(0);
+    expect(idx.srcItem[6]).toBe(-1); // the inserted separator space
+    expect(idx.srcItem[7]).toBe(1); // 'i' of "is"
+    expect(idx.srcOffset[7]).toBe(0);
+    expect(idx.srcItem[10]).toBe(2); // 's' of "severe."
+    expect(idx.srcOffset[10]).toBe(0);
+  });
+
+  it("lowercases for case-insensitive matching", () => {
+    const idx = buildPageIndex(["SEPSIS"]);
+    expect(idx.text).toBe("sepsis");
   });
 });
 
-describe("findMatches", () => {
-  it("returns each substring occurrence with its span range and offsets", () => {
-    const spans = [mockSpan("Sepsis"), mockSpan("is"), mockSpan("severe sepsis.")];
-    const idx = buildPageIndex(spans);
-    const matches = findMatches(idx, "sepsis");
-    expect(matches).toHaveLength(2);
-    expect(matches[0]).toMatchObject({ startSpanIdx: 0, startOffset: 0 });
-    expect(matches[1]).toMatchObject({ startSpanIdx: 2 });
+describe("findHitsInPage", () => {
+  it("returns one hit per substring occurrence with item coordinates", () => {
+    const items = ["Sepsis", "is", "severe sepsis."];
+    const hits = findHitsInPage(3, items, "sepsis");
+    expect(hits).toHaveLength(2);
+    expect(hits[0]).toEqual({ page: 3, startItem: 0, startOffset: 0, endItem: 0, endOffset: 6 });
+    expect(hits[1]).toEqual({ page: 3, startItem: 2, startOffset: 7, endItem: 2, endOffset: 13 });
   });
 
-  it("returns empty array on no match", () => {
-    const spans = [mockSpan("hello world")];
-    expect(findMatches(buildPageIndex(spans), "xyz")).toEqual([]);
+  it("is case-insensitive", () => {
+    const hits = findHitsInPage(1, ["Septic Shock"], "shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 7, endItem: 0, endOffset: 12 });
   });
 
-  it("handles queries that span across span boundaries (with the implicit space)", () => {
-    const spans = [mockSpan("foo"), mockSpan("bar")];
-    const matches = findMatches(buildPageIndex(spans), "foo bar");
-    expect(matches).toHaveLength(1);
-    // The cross-boundary match must report the full span range + offsets so
-    // computeMatchRects can paint the highlight over both spans, not just
-    // the first. Without these asserts a regression that drops `endSpanIdx`
-    // would silently under-highlight.
-    expect(matches[0]).toMatchObject({
-      startSpanIdx: 0,
-      startOffset: 0,
-      endSpanIdx: 1,
-      endOffset: 3,
-    });
-  });
-});
-
-describe("mergeRectsByLine", () => {
-  it("merges adjacent rects on the same line into one rect", () => {
-    const rects: Rect[] = [
-      { left: 0, top: 10, width: 20, height: 14 },
-      { left: 22, top: 10, width: 30, height: 14 },
-    ];
-    const merged = mergeRectsByLine(rects);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toEqual({ left: 0, top: 10, width: 52, height: 14 });
+  it("matches a phrase that straddles two text items", () => {
+    const hits = findHitsInPage(2, ["septic", "shock"], "septic shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toEqual({ page: 2, startItem: 0, startOffset: 0, endItem: 1, endOffset: 5 });
   });
 
-  it("keeps rects on different lines separate", () => {
-    const rects: Rect[] = [
-      { left: 0, top: 10, width: 20, height: 14 },
-      { left: 0, top: 30, width: 30, height: 14 },
-    ];
-    expect(mergeRectsByLine(rects)).toHaveLength(2);
+  it("returns no hits for empty query", () => {
+    expect(findHitsInPage(1, ["anything"], "")).toEqual([]);
   });
 
-  it("returns input unchanged when length <= 1", () => {
-    expect(mergeRectsByLine([])).toEqual([]);
-    const single: Rect[] = [{ left: 1, top: 2, width: 3, height: 4 }];
-    expect(mergeRectsByLine(single)).toEqual(single);
+  it("returns no hits when nothing matches", () => {
+    expect(findHitsInPage(1, ["sepsis"], "covid")).toEqual([]);
+  });
+
+  it("handles overlapping potential matches by advancing past each", () => {
+    const hits = findHitsInPage(1, ["aaaa"], "aa");
+    expect(hits).toHaveLength(2);
+    expect(hits.map(h => h.startOffset)).toEqual([0, 2]);
+  });
+
+  // --- normalization (the "misses matches" bug) ---
+
+  it("matches across a hyphenated line break (item ends with '-', next continues the word)", () => {
+    // pdfjs splits a hyphenated word at the line break into two items.
+    const hits = findHitsInPage(5, ["inflamma-", "tory response"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 1, endOffset: 4 });
+  });
+
+  it("matches across a hyphenated line break with a whitespace-only item between halves", () => {
+    // pdfjs frequently emits a bare whitespace item between the two halves
+    // of a hyphenated word: ["inflamma-", " ", "tory"]. The join must skip
+    // that item so the index does not contain an internal space.
+    const hits = findHitsInPage(5, ["inflamma-", " ", "tory"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 2, endOffset: 4 });
+  });
+
+  it("matches across a hyphenated line break with multi-char whitespace item between halves", () => {
+    const hits = findHitsInPage(5, ["inflamma-", "   ", "tory"], "inflammatory");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 2, endOffset: 4 });
+  });
+
+  it("collapses runs of whitespace so a query with one space matches several", () => {
+    const hits = findHitsInPage(1, ["septic    shock"], "septic shock");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 0, endOffset: 15 });
+  });
+
+  it("ignores soft hyphens embedded in the text", () => {
+    const hits = findHitsInPage(1, ["mor­tality"], "mortality");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, endItem: 0 });
+  });
+
+  it("normalizes whitespace in the query too", () => {
+    const hits = findHitsInPage(1, ["septic shock"], "  septic   shock  ");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ startItem: 0, startOffset: 0, endItem: 0, endOffset: 12 });
   });
 });

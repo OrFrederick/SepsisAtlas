@@ -45,7 +45,6 @@ const SLIDE_IN_RIGHT = {
   transition: { duration: 0.32, ease: [0.2, 0.7, 0.2, 1] as const },
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
-const VIEWER_KEY = "sepsis_atlas.last_viewer_url.v1";
 const HISTORY_MAX = 50;
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
@@ -145,16 +144,6 @@ function saveHistory(h: Turn[]): void {
   }
 }
 
-function loadViewerUrl(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return localStorage.getItem(VIEWER_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-
 function parseBbox(bbox: unknown): number[] | null {
   if (bbox == null) return null;
   let arr: unknown = bbox;
@@ -232,10 +221,15 @@ export default function ChatShell() {
   const [history, setHistory] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  // ts of the in-flight (optimistic) turn — the one showing the user's
+  // bubble immediately with a "thinking…" assistant placeholder until the
+  // response lands.
+  const [pendingTs, setPendingTs] = useState<number | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [viewerUrl, setViewerUrl] = useState("");
   const [chatPct, setChatPct] = useState<number>(DEFAULT_CHAT_PCT);
   const [resizing, setResizing] = useState(false);
+  const [chatHidden, setChatHidden] = useState(false);
 
   const scrollbackRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -266,20 +260,8 @@ export default function ChatShell() {
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
-    const last = loadViewerUrl();
-    if (last) {
-      try {
-        const u = new URL(last);
-        const okOrigin = BACKEND_URL
-          ? u.origin === new URL(BACKEND_URL).origin
-          : u.origin === window.location.origin;
-        if (okOrigin) {
-          setViewerUrl(last);
-        }
-      } catch {
-        /* drop malformed urls silently */
-      }
-    }
+    // The viewer URL is intentionally NOT restored — the PDF pane should
+    // start collapsed and only open when the user clicks an evidence row.
     inputRef.current?.focus();
   }, []);
 
@@ -306,8 +288,21 @@ export default function ChatShell() {
       const text = textRaw.trim();
       if (!text || pending) return;
 
+      // Show the user's bubble right away: append an optimistic turn with an
+      // empty assistant (rendered as "thinking…"), then fill it in when the
+      // response arrives. Not persisted until then. Using the same ts as both
+      // React key and patch target keeps the bubble stable across the update
+      // (no remount / re-animation).
+      const ts = Date.now();
+      const optimistic: Turn = {
+        user_text: text,
+        assistant: { summary: "", rows: [], refused: false, refused_reason: null, meta: null },
+        ts,
+      };
       setInput("");
       setPending(true);
+      setPendingTs(ts);
+      setHistory((prev) => [...prev, optimistic]);
 
       let payload: AssistantPayload;
       try {
@@ -339,25 +334,38 @@ export default function ChatShell() {
         };
       }
 
-      const turn: Turn = {
-        user_text: text,
-        assistant: {
-          query_id: payload.query_id || undefined,
-          summary: payload.summary || "",
-          rows: Array.isArray(payload.rows) ? payload.rows : [],
-          refused: !!payload.refused,
-          refused_reason: payload.refused_reason || null,
-          meta: payload.meta || null,
-        },
-        ts: Date.now(),
+      const assistant: AssistantPayload = {
+        query_id: payload.query_id || undefined,
+        summary: payload.summary || "",
+        rows: Array.isArray(payload.rows) ? payload.rows : [],
+        refused: !!payload.refused,
+        refused_reason: payload.refused_reason || null,
+        meta: payload.meta || null,
       };
 
+      // Patch the optimistic turn in place (matched by ts) so the user bubble
+      // stays put and only the assistant content fills in. Persist now.
+      // If the optimistic turn is no longer in history (e.g. some future code
+      // path drops it mid-flight), bail rather than silently writing the
+      // mapped-but-unchanged array back to storage. The Clear button is
+      // gated against this case, so this branch is defensive — we log so a
+      // future regression that bypasses the gate is at least visible in
+      // devtools rather than vanishing silently.
       setHistory((prev) => {
-        const next = [...prev, turn];
+        if (!prev.some((t) => t.ts === ts)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[chat] dropping assistant response for ts=%s — optimistic turn no longer in history",
+            ts,
+          );
+          return prev;
+        }
+        const next = prev.map((t) => (t.ts === ts ? { ...t, assistant } : t));
         saveHistory(next);
         return next;
       });
       setPending(false);
+      setPendingTs(null);
       setTimeout(() => inputRef.current?.focus(), 0);
     },
     [pending],
@@ -377,17 +385,31 @@ export default function ChatShell() {
 
   // ---- clear -------------------------------------------------------------
   const clearAll = () => {
+    // Single source of truth for "don't wipe history mid-flight" so a
+    // future Cmd+K shortcut, viewer event, or programmatic reset path
+    // that calls clearAll directly still respects the in-flight submit.
+    // The button's `disabled={pending}` is the user-visible cue; this
+    // is the structural guard.
+    if (pending) return;
     try {
       localStorage.removeItem(HISTORY_KEY);
-      localStorage.removeItem(VIEWER_KEY);
     } catch {
       /* ignore */
     }
     setHistory([]);
     setActiveRowKey(null);
     setViewerUrl("");
+    // Matches closeViewer: a full "clear everything" shouldn't leave the
+    // chat collapsed when the next evidence row reopens the viewer.
+    setChatHidden(false);
     setInput("");
     inputRef.current?.focus();
+  };
+
+  const closeViewer = () => {
+    setViewerUrl("");
+    setActiveRowKey(null);
+    setChatHidden(false);
   };
 
   // ---- auto-grow textarea (mirror the original behaviour) ----------------
@@ -477,10 +499,11 @@ export default function ChatShell() {
 
   const onDividerDoubleClick = () => commitChatPct(DEFAULT_CHAT_PCT);
 
-  // Viewer panel is revealed the moment the user submits the first query
-  // (pending) or once any turn lands in history. Clearing chat collapses
-  // back to the centered-chat landing state.
-  const showPdf = pending || history.length > 0;
+  // The viewer panel is revealed only after the user clicks an evidence row
+  // (which sets viewerUrl). It collapses again when the user closes the pane
+  // (closeViewer) or clears the chat. Submitting a new query does NOT open
+  // the panel — the user has to opt in by clicking a row.
+  const showPdf = viewerUrl !== "";
 
   // Drive the grid track template via inline style so React only writes a
   // single declaration when chatPct changes; transition lives on the
@@ -489,7 +512,9 @@ export default function ChatShell() {
     () =>
       showPdf
         ? {
-            gridTemplateColumns: `${chatPct}% calc(100% - ${chatPct}%)`,
+            gridTemplateColumns: chatHidden
+              ? `0% 100%`
+              : `${chatPct}% calc(100% - ${chatPct}%)`,
             transition: resizing
               ? "none"
               : `grid-template-columns 520ms ${SPLIT_EASE}`,
@@ -498,7 +523,7 @@ export default function ChatShell() {
             gridTemplateColumns: "100% 0%",
             transition: `grid-template-columns 520ms ${SPLIT_EASE}`,
           },
-    [chatPct, resizing, showPdf],
+    [chatPct, resizing, showPdf, chatHidden],
   );
 
   // Pointer/focus stays disabled on the viewer pane until the slide-in
@@ -506,7 +531,18 @@ export default function ChatShell() {
   // visual position is still mid-translate. Re-disabled instantly on
   // the reverse (Clear chat → solo). We key off the actual transitionend
   // on .viewer-wrap's transform so JS doesn't have to mirror the CSS
-  // duration — they stay in sync by construction.
+  // duration — they stay in sync by construction. A setTimeout fallback
+  // covers the cases where transitionend never fires (transition skipped
+  // because the property value didn't actually change between paints,
+  // event interrupted by a re-render, browser quirks); without the
+  // fallback, inert stays true and the PDF iframe can't be scrolled
+  // (issue #91).
+  // The fallback is set slightly above the CSS total of 600ms so a real
+  // transitionend wins the race in the common case. The 600ms is the
+  // `.viewer-wrap` transform timing in src/styles/tailwind.css
+  // (`transform 520ms … 80ms` delay) — keep this constant above that sum if
+  // the CSS timing changes.
+  const VIEWER_REVEAL_FALLBACK_MS = 800;
   const [viewerInteractive, setViewerInteractive] = useState(false);
   useEffect(() => {
     if (!showPdf) {
@@ -530,7 +566,14 @@ export default function ChatShell() {
       }
     };
     wrap.addEventListener("transitionend", onEnd);
-    return () => wrap.removeEventListener("transitionend", onEnd);
+    const fallbackId = window.setTimeout(
+      () => setViewerInteractive(true),
+      VIEWER_REVEAL_FALLBACK_MS,
+    );
+    return () => {
+      wrap.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(fallbackId);
+    };
   }, [showPdf]);
 
   const onDividerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -576,13 +619,10 @@ export default function ChatShell() {
     }
   };
 
-  // Solo (landing) tightens the chat column to a readable max-width and
-  // drops the composer top border; once the viewer reveals, the chat
-  // grows to fill the grid track.
-  const chatCls = showPdf
-    ? `flex flex-col bg-bg overflow-hidden max-w-none m-0`
-    : `flex flex-col bg-bg overflow-hidden max-w-[720px] mx-auto w-full`;
-  const chatTransition = `transition-[max-width] duration-[520ms] ease-[cubic-bezier(0.2,0.7,0.2,1)]`;
+  // Chat column fills the grid track in both solo and split modes; width
+  // animation is driven by the parent grid's track template (splitStyle),
+  // not by a max-width transition on this column.
+  const chatCls = `flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
 
   const scrollbackCls = showPdf
     ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
@@ -600,11 +640,22 @@ export default function ChatShell() {
       className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:44px_1fr]"
     >
       <div className="flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg border-b border-border max-[480px]:flex-wrap max-[480px]:justify-start max-[480px]:gap-2 max-[480px]:px-3">
+        {showPdf ? (
+          <button
+            type="button"
+            className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
+            title={chatHidden ? "Show chat pane" : "Hide chat pane"}
+            onClick={() => setChatHidden((v) => !v)}
+          >
+            {chatHidden ? "Show chat" : "Hide chat"}
+          </button>
+        ) : null}
         <button
           type="button"
-          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
-          title="Clear chat history"
+          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-transparent"
+          title={pending ? "Wait for the current response to finish" : "Clear chat history"}
           onClick={clearAll}
+          disabled={pending}
         >
           Clear chat
         </button>
@@ -615,7 +666,7 @@ export default function ChatShell() {
         ref={splitRef}
         style={splitStyle}
       >
-        <section className={`${chatCls} ${chatTransition} motion-reduce:transition-none`}>
+        <section inert={chatHidden} className={chatCls}>
           <div ref={scrollbackRef} className={scrollbackCls}>
             {history.length === 0 && !pending ? (
               <Welcome
@@ -638,7 +689,16 @@ export default function ChatShell() {
                   {turn.user_text}
                 </motion.div>
                 <div className="self-start w-full flex flex-col gap-[14px]">
-                  {turn.assistant.refused ? (
+                  {pending && turn.ts === pendingTs ? (
+                    <motion.div
+                      className="text-fg-muted italic py-1 px-[2px] font-serif"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      thinking...
+                    </motion.div>
+                  ) : turn.assistant.refused ? (
                     <motion.div
                       className="text-fg-muted italic py-1 px-[2px] font-serif"
                       initial={FADE_UP.initial}
@@ -713,20 +773,6 @@ export default function ChatShell() {
                 </div>
               </div>
             ))}
-            {pending ? (
-              <div className="flex flex-col gap-[14px]">
-                <div className="self-start w-full flex flex-col gap-[14px]">
-                  <motion.div
-                    className="text-fg-muted italic py-1 px-[2px] font-serif"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    thinking...
-                  </motion.div>
-                </div>
-              </div>
-            ) : null}
           </div>
 
           <form className={composerCls} onSubmit={onComposerSubmit} autoComplete="off">
@@ -766,12 +812,16 @@ export default function ChatShell() {
               `opacity 360ms ${SPLIT_EASE} 80ms, transform 520ms ${SPLIT_EASE} 80ms`,
           }}
           className={
-            "relative h-full overflow-hidden motion-reduce:transition-none motion-reduce:transform-none " +
+            "viewer-wrap relative h-full overflow-hidden motion-reduce:transition-none motion-reduce:transform-none " +
             (showPdf
               ? "opacity-100 translate-x-0"
               : "opacity-0 translate-x-[28px]")
           }
         >
+          {/* Divider is meaningless while the chat is hidden (chat track
+              pinned to 0%). Stripping handlers + focus prevents silent
+              chatPct writes (and localStorage churn) from drags or
+              arrow-keys the user can't even see. */}
           <div
             role="separator"
             aria-orientation="vertical"
@@ -780,20 +830,24 @@ export default function ChatShell() {
             aria-valuenow={Math.round(chatPct)}
             aria-valuetext={`${Math.round(chatPct)}%`}
             aria-label="Resize chat pane (arrow keys; Shift+arrow for 10% steps; Home/End for min/max; Enter or double-click to reset)"
-            tabIndex={0}
-            onPointerDown={onDividerPointerDown}
-            onPointerMove={onDividerPointerMove}
-            onPointerUp={endDividerDrag}
-            onPointerCancel={onDividerPointerCancel}
-            onDoubleClick={onDividerDoubleClick}
-            onKeyDown={onDividerKeyDown}
+            aria-hidden={chatHidden}
+            tabIndex={chatHidden ? -1 : 0}
+            onPointerDown={chatHidden ? undefined : onDividerPointerDown}
+            onPointerMove={chatHidden ? undefined : onDividerPointerMove}
+            onPointerUp={chatHidden ? undefined : endDividerDrag}
+            onPointerCancel={chatHidden ? undefined : onDividerPointerCancel}
+            onDoubleClick={chatHidden ? undefined : onDividerDoubleClick}
+            onKeyDown={chatHidden ? undefined : onDividerKeyDown}
             className={
-              "absolute top-0 bottom-0 left-0 w-2 z-[2] bg-transparent outline-none cursor-col-resize touch-none " +
+              "absolute top-0 bottom-0 left-0 w-2 z-[2] bg-transparent outline-none touch-none " +
+              (chatHidden ? "pointer-events-none cursor-default " : "cursor-col-resize ") +
               "before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-px before:bg-border " +
               "before:transition-[background,width] before:duration-[160ms] before:ease-out " +
-              "hover:before:bg-accent hover:before:w-[2px] " +
-              "focus-visible:before:bg-accent focus-visible:before:w-[2px] " +
-              "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] " +
+              (chatHidden
+                ? ""
+                : "hover:before:bg-accent hover:before:w-[2px] " +
+                  "focus-visible:before:bg-accent focus-visible:before:w-[2px] " +
+                  "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] ") +
               (resizing ? "before:!bg-accent before:!w-[2px] " : "")
             }
           />
@@ -808,7 +862,7 @@ export default function ChatShell() {
           >
             <PdfViewerPane
               src={viewerUrl || null}
-              storageKey={VIEWER_KEY}
+              onClose={closeViewer}
               emptyHint="Click an evidence row to view the source PDF."
             />
           </div>

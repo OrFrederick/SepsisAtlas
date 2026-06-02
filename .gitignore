@@ -34,3 +34,14 @@ pipelines/*/valves.json
 
 # Local debug scratch
 static/bbox_proof/
+
+# Local git worktrees (used by isolated dev sessions)
+.worktrees/
+
+# graphify: see https://github.com/safishamsi/graphify v7 README "Team setup"
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/cache/
+
+# Brainstorming visual-companion mockups (disposable design scratch)
+.superpowers/

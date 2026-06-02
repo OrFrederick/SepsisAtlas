@@ -66,7 +66,7 @@ class _Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    total_cost: float = 0.0
+    cost: float = 0.0
 
 
 @dataclass
@@ -139,8 +139,24 @@ class ClaudeCLIClient:
             role = m.get("role")
             content = m.get("content") or ""
             if not isinstance(content, str):
-                # Multimodal arrays — claude CLI doesn't accept them; flatten.
-                content = json.dumps(content)
+                # Anthropic-style content-block arrays:
+                # [{"type":"text","text":"..."}, ...]. The CLI takes plain
+                # strings, so concatenate the text blocks (and ignore the
+                # cache_control / image fields — caching is handled by the
+                # CLI's own session cache, and we never send images here).
+                # json.dumps'ing the array would have shipped the literal
+                # `[{"type":"text",...}]` JSON as the system prompt.
+                # A bare-dict block (`{"type":"text","text":"..."}`) is
+                # normalized into a single-element list so it doesn't
+                # silently flatten to "" — matches the original bug shape.
+                if isinstance(content, dict):
+                    content = [content]
+                parts: list[str] = []
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(str(block.get("text") or ""))
+                content = "\n\n".join(p for p in parts if p)
             if role == "system":
                 system_parts.append(content)
             elif role in ("user", "assistant"):
@@ -215,7 +231,7 @@ class ClaudeCLIClient:
             completion_tokens=int(usage_raw.get("output_tokens", 0)),
             total_tokens=int(usage_raw.get("input_tokens", 0))
             + int(usage_raw.get("output_tokens", 0)),
-            total_cost=float(envelope.get("total_cost_usd", 0.0) or 0.0),
+            cost=float(envelope.get("total_cost_usd", 0.0) or 0.0),
         )
         return _ChatCompletion(
             id=str(envelope.get("session_id") or uuid.uuid4()),

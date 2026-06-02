@@ -4,7 +4,7 @@ Production target: `atlas.efferon.com` (DigitalOcean droplet, Ubuntu 24.04).
 
 ## What runs where
 
-Everything in prod is docker. The VPS has no source checkout and no host services beyond docker itself.
+Everything in prod is docker. The VPS hosts the `atlas-main` compose stack under `/opt/sepsisatlas/main/` (with a working git checkout used as the compose build/context dir and as the home for the runtime `.env` + bind-mounted state). Additional ephemeral PR stacks may live under sibling dirs (e.g. `/opt/sepsisatlas/pr-29/`). No host services beyond docker itself.
 
 | Component  | Where                                                    | Port            |
 | ---------- | -------------------------------------------------------- | --------------- |
@@ -36,10 +36,10 @@ Both images are **always built in CI**, never on the VPS. The frontend's CI buil
 
 ### Updating either compose file
 
-Compose YAML changes don't ship via the registry; they live in `/opt/sepsisatlas/` on the box. To pick up new compose files after a merge:
+Compose YAML changes don't ship via the registry; they live in `/opt/sepsisatlas/main/` on the box. To pick up new compose files after a merge:
 
 ```bash
-ssh efferon-deploy 'cd /opt/sepsisatlas && ./update-compose.sh'
+ssh efferon-deploy 'cd /opt/sepsisatlas/main && ./update-compose.sh'
 ```
 
 The script curls fresh `docker-compose.yml`, `docker-compose.prod.yml`, and itself from `raw.githubusercontent.com/.../main`, then `docker compose pull && up -d --remove-orphans`. The script is committed at the repo root; it's the one escape hatch for infra changes that aren't image-shaped.
@@ -57,12 +57,12 @@ Then drop the compose files onto the box and bring up the stack:
 ```bash
 ssh deploy@<host> bash -lc '
   RAW=https://raw.githubusercontent.com/OrFrederick/SepsisAtlas/main
-  cd /opt/sepsisatlas
+  mkdir -p /opt/sepsisatlas/main && cd /opt/sepsisatlas/main
   curl -fsSL "$RAW/docker-compose.yml"      -o docker-compose.yml
   curl -fsSL "$RAW/docker-compose.prod.yml" -o docker-compose.prod.yml
   curl -fsSL "$RAW/update-compose.sh"       -o update-compose.sh
   chmod +x update-compose.sh
-  # Place .env (with OPENROUTER_API_KEY etc.) at /opt/sepsisatlas/.env before continuing.
+  # Place .env (with OPENROUTER_API_KEY etc.) at /opt/sepsisatlas/main/.env before continuing.
   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d
 '
 ```
@@ -75,17 +75,17 @@ gh workflow run "deploy main" -R OrFrederick/SepsisAtlas
 
 ## Updating .env
 
-`/opt/sepsisatlas/.env` holds `OPENROUTER_API_KEY` and optional Langfuse keys. Edit in place, then:
+`/opt/sepsisatlas/main/.env` holds `OPENROUTER_API_KEY`, the feedback-form vars (see below), and optional Langfuse keys. Edit in place, then:
 
 ```bash
-ssh efferon-deploy 'cd /opt/sepsisatlas && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main restart backend'
+ssh efferon-deploy 'cd /opt/sepsisatlas/main && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main restart backend'
 ```
 
 ## Feedback feature
 
 The feedback form (`/feedback`) creates labeled GitHub issues via the GitHub
 REST API. Required production env vars, all read by the frontend container
-from `/opt/sepsisatlas/.env` (interpolated by `docker-compose.prod.yml`):
+from `/opt/sepsisatlas/main/.env` (interpolated by `docker-compose.prod.yml`):
 
 - `GITHUB_FEEDBACK_TOKEN` — fine-grained PAT, scoped to `Issues: read & write`
   on `OrFrederick/SepsisAtlas` only. Set 1-year expiry; rotate annually.
@@ -95,11 +95,11 @@ from `/opt/sepsisatlas/.env` (interpolated by `docker-compose.prod.yml`):
 - `FEEDBACK_MOUNT_SECRET` — ≥16 random bytes (`openssl rand -hex 32`) that
   HMAC-sign the mount-time token served by `/api/feedback/mount`.
 
-After editing `/opt/sepsisatlas/.env`, restart the frontend container so
+After editing `/opt/sepsisatlas/main/.env`, restart the frontend container so
 Next picks up the new env:
 
 ```bash
-ssh efferon-deploy 'cd /opt/sepsisatlas && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d frontend'
+ssh efferon-deploy 'cd /opt/sepsisatlas/main && docker compose -f docker-compose.yml -f docker-compose.prod.yml -p atlas-main up -d frontend'
 ```
 
 Run `scripts/setup-feedback-labels.sh` once after deploy to seed the
@@ -124,7 +124,7 @@ Both images are tagged with the commit SHA in addition to `:main`. To pin the st
 
 ```bash
 ssh efferon-deploy 'bash -lc "
-  cd /opt/sepsisatlas
+  cd /opt/sepsisatlas/main
   SHA=<good-sha>
   docker pull ghcr.io/orfrederick/sepsis-atlas-backend:\$SHA
   docker pull ghcr.io/orfrederick/sepsis-atlas-frontend:\$SHA
@@ -143,12 +143,12 @@ After the first run of each build job, the `sepsis-atlas-backend` and `sepsis-at
 ## Common failures
 
 - **HTTPS won't issue (first run after cutover):** `docker logs -f atlas-main-frontend-1 | grep -i acme`. Usually DNS doesn't point at the server or port 80/443 is blocked. The `caddy_data` named volume must be writable.
-- **Backend 502 at /query:** `docker compose -p atlas-main logs --tail=200 backend`. Common cause: missing or invalid `OPENROUTER_API_KEY` in `/opt/sepsisatlas/.env`.
+- **Backend 502 at /query:** `docker compose -p atlas-main logs --tail=200 backend`. Common cause: missing or invalid `OPENROUTER_API_KEY` in `/opt/sepsisatlas/main/.env`.
 - **Frontend shows empty tables / 404s on PDFs:** the build that produced the running `:main` image was missing `web/public/data/*.json` or `data/papers/raw/*.pdf` in the CI checkout. Confirm those files are committed; the next build will bake them in.
 - **Watchtower not pulling new images:** `docker logs atlas-watchtower`. Most often: the container the label was supposed to be on isn't running, or the poll interval (5 min) hasn't elapsed yet.
 
 ## Isolation model
 
-- **Prod** is this server (`atlas.efferon.com`). Long-lived state lives under `/opt/sepsisatlas/` on the VPS: `db.sqlite`, `data/papers/raw/`, `runs/`, `logs/`, `static/`. The bind-mount layout in `docker-compose.prod.yml` is the source of truth for which directories the backend container needs at runtime.
+- **Prod** is this server (`atlas.efferon.com`). Long-lived state lives under `/opt/sepsisatlas/main/` on the VPS: `db.sqlite`, `data/papers/raw/`, `runs/`, `logs/`, `static/`. The bind-mount layout in `docker-compose.prod.yml` is the source of truth for which directories the backend container needs at runtime.
 - **Dev** runs on the contributor's laptop with their own `.env` and `.venv` against a local `db.sqlite`. No shared state, no shared backend.
 - **PR previews** are not deployed. We considered both subdomain (`pr-<N>.atlas.efferon.com`) and path-prefix (`/pr/<N>/`); the former needs wildcard DNS we don't have, the latter shares browser origin and `/static` with prod, which doesn't qualify as real isolation. If wildcard DNS or DNS-01 API access becomes available, re-add the per-PR scripts (see git history of this directory).

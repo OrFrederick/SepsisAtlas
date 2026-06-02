@@ -12,6 +12,27 @@ interface Props {
   basePath: string; // e.g. "/" or "/SepsisAtlas/"; used to build asset URLs
 }
 
+// Loosely tied to a PDF page coordinate range; lets through anything a
+// real Docling bbox could produce while rejecting NaN / inverted / runaway
+// values that would render an invisible-but-massive overlay.
+const BBOX_MAX_ABS = 100_000;
+
+function sanitizePage(raw: unknown): number | null {
+  const n = typeof raw === "number" ? raw : parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.floor(n);
+}
+
+function sanitizeBbox(parts: number[], origin: "tl" | "bl"): number[] | null {
+  if (parts.length !== 4) return null;
+  if (!parts.every(Number.isFinite)) return null;
+  if (parts.some((v) => Math.abs(v) >= BBOX_MAX_ABS)) return null;
+  // l < r in any origin; t/b ordering depends on origin convention.
+  if (parts[2] <= parts[0]) return null;
+  if (origin === "tl" ? parts[3] <= parts[1] : parts[3] >= parts[1]) return null;
+  return parts;
+}
+
 export default function PdfViewer({ stem, basePath }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<PdfController | null>(null);
@@ -42,15 +63,14 @@ export default function PdfViewer({ stem, basePath }: Props) {
   useEffect(() => {
     if (!stageRef.current) return;
     const params = new URLSearchParams(window.location.search);
-    const initialPage = Math.max(1, parseInt(params.get("page") || "1", 10));
+    const initialPage = sanitizePage(params.get("page")) ?? 1;
+    const initialBboxOrigin: "tl" | "bl" =
+      (params.get("origin") || "tl").toLowerCase() === "bl" ? "bl" : "tl";
     const bboxStr = params.get("bbox");
     let initialBbox: number[] | null = null;
     if (bboxStr) {
-      const parts = bboxStr.split(",").map(Number);
-      if (parts.length === 4 && parts.every(Number.isFinite)) initialBbox = parts;
+      initialBbox = sanitizeBbox(bboxStr.split(",").map(Number), initialBboxOrigin);
     }
-    const initialBboxOrigin: "tl" | "bl" =
-      (params.get("origin") || "tl").toLowerCase() === "bl" ? "bl" : "tl";
 
     const controller = new PdfController({
       pdfUrl: `${basePath}pdfs/${encodeURIComponent(stem)}.pdf`,
@@ -121,16 +141,16 @@ export default function PdfViewer({ stem, basePath }: Props) {
       if (!data || data.type !== "sepsis-atlas:jump") return;
       const c = controllerRef.current;
       if (!c) return;
+      const origin: "tl" | "bl" = data.origin === "bl" ? "bl" : "tl";
       let bbox: number[] | null = null;
       if (Array.isArray(data.bbox) && data.bbox.length === 4) {
-        const parts = data.bbox.map(Number);
-        if (parts.every(Number.isFinite)) bbox = parts;
+        bbox = sanitizeBbox(data.bbox.map(Number), origin);
       } else if (typeof data.bbox === "string" && data.bbox) {
-        const parts = data.bbox.split(",").map(Number);
-        if (parts.length === 4 && parts.every(Number.isFinite)) bbox = parts;
+        bbox = sanitizeBbox(data.bbox.split(",").map(Number), origin);
       }
-      const origin: "tl" | "bl" = data.origin === "bl" ? "bl" : "tl";
-      c.applyJump({ page: data.page ?? 1, bbox, origin });
+      // Page must be a finite positive integer; "data.page ?? 1" missed NaN/0/-N.
+      const page = sanitizePage(data.page) ?? 1;
+      c.applyJump({ page, bbox, origin });
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

@@ -348,9 +348,18 @@ export default function ChatShell() {
       // If the optimistic turn is no longer in history (e.g. some future code
       // path drops it mid-flight), bail rather than silently writing the
       // mapped-but-unchanged array back to storage. The Clear button is
-      // already disabled while pending, so this branch is defensive.
+      // gated against this case, so this branch is defensive — we log so a
+      // future regression that bypasses the gate is at least visible in
+      // devtools rather than vanishing silently.
       setHistory((prev) => {
-        if (!prev.some((t) => t.ts === ts)) return prev;
+        if (!prev.some((t) => t.ts === ts)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[chat] dropping assistant response for ts=%s — optimistic turn no longer in history",
+            ts,
+          );
+          return prev;
+        }
         const next = prev.map((t) => (t.ts === ts ? { ...t, assistant } : t));
         saveHistory(next);
         return next;
@@ -376,6 +385,12 @@ export default function ChatShell() {
 
   // ---- clear -------------------------------------------------------------
   const clearAll = () => {
+    // Single source of truth for "don't wipe history mid-flight" so a
+    // future Cmd+K shortcut, viewer event, or programmatic reset path
+    // that calls clearAll directly still respects the in-flight submit.
+    // The button's `disabled={pending}` is the user-visible cue; this
+    // is the structural guard.
+    if (pending) return;
     try {
       localStorage.removeItem(HISTORY_KEY);
     } catch {

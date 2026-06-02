@@ -345,7 +345,12 @@ export default function ChatShell() {
 
       // Patch the optimistic turn in place (matched by ts) so the user bubble
       // stays put and only the assistant content fills in. Persist now.
+      // If the optimistic turn is no longer in history (e.g. some future code
+      // path drops it mid-flight), bail rather than silently writing the
+      // mapped-but-unchanged array back to storage. The Clear button is
+      // already disabled while pending, so this branch is defensive.
       setHistory((prev) => {
+        if (!prev.some((t) => t.ts === ts)) return prev;
         const next = prev.map((t) => (t.ts === ts ? { ...t, assistant } : t));
         saveHistory(next);
         return next;
@@ -632,9 +637,10 @@ export default function ChatShell() {
         ) : null}
         <button
           type="button"
-          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
-          title="Clear chat history"
+          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-transparent"
+          title={pending ? "Wait for the current response to finish" : "Clear chat history"}
           onClick={clearAll}
+          disabled={pending}
         >
           Clear chat
         </button>

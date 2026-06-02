@@ -44,7 +44,11 @@ export default function PdfViewer({ stem, basePath }: Props) {
     const params = new URLSearchParams(window.location.search);
     const initialPage = Math.max(1, parseInt(params.get("page") || "1", 10));
     const bboxStr = params.get("bbox");
-    const initialBbox = bboxStr ? bboxStr.split(",").map(Number) : null;
+    let initialBbox: number[] | null = null;
+    if (bboxStr) {
+      const parts = bboxStr.split(",").map(Number);
+      if (parts.length === 4 && parts.every(Number.isFinite)) initialBbox = parts;
+    }
     const initialBboxOrigin: "tl" | "bl" =
       (params.get("origin") || "tl").toLowerCase() === "bl" ? "bl" : "tl";
 
@@ -118,8 +122,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
       const c = controllerRef.current;
       if (!c) return;
       let bbox: number[] | null = null;
-      if (Array.isArray(data.bbox) && data.bbox.length === 4) bbox = data.bbox.map(Number);
-      else if (typeof data.bbox === "string" && data.bbox) {
+      if (Array.isArray(data.bbox) && data.bbox.length === 4) {
+        const parts = data.bbox.map(Number);
+        if (parts.every(Number.isFinite)) bbox = parts;
+      } else if (typeof data.bbox === "string" && data.bbox) {
         const parts = data.bbox.split(",").map(Number);
         if (parts.length === 4 && parts.every(Number.isFinite)) bbox = parts;
       }

@@ -804,29 +804,33 @@ def test_resolve_r3_scopes_fuzzy_to_section_caption():
 
 
 def test_r5_demote_helper_partial_when_resolved_false():
-    from src.extract.extractor import extract_paper  # noqa: F401
     from sepsis_atlas.schemas import VerifierResponse
+    from src.extract.extractor import demote_if_anchor_missed
 
-    # We can't easily run the full pipeline in a unit test, but the demotion
-    # helper is module-local. Replicate its contract here as an integration
-    # invariant: an `ok` verdict with resolved=False must become `partial`
-    # with a tagged rationale; `partial`/`reject` verdicts must pass through.
-    import importlib
-    extractor_mod = importlib.import_module("src.extract.extractor")
-    # Helper is defined inside extract_paper closure; instead we re-implement
-    # the same logic and assert the rule. The integration test that exercises
-    # the closure path is the smoke check (separate script).
+    # `ok` + unresolved anchor must become `partial` with a tagged rationale.
     v_ok = VerifierResponse(verdict="ok", score=0.98, rationale="numbers match")
-    # Simulate demotion logic identical to extractor._demote_if_anchor_missed:
-    if v_ok.verdict == "ok":
-        demoted = VerifierResponse(
-            verdict="partial",
-            score=v_ok.score,
-            rationale=(v_ok.rationale or "") + " | anchor_unresolved",
-        )
+    demoted = demote_if_anchor_missed(v_ok, resolved=False)
     assert demoted.verdict == "partial"
     assert "anchor_unresolved" in (demoted.rationale or "")
     assert demoted.score == 0.98
+
+    # `ok` + resolved passes through unchanged.
+    passthrough = demote_if_anchor_missed(v_ok, resolved=True)
+    assert passthrough.verdict == "ok"
+    assert passthrough.rationale == "numbers match"
+
+    # Non-ok verdicts pass through regardless of resolution state.
+    v_partial = VerifierResponse(verdict="partial", score=0.5, rationale="rx")
+    assert demote_if_anchor_missed(v_partial, resolved=False).verdict == "partial"
+    v_reject = VerifierResponse(verdict="reject", score=0.0, rationale="rx")
+    assert demote_if_anchor_missed(v_reject, resolved=False).verdict == "reject"
+
+    # The tag is added only once even on repeated demotion.
+    once = demote_if_anchor_missed(v_ok, resolved=False)
+    twice = demote_if_anchor_missed(once, resolved=False)
+    # `once` is already `partial`, so `twice` is a no-op pass-through; either
+    # way the tag must not appear twice in the rationale.
+    assert (twice.rationale or "").count("anchor_unresolved") == 1
 
 
 def test_numeric_regex_matches_verifier():

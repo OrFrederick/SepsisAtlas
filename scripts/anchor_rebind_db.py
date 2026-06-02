@@ -151,7 +151,20 @@ def main() -> int:
                 bbox_changed = False
             else:
                 effective_bbox_json = new_bbox_json
-                bbox_changed = (old_bbox_norm or None) != (new_bbox_json or None)
+                # Compare parsed arrays, not raw JSON strings: the stored TEXT
+                # `"[100, 200, 300, 400]"` and `json.dumps([100.0,200.0,...])`
+                # are byte-different but semantically identical, which would
+                # otherwise mark every preserved row as "updated" and trigger
+                # a no-op UPDATE that masks real changes in the audit output.
+                def _parse(b):
+                    if b is None:
+                        return None
+                    try:
+                        v = json.loads(b)
+                    except (TypeError, ValueError):
+                        return b
+                    return v if isinstance(v, list) else b
+                bbox_changed = _parse(old_bbox_norm) != _parse(new_bbox_json)
             page_changed = old_page != new_page
             section_changed = (old_section or "") != (new_section or "")
 

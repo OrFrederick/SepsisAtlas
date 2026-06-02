@@ -61,12 +61,18 @@ export function buildPageIndex(itemsStr: string[]): PageIndex {
   for (let i = 0; i < itemsStr.length; i++) {
     const item = itemsStr[i];
 
-    // A trailing "-" whose next item continues with a letter is treated as a
-    // line-break hyphenation: drop the hyphen and suppress the separator so
-    // "inflamma-" + "tory" reads as "inflammatory".
-    const next = itemsStr[i + 1];
-    const hyphenJoin =
-      item.endsWith("-") && next !== undefined && /^\s*[a-zA-Z]/.test(next);
+    // A trailing "-" whose next non-whitespace item continues with a letter
+    // is treated as a line-break hyphenation: drop the hyphen and suppress
+    // the separator so "inflamma-" + "tory" reads as "inflammatory". pdfjs
+    // often interleaves an empty/whitespace-only item between the parts
+    // (`["inflamma-", " ", "tory"]`), so we scan past those before checking.
+    let hyphenJoin = false;
+    if (item.endsWith("-")) {
+      let j = i + 1;
+      while (j < itemsStr.length && /^\s*$/.test(itemsStr[j])) j++;
+      const next = itemsStr[j];
+      if (next !== undefined && /^[a-zA-Z]/.test(next)) hyphenJoin = true;
+    }
 
     if (i > 0 && !prevHyphenJoined) push(" ", -1, -1);
 

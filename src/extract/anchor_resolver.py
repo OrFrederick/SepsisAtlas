@@ -629,28 +629,36 @@ def _numeric_fingerprint_hits(
 
     * at least ``min_overlap`` numeric tokens in the anchor;
     * the candidate row's numeric tokens form a superset of the anchor's;
-    * a unique winner — ties are dropped to ``[]`` to avoid wrong-table hits.
+    * a unique winner — when several rows superset the anchor we prefer the
+      tightest one (fewest extra numerics) and only drop to ``[]`` if even
+      that tier ties.
 
     Operates on ``table_row`` entries only (not individual cells) so we score
-    against the row's full numeric content.
+    against the row's full numeric content. Earlier versions counted "overlap"
+    as ``len(anchor_nums)`` (constant across every survivor) and then declared
+    a tie on the first duplicate — which made R2 return ``[]`` for any caption
+    with two superset rows (e.g. unadjusted + adjusted HR sharing the same
+    numbers), even though one was clearly the legitimate target.
     """
     anchor_nums = _numeric_tokens(anchor_text)
     if len(anchor_nums) < min_overlap:
         return []
     rows = [e for e in pool if e.get("kind") == "table_row"]
+    # Tightness = row_nums - anchor_nums; smaller is better (the row carries
+    # fewer numerics the anchor didn't mention, so it's the closest match).
     best: dict | None = None
-    best_overlap = 0
+    best_extra: int | None = None
     tied = False
     for r in rows:
         row_nums = _numeric_tokens(r.get("text") or "")
         if not anchor_nums.issubset(row_nums):
             continue
-        overlap = len(anchor_nums)  # by definition since anchor ⊆ row
-        if overlap > best_overlap:
+        extra = len(row_nums) - len(anchor_nums)
+        if best_extra is None or extra < best_extra:
             best = r
-            best_overlap = overlap
+            best_extra = extra
             tied = False
-        elif overlap == best_overlap and r is not best:
+        elif extra == best_extra and r is not best:
             tied = True
     if best is None or tied:
         return []

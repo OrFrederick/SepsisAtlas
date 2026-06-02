@@ -59,6 +59,26 @@ from src.extract.verify_nli import run_verifier
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
 
+def demote_if_anchor_missed(
+    verdict: VerifierResponse, resolved: bool
+) -> VerifierResponse:
+    """Enforce the CLAUDE.md anchor contract: an unresolved anchor cannot
+    back an ``ok`` verdict. Demote to ``partial`` and tag the rationale so
+    downstream consumers can audit the reason. Other verdicts pass through.
+    """
+    if resolved or verdict.verdict != "ok":
+        return verdict
+    rationale = (verdict.rationale or "").rstrip()
+    tag = "anchor_unresolved"
+    if tag not in rationale:
+        rationale = f"{rationale} | {tag}" if rationale else tag
+    return VerifierResponse(
+        verdict="partial",
+        score=verdict.score,
+        rationale=rationale,
+    )
+
+
 def _load_prompt(name: str) -> tuple[str, str]:
     """Return (text, prompt_id) where prompt_id = '<name>@<sha8>'."""
     p = _PROMPT_DIR / name
@@ -480,7 +500,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
         bbox cannot be resolved must not carry an ``ok`` verdict. Predictor
         rows short-circuit the LLM verifier on a miss (saves a Haiku call);
         cohorts still run the verifier and demote ``ok`` via
-        ``_demote_if_anchor_missed``.
+        ``demote_if_anchor_missed``.
         """
         hit = resolve(anchor.text or "", anchor.section, anchor_index)
         if hit is None:
@@ -499,24 +519,6 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
             anchor.section = sec
         summary["anchor_resolved"] += 1
         return True
-
-    def _demote_if_anchor_missed(
-        verdict: VerifierResponse, resolved: bool
-    ) -> VerifierResponse:
-        """Enforce anchor contract: an unresolved anchor cannot back an `ok`
-        verdict. Demote to `partial` and tag the rationale so downstream
-        consumers can audit the reason."""
-        if resolved or verdict.verdict != "ok":
-            return verdict
-        rationale = (verdict.rationale or "").rstrip()
-        tag = "anchor_unresolved"
-        if tag not in rationale:
-            rationale = f"{rationale} | {tag}" if rationale else tag
-        return VerifierResponse(
-            verdict="partial",
-            score=verdict.score,
-            rationale=rationale,
-        )
 
     # IMPORTANT: do NOT hold a session open across LLM calls. SQLite is a
     # single-writer DB; even with WAL+busy_timeout, an open transaction held
@@ -555,7 +557,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                 rationale=f"verifier_error: {e!r}",
             )
             vmeta = {"cost_usd": 0.0, "latency_ms": 0}
-        verdict = _demote_if_anchor_missed(verdict, resolved)
+        verdict = demote_if_anchor_missed(verdict, resolved)
         summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
         summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
         summary["verdict_counts"][verdict.verdict] += 1
@@ -618,7 +620,7 @@ def extract_paper(file_stem: str, *, run_id: str | None = None,
                     rationale=f"verifier_error: {e!r}",
                 )
                 vmeta = {"cost_usd": 0.0, "latency_ms": 0}
-            verdict = _demote_if_anchor_missed(verdict, resolved)
+            verdict = demote_if_anchor_missed(verdict, resolved)
             summary["cost_usd_total"] += vmeta.get("cost_usd", 0.0)
             summary["latency_ms_total"] += vmeta.get("latency_ms", 0)
             summary["verdict_counts"][verdict.verdict] += 1

@@ -163,103 +163,106 @@ def reverify_table(
     # connection and contends with the per-row UPDATE — exactly the
     # contention the cache_con plumbing was added to eliminate. Plumbed
     # through `kwargs["cache_con"]`; verify_nli forwards to run_llm_judge.
+    # try/finally so a row-loop exception (KeyError on row shape drift,
+    # OperationalError on lock contention, etc.) doesn't leak the WAL fd
+    # — under --all batch mode an unclosed cache_con per paper compounds.
     cache_con = _open_cache()
+    try:
+        # Batched updates: we accumulate (verdict, score, rationale, pk)
+        # tuples and run a single executemany at the end. Per-row UPDATE
+        # inside the loop holds an implicit transaction that fights for
+        # the SQLite write lock with the verifier_llm_cache writer (which
+        # lives on a separate connection). Batching sidesteps it entirely.
+        pending_updates: list[tuple[str, float, str, Any]] = []
+        for r in rows:
+            claim = _row_to_claim(r, num_cols, text_cols)
+            span = r["anchor_text"] or ""
 
-    # Batched updates: we accumulate (verdict, score, rationale, pk) tuples
-    # and run a single executemany at the end. Per-row UPDATE inside the
-    # loop holds an implicit transaction that fights for the SQLite write
-    # lock with the verifier_llm_cache writer (which lives on a separate
-    # connection). Batching sidesteps the contention entirely.
-    pending_updates: list[tuple[str, float, str, Any]] = []
-    for r in rows:
-        claim = _row_to_claim(r, num_cols, text_cols)
-        span = r["anchor_text"] or ""
-
-        # Anchor section is part of the claim for the LLM judge.
-        try:
-            asec = r["anchor_section"]
-            if asec:
-                claim["anchor"] = {"section": asec}
-        except (IndexError, KeyError):
-            pass
-
-        # Resolve paper_id (file_stem) so the LLM judge can load the full
-        # parsed paper. For study_cohort, file_name is on the row directly;
-        # for predictor_model we look it up via cohort_id.
-        paper_id = ""
-        if table == "study_cohort":
+            # Anchor section is part of the claim for the LLM judge.
             try:
-                paper_id = r["file_name"] or ""
-            except (IndexError, KeyError):
-                paper_id = ""
-        else:
-            cid = r["cohort_id"] or ""
-            paper_id = cohort_to_paper.get(cid, "")
-
-        kwargs: dict = {
-            "skip_nli": skip_nli,
-            "paper_id": paper_id,
-            "cache_con": cache_con,
-        }
-        if not use_llm:
-            kwargs["skip_llm"] = True
-        if table == "predictor_model":
-            cid = r["cohort_id"]
-            if cid:
-                claim["cohort_id"] = cid
-                ctx = cohort_ctx_map.get(cid)
-                if ctx:
-                    kwargs["cohort_context"] = ctx
-            # Predictor rows also carry their own outcome_window_days.
-            try:
-                w = r["outcome_window_days"]
-                if w is not None:
-                    claim["outcome_window_days"] = w
+                asec = r["anchor_section"]
+                if asec:
+                    claim["anchor"] = {"section": asec}
             except (IndexError, KeyError):
                 pass
 
-        try:
-            verdict, vmeta = run_verifier(claim, span, **kwargs)
-        except Exception as e:
-            n_errors += 1
-            verdict_obj_rationale = f"verifier_error: {e!r}"
-            # Wrap exceptions in a partial verdict (matches extract_paper).
-            from sepsis_atlas.schemas import VerifierResponse as _VR
-            verdict = _VR(
-                verdict="partial", score=0.5, rationale=verdict_obj_rationale[:400]
+            # Resolve paper_id (file_stem) so the LLM judge can load the full
+            # parsed paper. For study_cohort, file_name is on the row directly;
+            # for predictor_model we look it up via cohort_id.
+            paper_id = ""
+            if table == "study_cohort":
+                try:
+                    paper_id = r["file_name"] or ""
+                except (IndexError, KeyError):
+                    paper_id = ""
+            else:
+                cid = r["cohort_id"] or ""
+                paper_id = cohort_to_paper.get(cid, "")
+
+            kwargs: dict = {
+                "skip_nli": skip_nli,
+                "paper_id": paper_id,
+                "cache_con": cache_con,
+            }
+            if not use_llm:
+                kwargs["skip_llm"] = True
+            if table == "predictor_model":
+                cid = r["cohort_id"]
+                if cid:
+                    claim["cohort_id"] = cid
+                    ctx = cohort_ctx_map.get(cid)
+                    if ctx:
+                        kwargs["cohort_context"] = ctx
+                # Predictor rows also carry their own outcome_window_days.
+                try:
+                    w = r["outcome_window_days"]
+                    if w is not None:
+                        claim["outcome_window_days"] = w
+                except (IndexError, KeyError):
+                    pass
+
+            try:
+                verdict, vmeta = run_verifier(claim, span, **kwargs)
+            except Exception as e:
+                n_errors += 1
+                verdict_obj_rationale = f"verifier_error: {e!r}"
+                # Wrap exceptions in a partial verdict (matches extract_paper).
+                from sepsis_atlas.schemas import VerifierResponse as _VR
+                verdict = _VR(
+                    verdict="partial", score=0.5, rationale=verdict_obj_rationale[:400]
+                )
+                vmeta = {"cost_usd": 0.0}
+
+            total_cost_usd += float(vmeta.get("cost_usd", 0.0) or 0.0)
+            if vmeta.get("cache_hit"):
+                n_cache_hits += 1
+            elif vmeta.get("model", "").startswith("anthropic/"):
+                n_llm_calls += 1
+
+            old = (r["verifier_verdict"] or "other").lower()
+            counts_old[old if old in counts_old else "other"] += 1
+            counts_new[verdict.verdict] += 1
+            if old != verdict.verdict:
+                old_rat = (r["verifier_rationale"] or "")[:200]
+                new_rat = (verdict.rationale or "")[:200]
+                flips.append(
+                    (str(r[pk_col])[:80], old, verdict.verdict, old_rat, new_rat)
+                )
+
+            if not dry_run:
+                pending_updates.append(
+                    (verdict.verdict, verdict.score, verdict.rationale, r[pk_col])
+                )
+
+        if not dry_run and pending_updates:
+            con.executemany(
+                f"UPDATE {table} SET verifier_verdict=?, verifier_score=?, "
+                f"verifier_rationale=? WHERE {pk_col}=?",
+                pending_updates,
             )
-            vmeta = {"cost_usd": 0.0}
-
-        total_cost_usd += float(vmeta.get("cost_usd", 0.0) or 0.0)
-        if vmeta.get("cache_hit"):
-            n_cache_hits += 1
-        elif vmeta.get("model", "").startswith("anthropic/"):
-            n_llm_calls += 1
-
-        old = (r["verifier_verdict"] or "other").lower()
-        counts_old[old if old in counts_old else "other"] += 1
-        counts_new[verdict.verdict] += 1
-        if old != verdict.verdict:
-            old_rat = (r["verifier_rationale"] or "")[:200]
-            new_rat = (verdict.rationale or "")[:200]
-            flips.append(
-                (str(r[pk_col])[:80], old, verdict.verdict, old_rat, new_rat)
-            )
-
-        if not dry_run:
-            pending_updates.append(
-                (verdict.verdict, verdict.score, verdict.rationale, r[pk_col])
-            )
-
-    if not dry_run and pending_updates:
-        con.executemany(
-            f"UPDATE {table} SET verifier_verdict=?, verifier_score=?, "
-            f"verifier_rationale=? WHERE {pk_col}=?",
-            pending_updates,
-        )
-        con.commit()
-
-    cache_con.close()
+            con.commit()
+    finally:
+        cache_con.close()
 
     return {
         "table": table,

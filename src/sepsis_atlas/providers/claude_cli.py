@@ -146,6 +146,11 @@ class ClaudeCLIClient:
                 # CLI's own session cache, and we never send images here).
                 # json.dumps'ing the array would have shipped the literal
                 # `[{"type":"text",...}]` JSON as the system prompt.
+                # A bare-dict block (`{"type":"text","text":"..."}`) is
+                # normalized into a single-element list so it doesn't
+                # silently flatten to "" — matches the original bug shape.
+                if isinstance(content, dict):
+                    content = [content]
                 parts: list[str] = []
                 if isinstance(content, list):
                     for block in content:

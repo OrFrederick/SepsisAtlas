@@ -234,11 +234,22 @@ export class PdfController {
         entry.renderTask = null;
       }
     }
-    this.pdfDoc?.destroy();
-    // Null the field so every `if (!this.pdfDoc) return` guard (renderPage,
-    // applyJump, fitWidth, search) actually short-circuits — otherwise an
-    // in-flight async passes the guard and calls into a destroyed doc.
+    // Null the field FIRST so every `if (!this.pdfDoc) return` guard
+    // (renderPage, applyJump, fitWidth, search) short-circuits before the
+    // worker tears down. Then fire-and-forget destroy() on the captured
+    // reference. Intentionally unawaited:
+    //   - Long-running worker calls already covered: `renderTask.cancel()`
+    //     above (page rendering) and `searchGen++` (per-page getTextContent
+    //     loop in search()).
+    //   - NOT covered: a `getPage(...)` await mid-flight in `applyJump` or
+    //     `fitWidth` (bare `.then` chain, no catch) will reject as an
+    //     unhandled "Worker was destroyed" — noisy but harmless; the
+    //     guarded handlers won't run their then-body once destroy resolves.
+    //   - Awaiting destroy() would block unmount on a worker flush, which
+    //     we don't want in the React effect cleanup path.
+    const doc = this.pdfDoc;
     this.pdfDoc = null;
+    doc?.destroy();
     this.stage.replaceChildren();
     this.pages = [];
     // CSS.highlights is window-scoped, so a stale viewer's highlight

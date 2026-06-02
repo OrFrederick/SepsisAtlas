@@ -621,6 +621,58 @@ def test_resolve_r1_row_union_matches_concatenated_anchor():
     assert (bb[3] - bb[1]) >= 20
 
 
+def test_resolve_r1_row_union_spans_table_continued_page_boundary():
+    """A "Table X continued" anchor whose rows straddle pages N and N+1 must
+    union across the page boundary; in-group walks would otherwise miss it
+    because the two halves land in different (section, page) buckets."""
+    same_caption = "TABLE 4 | predictors (continued)"
+    table_p5 = {
+        "self_ref": "#/tables/0",
+        "page": 5,
+        "bbox": _bbox(page=5),
+        "n_rows": 1,
+        "n_cols": 1,
+        "caption": same_caption,
+        "cells": [
+            {
+                "row": 0,
+                "col": 0,
+                "text": "Age 1.04 0.91 1.17 0.5785",
+                "bbox": _bbox(l=0, t=200, r=400, b=180, page=5),
+            },
+        ],
+    }
+    # Continuation table on page 6: same caption, row_idx restarts at 0.
+    table_p6 = {
+        "self_ref": "#/tables/1",
+        "page": 6,
+        "bbox": _bbox(page=6),
+        "n_rows": 1,
+        "n_cols": 1,
+        "caption": same_caption,
+        "cells": [
+            {
+                "row": 0,
+                "col": 0,
+                "text": "Sex 0.88 0.79 0.98 0.0231",
+                "bbox": _bbox(l=0, t=750, r=400, b=730, page=6),
+            },
+        ],
+    }
+    parsed = _make_parsed(
+        full_text="",
+        offsets=[],
+        tables=[table_p5, table_p6],
+    )
+    idx = build_index(parsed)
+    needle = "Age 1.04 0.91 1.17 0.5785 Sex 0.88 0.79 0.98 0.0231"
+    hit = resolve(needle, same_caption, idx)
+    assert hit is not None
+    assert hit["kind"] == "table_row_union"
+    # Primary page is the first (where coverage begins); bbox lives there.
+    assert hit["page"] == 5
+
+
 def test_resolve_r1_row_union_requires_consecutive_rows():
     """Non-adjacent rows must not union — guards against cross-row hallucinations."""
     table = {

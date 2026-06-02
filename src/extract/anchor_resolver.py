@@ -543,6 +543,23 @@ def _section_scope(
     return scoped or None
 
 
+# Strip a trailing continuation marker so "TABLE 4 | predictors" and
+# "TABLE 4 | predictors (continued)" bucket together for the cross-page row
+# union fallback. Tolerates the common shapes Docling emits:
+# "(continued)", "(cont.)", "(cont)", ", continued", "; continued",
+# bare " continued" / " cont.". Case-insensitive; trailing whitespace is
+# trimmed. Captures only the suffix — the table number / caption body is
+# preserved so different tables stay in different buckets.
+_CONTINUATION_SUFFIX_RE = re.compile(
+    r"[\s,;:\-]*\(?\s*cont(?:inued)?\.?\s*\)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _canonical_section_for_continuation(section: str) -> str:
+    return _CONTINUATION_SUFFIX_RE.sub("", section).strip().lower()
+
+
 def _row_union_hits(
     anchor_text: str,
     pool: list[dict],
@@ -622,10 +639,21 @@ def _row_union_hits(
     # (row_idx may restart on the continued page). To keep the synthetic
     # entry renderable, the envelope and page come from the first page only;
     # rows on the continued page contribute to the text/coverage check.
+    #
+    # The bucketing key is the section caption with any trailing
+    # "(continued)" / "cont." / "continued" suffix stripped: Docling
+    # typically appends one of those to the caption on the continuation
+    # page, so a raw-string bucket would never merge the two halves. Rows
+    # with no section (None or "") are excluded so two unrelated unlabeled
+    # tables on consecutive pages can't synthesize a fake continuation.
     if not by_n:
         section_groups: dict[str, list[dict]] = {}
         for r in rows:
-            section_groups.setdefault(r.get("section") or "", []).append(r)
+            sec = r.get("section")
+            if not sec:
+                continue
+            key = _canonical_section_for_continuation(sec)
+            section_groups.setdefault(key, []).append(r)
         for sec_rows in section_groups.values():
             sec_rows = sorted(
                 sec_rows,

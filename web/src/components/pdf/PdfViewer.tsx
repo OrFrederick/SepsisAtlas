@@ -55,8 +55,11 @@ export default function PdfViewer({ stem, basePath }: Props) {
   // We replay these onto the toolbar "open in new tab" link so a full-tab
   // viewer keeps the same highlight the side pane was showing, rather than
   // dropping the user on a raw /pdfs/<stem>.pdf with no anchor context.
-  const [initialBboxParam, setInitialBboxParam] = useState<string | null>(null);
-  const [initialOriginParam, setInitialOriginParam] = useState<"tl" | "bl">("tl");
+  // `bbox` is null when the URL had no valid anchor (direct visit).
+  const [initialAnchor, setInitialAnchor] = useState<{ bbox: string | null; origin: "tl" | "bl" }>({
+    bbox: null,
+    origin: "tl",
+  });
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
@@ -81,13 +84,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
     // there's no valid anchor so a re-run of this effect (same component
     // instance, new stem/URL) doesn't leave a stale bbox from the previous
     // mount glued to the new link.
-    if (initialBbox) {
-      setInitialBboxParam(initialBbox.map((v) => v.toFixed(2)).join(","));
-      setInitialOriginParam(initialBboxOrigin);
-    } else {
-      setInitialBboxParam(null);
-      setInitialOriginParam("tl");
-    }
+    setInitialAnchor({
+      bbox: initialBbox ? initialBbox.map((v) => v.toFixed(2)).join(",") : null,
+      origin: initialBbox ? initialBboxOrigin : "tl",
+    });
 
     const controller = new PdfController({
       pdfUrl: `${basePath}pdfs/${encodeURIComponent(stem)}.pdf`,
@@ -274,10 +274,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
   // pane was showing. `currentPage` tracks the user's current view;
   // bbox/origin replay the anchor the viewer was opened with. Without a
   // valid anchor (direct visit) the link is bbox-less.
-  let viewerHref = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}`;
-  if (initialBboxParam) {
-    viewerHref += `&bbox=${initialBboxParam}&origin=${initialOriginParam}`;
-  }
+  const anchorQuery = initialAnchor.bbox
+    ? `&bbox=${initialAnchor.bbox}&origin=${initialAnchor.origin}`
+    : "";
+  const viewerHref = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}${anchorQuery}`;
 
   return (
     <div className="pdf-viewer relative flex flex-col h-full text-[var(--fg)] bg-[var(--panel-3)] font-[var(--sans)]">

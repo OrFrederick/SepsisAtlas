@@ -51,6 +51,12 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchActive, setSearchActive] = useState(-1);
   const [findOpen, setFindOpen] = useState(false);
+  // The anchor bbox + origin the viewer was opened with (from the URL).
+  // We replay these onto the toolbar "open in new tab" link so a full-tab
+  // viewer keeps the same highlight the side pane was showing, rather than
+  // dropping the user on a raw /pdfs/<stem>.pdf with no anchor context.
+  const [initialBboxParam, setInitialBboxParam] = useState<string | null>(null);
+  const [initialOriginParam, setInitialOriginParam] = useState<"tl" | "bl">("tl");
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
@@ -70,6 +76,13 @@ export default function PdfViewer({ stem, basePath }: Props) {
     let initialBbox: number[] | null = null;
     if (bboxStr) {
       initialBbox = sanitizeBbox(bboxStr.split(",").map(Number), initialBboxOrigin);
+    }
+    // Stash the sanitized anchor for the toolbar link. If the bbox failed
+    // validation we leave the link bbox-less so we don't propagate a bad
+    // value into a new tab.
+    if (initialBbox) {
+      setInitialBboxParam(initialBbox.map((v) => (+v).toFixed(2)).join(","));
+      setInitialOriginParam(initialBboxOrigin);
     }
 
     const controller = new PdfController({
@@ -259,7 +272,11 @@ export default function PdfViewer({ stem, basePath }: Props) {
           "sticky top-0 z-10 flex items-center gap-1.5 " +
           "h-9 px-3 py-[5px] box-border text-xs " +
           "bg-[var(--bg)] border-b border-[var(--border)] " +
-          "overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+          "overflow-x-auto overflow-y-hidden [scrollbar-width:thin] " +
+          // Match the chat scrollbar look in webkit browsers, themed to
+          // the PDF viewer's local warm palette via var(--border).
+          "[&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-[var(--border)] " +
+          "[&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
         }
       >
         <button
@@ -325,7 +342,18 @@ export default function PdfViewer({ stem, basePath }: Props) {
             "no-underline whitespace-nowrap transition-colors duration-150 " +
             "hover:bg-[var(--panel-2)] hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
           }
-          href={`${basePath}pdfs/${encodeURIComponent(stem)}.pdf`}
+          // Point at our own /viewer route (not the raw PDF) so a full-tab
+          // open preserves the page + bbox highlight the side pane was
+          // showing. Page tracks the user's current view; bbox/origin come
+          // from the anchor we were opened with. If there's no anchor we
+          // fall back to a bbox-less link (page 1 of the controller).
+          href={(() => {
+            let url = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}`;
+            if (initialBboxParam) {
+              url += `&bbox=${initialBboxParam}&origin=${initialOriginParam}`;
+            }
+            return url;
+          })()}
           target="_blank"
           rel="noopener"
           title={`Open ${stem}.pdf in a new tab`}
@@ -381,8 +409,17 @@ export default function PdfViewer({ stem, basePath }: Props) {
         // horizontal scroll. `items-center` on a flex column would put
         // the wrap's center on the container's center and make the left
         // overflow unreachable when zoomed past fit width.
-        // `overflow-auto` enables both axes.
-        className="flex flex-1 flex-col min-h-0 px-4 pt-7 pb-20 gap-[22px] bg-[var(--panel-3)] overflow-auto"
+        // `overflow-auto` enables both axes. The scrollbar styling mirrors
+        // the chat's thin scrollbar but uses var(--border) so it sits in
+        // the PDF viewer's warm palette rather than the global cool gray.
+        className={
+          "flex flex-1 flex-col min-h-0 px-4 pt-7 pb-20 gap-[22px] " +
+          "bg-[var(--panel-3)] overflow-auto [scrollbar-width:thin] " +
+          "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 " +
+          "[&::-webkit-scrollbar-thumb]:bg-[var(--border)] " +
+          "[&::-webkit-scrollbar-thumb]:rounded " +
+          "[&::-webkit-scrollbar-track]:bg-transparent"
+        }
         ref={stageRef}
       />
     </div>

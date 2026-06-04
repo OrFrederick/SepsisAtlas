@@ -77,12 +77,16 @@ export default function PdfViewer({ stem, basePath }: Props) {
     if (bboxStr) {
       initialBbox = sanitizeBbox(bboxStr.split(",").map(Number), initialBboxOrigin);
     }
-    // Stash the sanitized anchor for the toolbar link. If the bbox failed
-    // validation we leave the link bbox-less so we don't propagate a bad
-    // value into a new tab.
+    // Stash the sanitized anchor for the toolbar link. Reset to null when
+    // there's no valid anchor so a re-run of this effect (same component
+    // instance, new stem/URL) doesn't leave a stale bbox from the previous
+    // mount glued to the new link.
     if (initialBbox) {
-      setInitialBboxParam(initialBbox.map((v) => (+v).toFixed(2)).join(","));
+      setInitialBboxParam(initialBbox.map((v) => v.toFixed(2)).join(","));
       setInitialOriginParam(initialBboxOrigin);
+    } else {
+      setInitialBboxParam(null);
+      setInitialOriginParam("tl");
     }
 
     const controller = new PdfController({
@@ -265,6 +269,16 @@ export default function PdfViewer({ stem, basePath }: Props) {
     "focus:outline-none focus:border-[var(--accent)]";
   const sepClass = "w-px h-4 mx-1 shrink-0 bg-[var(--border)]";
 
+  // Toolbar "open in new tab" target: our own /viewer route, not the raw
+  // PDF, so a full-tab open preserves the page + bbox highlight the side
+  // pane was showing. `currentPage` tracks the user's current view;
+  // bbox/origin replay the anchor the viewer was opened with. Without a
+  // valid anchor (direct visit) the link is bbox-less.
+  let viewerHref = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}`;
+  if (initialBboxParam) {
+    viewerHref += `&bbox=${initialBboxParam}&origin=${initialOriginParam}`;
+  }
+
   return (
     <div className="pdf-viewer relative flex flex-col h-full text-[var(--fg)] bg-[var(--panel-3)] font-[var(--sans)]">
       <div
@@ -342,21 +356,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
             "no-underline whitespace-nowrap transition-colors duration-150 " +
             "hover:bg-[var(--panel-2)] hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
           }
-          // Point at our own /viewer route (not the raw PDF) so a full-tab
-          // open preserves the page + bbox highlight the side pane was
-          // showing. Page tracks the user's current view; bbox/origin come
-          // from the anchor we were opened with. If there's no anchor we
-          // fall back to a bbox-less link (page 1 of the controller).
-          href={(() => {
-            let url = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}`;
-            if (initialBboxParam) {
-              url += `&bbox=${initialBboxParam}&origin=${initialOriginParam}`;
-            }
-            return url;
-          })()}
+          href={viewerHref}
           target="_blank"
           rel="noopener"
-          title={`Open ${stem}.pdf in a new tab`}
+          title={`Open ${stem} in a new tab`}
         >
           <span className="min-w-0 overflow-hidden text-ellipsis font-[var(--mono)]">{stem}.pdf</span>
           <span className="shrink-0 text-[var(--muted)]" aria-hidden="true">↗</span>

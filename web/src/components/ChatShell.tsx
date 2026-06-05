@@ -21,6 +21,7 @@ import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
 import PdfViewerPane from "./PdfViewerPane";
 import { rowsToCsv, downloadCsv } from "../lib/csv";
+import { ChatActionsMenu } from "./ChatActionsMenu";
 import {
   clampChatPct,
   DEFAULT_CHAT_PCT,
@@ -622,7 +623,7 @@ export default function ChatShell() {
   // Chat column fills the grid track in both solo and split modes; width
   // animation is driven by the parent grid's track template (splitStyle),
   // not by a max-width transition on this column.
-  const chatCls = `flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
+  const chatCls = `relative flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
 
   const scrollbackCls = showPdf
     ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
@@ -637,36 +638,17 @@ export default function ChatShell() {
   return (
     <MotionConfig reducedMotion="user">
     <main
-      className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:44px_1fr]"
+      className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:1fr]"
     >
-      <div className="flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg border-b border-border max-[480px]:flex-wrap max-[480px]:justify-start max-[480px]:gap-2 max-[480px]:px-3">
-        {showPdf ? (
-          <button
-            type="button"
-            className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
-            title={chatHidden ? "Show chat pane" : "Hide chat pane"}
-            onClick={() => setChatHidden((v) => !v)}
-          >
-            {chatHidden ? "Show chat" : "Hide chat"}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-transparent"
-          title={pending ? "Wait for the current response to finish" : "Clear chat history"}
-          onClick={clearAll}
-          disabled={pending}
-        >
-          Clear chat
-        </button>
-      </div>
-
       <section
         className={`split grid h-full w-full overflow-hidden ${resizing ? "select-none cursor-col-resize" : ""}`}
         ref={splitRef}
         style={splitStyle}
       >
         <section inert={chatHidden} className={chatCls}>
+          {history.length > 0 ? (
+            <ChatActionsMenu onClear={clearAll} disabled={pending} />
+          ) : null}
           <div ref={scrollbackRef} className={scrollbackCls}>
             {history.length === 0 && !pending ? (
               <Welcome

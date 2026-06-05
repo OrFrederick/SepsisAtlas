@@ -48,6 +48,13 @@ beforeEach(() => {
     HTMLElement.prototype.releasePointerCapture = () => {};
     HTMLElement.prototype.hasPointerCapture = () => false;
   }
+  // Confirm dialog uses <dialog>.showModal, unimplemented in jsdom.
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.open = false;
+  };
   seedHistory();
 });
 
@@ -315,5 +322,33 @@ describe("ChatShell — viewer reveal fallback (issue #91)", () => {
     });
 
     expect(viewerWrap.hasAttribute("inert")).toBe(false);
+  });
+});
+
+describe("ChatShell — chat actions menu", () => {
+  it("has no always-visible Clear chat button; exposes a kebab instead", async () => {
+    render(<ChatShell />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /^clear chat$/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /chat actions/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("Clear chat from the menu wipes history after confirming", async () => {
+    const user = userEvent.setup();
+    render(<ChatShell />);
+    await act(async () => {});
+    await user.click(screen.getByRole("button", { name: /chat actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /clear chat/i }));
+    await user.click(screen.getByRole("button", { name: /clear chat/i }));
+    expect(localStorage.getItem(HISTORY_KEY)).toBeNull();
+  });
+
+  it("hides the kebab when there is no history", async () => {
+    localStorage.removeItem(HISTORY_KEY);
+    render(<ChatShell />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /chat actions/i })).toBeNull();
   });
 });

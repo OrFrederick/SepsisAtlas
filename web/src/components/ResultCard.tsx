@@ -103,6 +103,10 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
       onClick={handleActivate}
       onKeyDown={handleKey}
       data-href={viewerHref}
+      // Each card's hover transform creates its own stacking context, which
+      // would clip an open popover behind the next card. Lift this card above
+      // its siblings while the popover is open.
+      style={popoverOpen ? { position: "relative", zIndex: 50 } : undefined}
     >
       <header className="flex justify-between gap-3 mb-[10px]">
         <span className="font-serif text-[16px] font-medium text-fg">{study}</span>

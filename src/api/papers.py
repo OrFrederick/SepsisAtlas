@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from sepsis_atlas.config import PAPERS_PARSED
 from sepsis_atlas.db import Paper, PredictorModel, StudyCohort
+from api.human_reviews import latest_reviews_for_table, to_row_payload
 
 
 # Verdict normalization mirrors export_static.py so the TS enum
@@ -145,10 +146,20 @@ def _parsed_stems() -> set[str]:
         return set()
 
 
-def _row_dict(pm: PredictorModel, sc: Optional[StudyCohort]) -> dict:
+def _row_dict(
+    pm: PredictorModel,
+    sc: Optional[StudyCohort],
+    human_reviews: Optional[dict[str, dict]] = None,
+) -> dict:
     """Build one Row payload from a (PredictorModel, StudyCohort) join."""
+    rid = _coerce_str(pm.id)
+    review = None
+    if human_reviews and rid:
+        review = to_row_payload(human_reviews.get(rid))
     return {
-        "row_id": _coerce_str(pm.id),
+        "row_id": rid,
+        "table_name": "predictor_model",
+        "human_review": review,
         "paper_ref": _coerce_str(sc.paper_ref) if sc else None,
         "cohort_label": _coerce_str(sc.cohort_label) if sc else None,
         "file_name": _coerce_str(sc.file_name) if sc else None,
@@ -186,7 +197,10 @@ def list_rows(session: Session) -> list[dict]:
         session.query(PredictorModel, StudyCohort)
         .outerjoin(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
     )
-    return [_row_dict(pm, sc) for pm, sc in q.all()]
+    pairs = list(q.all())
+    row_ids = [pm.id for pm, _ in pairs if pm.id is not None]
+    reviews = latest_reviews_for_table(session, "predictor_model", row_ids)
+    return [_row_dict(pm, sc, reviews) for pm, sc in pairs]
 
 
 def list_rows_for_file(session: Session, file_name: str) -> list[dict]:
@@ -203,7 +217,10 @@ def list_rows_for_file(session: Session, file_name: str) -> list[dict]:
         .join(StudyCohort, StudyCohort.cohort_id == PredictorModel.cohort_id)
         .filter(StudyCohort.file_name == file_name)
     )
-    return [_row_dict(pm, sc) for pm, sc in q.all()]
+    pairs = list(q.all())
+    row_ids = [pm.id for pm, _ in pairs if pm.id is not None]
+    reviews = latest_reviews_for_table(session, "predictor_model", row_ids)
+    return [_row_dict(pm, sc, reviews) for pm, sc in pairs]
 
 
 def _empty_verdicts() -> dict[str, int]:

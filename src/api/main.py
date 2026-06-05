@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sqla_inspect, text
 
 from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
@@ -99,12 +99,17 @@ def _ensure_schema() -> None:
     existing SQLite snapshots without a separate migration step. SQLAlchemy
     skips tables that already exist, so this is a no-op after first start.
     """
+    import logging
     try:
         Base.metadata.create_all(_engine())
-    except Exception:
+    except Exception as e:
         # Don't block app startup on schema check; endpoints that need the
-        # table will surface their own errors.
-        pass
+        # table will surface their own errors. Log so an operator debugging
+        # "table does not exist" can correlate it with this hook.
+        logging.getLogger(__name__).warning(
+            "ensure_schema failed: %s; subsequent table-missing errors may follow",
+            e,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -822,8 +827,11 @@ class HumanReviewRequest(BaseModel):
     table_name: str
     row_id: str
     human_verdict: str
-    human_rationale: str | None = None
-    reviewer: str | None = None
+    # Bound the free-text fields so a malformed client can't store
+    # arbitrarily large blobs in the audit chain. Generous limits — typical
+    # rationales are a sentence or two.
+    human_rationale: str | None = Field(default=None, max_length=4000)
+    reviewer: str | None = Field(default=None, max_length=200)
 
 
 @app.post("/api/reviews")
@@ -845,12 +853,28 @@ def post_review_endpoint(req: HumanReviewRequest):
 
 
 @app.get("/api/reviews")
-def get_review_endpoint(table_name: str, row_id: str | None = None):
+def get_review_endpoint(
+    table_name: str,
+    row_id: str | None = None,
+    row_ids: str | None = None,
+):
+    """Fetch active reviews for an extraction table.
+
+    - ``row_id``: single-row lookup, returns ``{"review": <dict|null>}``.
+    - ``row_ids``: comma-separated list, scopes the table-wide query to a
+      known set so clients can avoid pulling every review in the table when
+      they only need a handful (e.g. ChatShell rehydrating cached turns).
+    - neither: returns every active review for the table (unbounded — use
+      with care; intended for admin/audit only).
+    """
     engine = _engine()
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     with Session() as session:
         if row_id is not None:
             return {"review": latest_review_for_row(session, table_name, row_id)}
-        return {"reviews": latest_reviews_for_table(session, table_name)}
+        ids: list[str] | None = None
+        if row_ids:
+            ids = [s for s in (rid.strip() for rid in row_ids.split(",")) if s]
+        return {"reviews": latest_reviews_for_table(session, table_name, ids)}
 
 

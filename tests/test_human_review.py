@@ -132,6 +132,44 @@ def test_missing_row_id_400(app_client):
     assert r.status_code == 400
 
 
+def test_get_table_scoped_by_row_ids(app_client):
+    # Add a second predictor + review so we can verify scoping drops it.
+    import os
+    from sepsis_atlas.db import PredictorModel, get_session
+    Session = get_session(os.environ["SEPSIS_DB_URL"])
+    with Session() as s:
+        s.add(
+            PredictorModel(
+                id="r_gai_other",
+                cohort_id="Gai 2022 Total",
+                predictors="SOFA",
+                outcome="28-day mortality",
+                effect_type="OR",
+                effect_value=1.5,
+                verifier_verdict="weak",
+            )
+        )
+        s.commit()
+    _post(app_client, human_verdict="approve")
+    _post(app_client, row_id="r_gai_other", human_verdict="reject")
+
+    # Unscoped: both reviews surface.
+    r = app_client.get("/api/reviews", params={"table_name": "predictor_model"})
+    assert set(r.json()["reviews"].keys()) == {"r_gai_1", "r_gai_other"}
+
+    # Scoped to r_gai_1 only: r_gai_other is dropped.
+    r = app_client.get(
+        "/api/reviews",
+        params={"table_name": "predictor_model", "row_ids": "r_gai_1,unknown_id"},
+    )
+    assert set(r.json()["reviews"].keys()) == {"r_gai_1"}
+
+
+def test_post_review_rejects_oversized_rationale(app_client):
+    r = _post(app_client, human_rationale="x" * 5000)
+    assert r.status_code == 422  # Pydantic validation error
+
+
 def test_paper_rows_carry_human_review(app_client):
     # Unreviewed → null.
     r = app_client.get("/papers/Gai_2022/rows")

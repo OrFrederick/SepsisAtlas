@@ -30,6 +30,7 @@ import {
   MIN_CHAT_PCT,
   saveChatPct,
 } from "../lib/chatPct";
+import { BACKEND_URL, fetchReviewsForRows } from "../lib/humanReview";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -46,8 +47,6 @@ const SLIDE_IN_RIGHT = {
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const HISTORY_MAX = 50;
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",
@@ -275,39 +274,44 @@ export default function ChatShell() {
 
     // Cached chat rows in localStorage predate any human reviews added
     // after the response was stored, so refetch the latest reviews and
-    // patch them onto the restored rows. Reviews live in the DB; chat
-    // rows are display-only — overwriting human_review on the restored
-    // turns is safe.
+    // patch them onto the restored rows. Scoped to the cached row_ids so
+    // we don't pull the entire predictor_model review table down on
+    // mount.
     if (restored.length === 0) return;
+    const cachedRowIds = Array.from(
+      new Set(
+        restored.flatMap((t) =>
+          (t.assistant?.rows ?? [])
+            .map((r) => r.row_id)
+            .filter((rid): rid is string => Boolean(rid)),
+        ),
+      ),
+    );
+    if (cachedRowIds.length === 0) return;
     (async () => {
       try {
-        const url = (BACKEND_URL || "") + "/api/reviews?table_name=predictor_model";
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          reviews?: Record<string, {
-            human_verdict: "approve" | "reject" | "flag";
-            human_rationale: string | null;
-            reviewer: string | null;
-            reviewed_ts: string | null;
-          }>;
-        };
-        const reviews = body.reviews || {};
+        const reviews = await fetchReviewsForRows("predictor_model", cachedRowIds);
+        if (!Object.keys(reviews).length) {
+          // Still tag cached rows with table_name so the popover knows what
+          // to do when the user reviews one for the first time.
+          setHistory((prev) =>
+            prev.map((t) => {
+              if (!t.assistant?.rows?.length) return t;
+              const nextRows = t.assistant.rows.map((r) =>
+                r.table_name ? r : { ...r, table_name: "predictor_model" },
+              );
+              return { ...t, assistant: { ...t.assistant, rows: nextRows } };
+            }),
+          );
+          return;
+        }
         setHistory((prev) =>
           prev.map((t) => {
             if (!t.assistant?.rows?.length) return t;
             const nextRows = t.assistant.rows.map((r) => {
               const rid = r.row_id;
               if (!rid) return r;
-              const rec = reviews[rid];
-              const human_review = rec
-                ? {
-                    verdict: rec.human_verdict,
-                    rationale: rec.human_rationale,
-                    reviewer: rec.reviewer,
-                    reviewed_ts: rec.reviewed_ts,
-                  }
-                : null;
+              const human_review = reviews[rid] ?? null;
               return { ...r, table_name: r.table_name || "predictor_model", human_review };
             });
             return { ...t, assistant: { ...t.assistant, rows: nextRows } };

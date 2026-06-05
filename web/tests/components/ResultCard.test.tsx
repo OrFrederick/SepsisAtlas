@@ -83,6 +83,13 @@ describe("ResultCard", () => {
     expect(screen.queryByText(/^p\./)).not.toBeInTheDocument();
   });
 
+  // The verdict badge is now its own <button> inside the card, so plain
+  // getByRole("button") matches two elements. The article is first in DOM
+  // order; pin it explicitly via [0].
+  function getCard(): HTMLElement {
+    return screen.getAllByRole("button")[0];
+  }
+
   it("fires onSelect on click", async () => {
     const onSelect = vi.fn();
     render(
@@ -92,7 +99,7 @@ describe("ResultCard", () => {
         onSelect={onSelect}
       />,
     );
-    await userEvent.click(screen.getByRole("button"));
+    await userEvent.click(getCard());
     expect(onSelect).toHaveBeenCalledWith(baseRow, "/viewer/X?page=4");
   });
 
@@ -105,7 +112,7 @@ describe("ResultCard", () => {
         onSelect={onSelect}
       />,
     );
-    const card = screen.getByRole("button");
+    const card = getCard();
     card.focus();
     await userEvent.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledTimes(1);
@@ -119,6 +126,6 @@ describe("ResultCard", () => {
         active
       />,
     );
-    expect(screen.getByRole("button")).toHaveClass("active");
+    expect(getCard()).toHaveClass("active");
   });
 });

@@ -12,7 +12,13 @@
 import { useState } from "react";
 import { FeedbackButton } from "./FeedbackButton";
 import HumanReviewPopover from "./HumanReviewPopover";
-import type { HumanReview, HumanReviewTable } from "../lib/humanReview";
+import {
+  isActiveHumanReview,
+  verdictKind,
+  type HumanReview,
+  type HumanReviewTable,
+  type VerdictKind,
+} from "../lib/humanReview";
 
 export type EvidenceRow = {
   paper_ref?: string;
@@ -42,8 +48,6 @@ export type EvidenceRow = {
   best_value?: number | null;
 };
 
-type VerdictKind = "ok" | "warn" | "fail" | "unk";
-
 type SortKey =
   | "paper"
   | "predictor"
@@ -71,22 +75,6 @@ function isGenericCohort(label: unknown): boolean {
   return s === "" || s === "total cohort" || s === "total";
 }
 
-function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
-  const s = String(v || "").toLowerCase();
-  if (s === "pass" || s === "ok" || s === "approve") return { cls: "ok", glyph: "✓" };
-  if (s === "weak" || s === "warn" || s === "partial" || s === "flag")
-    return { cls: "warn", glyph: "~" };
-  if (s === "fail" || s === "reject") return { cls: "fail", glyph: "✗" };
-  return { cls: "unk", glyph: "?" };
-}
-
-function hasActiveHumanReview(r: HumanReview | null | undefined): r is HumanReview {
-  if (!r) return false;
-  // A "cleared" rationale is the supersede sentinel: API still returns a row,
-  // but the UI should treat it as no active human verdict.
-  if ((r.rationale || "").trim().toLowerCase() === "cleared") return false;
-  return true;
-}
 
 function paperCohort(row: EvidenceRow): string {
   const ref = row.paper_ref || row.file_name || row.study || "(unknown)";
@@ -330,7 +318,7 @@ export default function EvidenceTable({
           const outcome = outcomeOf(row);
           const effect = effectOf(row);
           const review = reviewOverride[k] !== undefined ? reviewOverride[k] : (row.human_review ?? null);
-          const showHumanPip = hasActiveHumanReview(review);
+          const showHumanPip = isActiveHumanReview(review);
           const humanKind = showHumanPip ? verdictKind(review!.verdict) : null;
           const canReview =
             Boolean(row.row_id) && Boolean(row.table_name);
@@ -394,7 +382,7 @@ export default function EvidenceTable({
                   <HumanReviewPopover
                     tableName={row.table_name as HumanReviewTable}
                     rowId={row.row_id!}
-                    current={hasActiveHumanReview(review) ? review : null}
+                    current={isActiveHumanReview(review) ? review : null}
                     onSaved={(saved) =>
                       setReviewOverride((prev) => ({ ...prev, [k]: saved }))
                     }

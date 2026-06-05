@@ -3,9 +3,12 @@
 import { useState } from "react";
 import type { Row } from "../lib/types";
 import HumanReviewPopover from "./HumanReviewPopover";
-import type {
-  HumanReview as HumanReviewPayload,
-  HumanReviewTable,
+import {
+  isActiveHumanReview,
+  verdictKind as resolveVerdictKind,
+  type HumanReview as HumanReviewPayload,
+  type HumanReviewTable,
+  type VerdictKind,
 } from "../lib/humanReview";
 
 type Props = {
@@ -22,36 +25,21 @@ function fmt(v: number | null | undefined, d = 2): string {
   return parseFloat(v.toFixed(d)).toString();
 }
 
-type Verdict = "ok" | "warn" | "fail" | "unk";
-
 const BADGE_BASE =
   "inline-flex items-center justify-center py-px px-2 rounded-full text-[11px] font-semibold border tracking-[0.2px]";
-const BADGE_VARIANTS: Record<Verdict, string> = {
+const BADGE_VARIANTS: Record<VerdictKind, string> = {
   ok: "text-ok bg-ok-soft border-ok-border",
   warn: "text-warn bg-warn-soft border-warn-border",
   fail: "text-fail bg-fail-soft border-fail-border",
   unk: "text-fg-muted bg-panel-2 border-border",
 };
 
-function verdictKind(v: Row["verifier_verdict"]): Verdict {
-  if (v === "ok") return "ok";
-  if (v === "weak") return "warn";
-  if (v === "fail") return "fail";
-  return "unk";
+function verdictKindFor(v: Row["verifier_verdict"]): VerdictKind {
+  return resolveVerdictKind(v ?? "").cls;
 }
 
-function humanVerdictKind(v: HumanReviewPayload["verdict"]): Verdict {
-  if (v === "approve") return "ok";
-  if (v === "reject") return "fail";
-  return "warn";
-}
-
-function isActiveHumanReview(
-  r: HumanReviewPayload | null | undefined,
-): r is HumanReviewPayload {
-  if (!r) return false;
-  if ((r.rationale || "").trim().toLowerCase() === "cleared") return false;
-  return true;
+function humanVerdictKind(v: HumanReviewPayload["verdict"]): VerdictKind {
+  return resolveVerdictKind(v).cls;
 }
 
 export default function ResultCard({ row, viewerHref, active, onSelect }: Props) {
@@ -85,7 +73,7 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
     }
   };
 
-  const kind = verdictKind(row.verifier_verdict);
+  const kind = verdictKindFor(row.verifier_verdict);
   const cardBase =
     "card bg-panel border border-border rounded-md px-4 py-[14px] cursor-pointer outline-none " +
     "transition-[border-color,transform,box-shadow] duration-[180ms] ease-out " +

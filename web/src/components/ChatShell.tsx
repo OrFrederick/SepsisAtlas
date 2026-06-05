@@ -103,6 +103,14 @@ type EvidenceRow = {
   verifier?: string;
   study?: string;
   n?: string | number;
+  row_id?: string;
+  table_name?: string;
+  human_review?: {
+    verdict: "approve" | "reject" | "flag";
+    rationale?: string | null;
+    reviewer?: string | null;
+    reviewed_ts?: string | null;
+  } | null;
 };
 
 type AssistantPayload = {
@@ -256,13 +264,59 @@ export default function ChatShell() {
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
-    setHistory(loadHistory());
+    const restored = loadHistory();
+    setHistory(restored);
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
     // The viewer URL is intentionally NOT restored — the PDF pane should
     // start collapsed and only open when the user clicks an evidence row.
     inputRef.current?.focus();
+
+    // Cached chat rows in localStorage predate any human reviews added
+    // after the response was stored, so refetch the latest reviews and
+    // patch them onto the restored rows. Reviews live in the DB; chat
+    // rows are display-only — overwriting human_review on the restored
+    // turns is safe.
+    if (restored.length === 0) return;
+    (async () => {
+      try {
+        const url = (BACKEND_URL || "") + "/api/reviews?table_name=predictor_model";
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          reviews?: Record<string, {
+            human_verdict: "approve" | "reject" | "flag";
+            human_rationale: string | null;
+            reviewer: string | null;
+            reviewed_ts: string | null;
+          }>;
+        };
+        const reviews = body.reviews || {};
+        setHistory((prev) =>
+          prev.map((t) => {
+            if (!t.assistant?.rows?.length) return t;
+            const nextRows = t.assistant.rows.map((r) => {
+              const rid = r.row_id;
+              if (!rid) return r;
+              const rec = reviews[rid];
+              const human_review = rec
+                ? {
+                    verdict: rec.human_verdict,
+                    rationale: rec.human_rationale,
+                    reviewer: rec.reviewer,
+                    reviewed_ts: rec.reviewed_ts,
+                  }
+                : null;
+              return { ...r, table_name: r.table_name || "predictor_model", human_review };
+            });
+            return { ...t, assistant: { ...t.assistant, rows: nextRows } };
+          }),
+        );
+      } catch {
+        /* network hiccup; user can re-run the query to refresh reviews */
+      }
+    })();
   }, []);
 
   // ---- scroll to bottom on new turn -------------------------------------

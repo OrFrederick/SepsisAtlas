@@ -348,33 +348,48 @@ export default function EvidenceTable({
               onKeyDown={(e) => handleKey(e, ri, row)}
             >
               <td className={`${TD_BASE} text-center relative`}>
-                <span className="inline-flex items-center gap-1">
-                  <button
-                    type="button"
-                    className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[verdict.cls]} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"}`}
-                    title={
-                      canReview
-                        ? `verifier: ${row.verifier_verdict || row.verifier || "unverified"} — click to add human review`
-                        : `verdict: ${row.verifier_verdict || row.verifier || "unverified"}`
-                    }
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!canReview) return;
-                      setOpenPopover((prev) => (prev === k ? null : k));
-                    }}
-                    disabled={!canReview}
-                  >
-                    {verdict.glyph}
-                  </button>
-                  {showHumanPip && humanKind && (
-                    <span
-                      className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[humanKind.cls]} ring-1 ring-accent`}
-                      title={`human review: ${review!.verdict}${review!.reviewer ? ` — ${review!.reviewer}` : ""}${review!.rationale ? ` (${review!.rationale})` : ""}`}
+                {(() => {
+                  // When a human review exists, the human verdict is the
+                  // authoritative display: render ONE pip in the human's
+                  // verdict color with a small "reviewed" marker. The
+                  // verifier verdict moves to the tooltip so the reviewer
+                  // can still see what the machine said. When verdicts
+                  // agree this is just one tidy pip; when they disagree
+                  // the user no longer sees a confusing ✓ ✗ pair.
+                  const verifierLabel =
+                    row.verifier_verdict || row.verifier || "unverified";
+                  const effectiveKind = showHumanPip && humanKind ? humanKind : verdict;
+                  const effectiveLabel = showHumanPip
+                    ? review!.verdict
+                    : verifierLabel;
+                  const title = showHumanPip
+                    ? `human ${review!.verdict}${review!.reviewer ? ` (${review!.reviewer})` : ""} · machine said ${verifierLabel}${review!.rationale ? ` — ${review!.rationale}` : ""}`
+                    : canReview
+                      ? `verifier: ${verifierLabel} — click to add human review`
+                      : `verdict: ${verifierLabel}`;
+                  return (
+                    <button
+                      type="button"
+                      className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[effectiveKind.cls]} ${showHumanPip ? "ring-2 ring-accent" : ""} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"} relative`}
+                      title={title}
+                      aria-label={`${showHumanPip ? "human review" : "verifier"}: ${effectiveLabel}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canReview) return;
+                        setOpenPopover((prev) => (prev === k ? null : k));
+                      }}
+                      disabled={!canReview}
                     >
-                      {humanKind.glyph}
-                    </span>
-                  )}
-                </span>
+                      {effectiveKind.glyph}
+                      {showHumanPip && (
+                        <span
+                          className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent border border-panel"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  );
+                })()}
                 {openPopover === k && canReview && (
                   <HumanReviewPopover
                     tableName={row.table_name as HumanReviewTable}

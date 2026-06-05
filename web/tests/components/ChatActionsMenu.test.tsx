@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatActionsMenu } from "../../src/components/ChatActionsMenu";
 
@@ -63,6 +63,9 @@ describe("ChatActionsMenu", () => {
     await user.click(screen.getByRole("button", { name: /chat actions/i }));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /chat actions/i }),
+    ).toHaveFocus();
   });
 
   it("disables the trigger when disabled", () => {
@@ -70,5 +73,17 @@ describe("ChatActionsMenu", () => {
     expect(
       screen.getByRole("button", { name: /chat actions/i }),
     ).toBeDisabled();
+  });
+
+  it("closes the confirm dialog on backdrop click without clearing", async () => {
+    const onClear = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatActionsMenu onClear={onClear} />);
+    await user.click(screen.getByRole("button", { name: /chat actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /clear chat/i }));
+    // Clicking the <dialog> element itself = the ::backdrop region.
+    fireEvent.click(screen.getByRole("dialog"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onClear).not.toHaveBeenCalled();
   });
 });

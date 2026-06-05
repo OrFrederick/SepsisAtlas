@@ -51,11 +51,17 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
     const el = dialogRef.current;
     if (!el) return;
     const onClick = (e: MouseEvent) => {
-      if (e.target === el) closeConfirm();
+      if (e.target === el) {
+        try {
+          el.close();
+        } catch {
+          /* close() unavailable under jsdom; ignore */
+        }
+        triggerRef.current?.focus();
+      }
     };
     el.addEventListener("click", onClick);
     return () => el.removeEventListener("click", onClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function openConfirm() {
@@ -77,8 +83,11 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
   }
 
   function confirmClear() {
-    onClear();
+    // Close (returning focus to the trigger) BEFORE onClear: clearing the
+    // history unmounts this menu, so onClear must run last or focus is
+    // dropped to <body>. clearAll re-focuses the composer afterwards.
     closeConfirm();
+    onClear();
   }
 
   return (
@@ -104,7 +113,8 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Chat actions"
+          // Single-item menu: arrow-key roving navigation is intentionally
+          // omitted. Add it (ARIA APG menu pattern) if more items are added.
           className="absolute top-[36px] right-0 min-w-[150px] bg-panel border border-border rounded-lg p-1 shadow-[0_12px_32px_rgba(26,31,44,0.16)]"
         >
           <button

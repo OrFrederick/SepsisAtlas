@@ -111,31 +111,41 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
       <header className="flex justify-between gap-3 mb-[10px]">
         <span className="font-serif text-[16px] font-medium text-fg">{study}</span>
         <span className="flex gap-2 items-center text-fg-muted relative">
-          <button
-            type="button"
-            className={`badge ${kind} ${BADGE_BASE} ${BADGE_VARIANTS[kind]} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"}`}
-            title={
-              canReview
+          {(() => {
+            // Collapse machine + human badges into one when a review exists:
+            // shows the human verdict colour with a small accent dot marking
+            // it as reviewed; verifier verdict moves to the tooltip. Clicking
+            // the badge always opens the popover (pre-loaded with the active
+            // review so the reviewer can edit or clear).
+            const effectiveKind = hasReview ? humanVerdictKind(review!.verdict) : kind;
+            const effectiveLabel = hasReview ? review!.verdict : verdict;
+            const title = hasReview
+              ? `human ${review!.verdict}${review!.reviewer ? ` (${review!.reviewer})` : ""} · machine said ${verdict}${review!.rationale ? ` — ${review!.rationale}` : ""}`
+              : canReview
                 ? `verifier: ${verdict} — click to add human review`
-                : `verifier: ${verdict}`
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!canReview) return;
-              setPopoverOpen((prev) => !prev);
-            }}
-            disabled={!canReview}
-          >
-            {verdict}
-          </button>
-          {hasReview && (
-            <span
-              className={`${BADGE_BASE} ${BADGE_VARIANTS[humanVerdictKind(review!.verdict)]} ring-1 ring-accent`}
-              title={`human review: ${review!.verdict}${review!.reviewer ? ` — ${review!.reviewer}` : ""}${review!.rationale ? ` (${review!.rationale})` : ""}`}
-            >
-              {review!.verdict}
-            </span>
-          )}
+                : `verifier: ${verdict}`;
+            return (
+              <button
+                type="button"
+                className={`badge ${effectiveKind} ${BADGE_BASE} ${BADGE_VARIANTS[effectiveKind]} ${hasReview ? "ring-2 ring-accent" : ""} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"} relative`}
+                title={title}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!canReview) return;
+                  setPopoverOpen((prev) => !prev);
+                }}
+                disabled={!canReview}
+              >
+                {effectiveLabel}
+                {hasReview && (
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent border border-panel"
+                    aria-hidden="true"
+                  />
+                )}
+              </button>
+            );
+          })()}
           {row.anchor_page != null && (
             <span className="text-xs tabular-nums">p. {row.anchor_page}</span>
           )}

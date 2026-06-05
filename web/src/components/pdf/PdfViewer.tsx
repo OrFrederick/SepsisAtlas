@@ -51,6 +51,15 @@ export default function PdfViewer({ stem, basePath }: Props) {
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchActive, setSearchActive] = useState(-1);
   const [findOpen, setFindOpen] = useState(false);
+  // The anchor bbox + origin the viewer was opened with (from the URL).
+  // We replay these onto the toolbar "open in new tab" link so a full-tab
+  // viewer keeps the same highlight the side pane was showing, rather than
+  // dropping the user on a raw /pdfs/<stem>.pdf with no anchor context.
+  // `bbox` is null when the URL had no valid anchor (direct visit).
+  const [initialAnchor, setInitialAnchor] = useState<{ bbox: string | null; origin: "tl" | "bl" }>({
+    bbox: null,
+    origin: "tl",
+  });
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
@@ -71,6 +80,14 @@ export default function PdfViewer({ stem, basePath }: Props) {
     if (bboxStr) {
       initialBbox = sanitizeBbox(bboxStr.split(",").map(Number), initialBboxOrigin);
     }
+    // Stash the sanitized anchor for the toolbar link. Reset to null when
+    // there's no valid anchor so a re-run of this effect (same component
+    // instance, new stem/URL) doesn't leave a stale bbox from the previous
+    // mount glued to the new link.
+    setInitialAnchor({
+      bbox: initialBbox ? initialBbox.map((v) => v.toFixed(2)).join(",") : null,
+      origin: initialBbox ? initialBboxOrigin : "tl",
+    });
 
     const controller = new PdfController({
       pdfUrl: `${basePath}pdfs/${encodeURIComponent(stem)}.pdf`,
@@ -252,6 +269,16 @@ export default function PdfViewer({ stem, basePath }: Props) {
     "focus:outline-none focus:border-[var(--accent)]";
   const sepClass = "w-px h-4 mx-1 shrink-0 bg-[var(--border)]";
 
+  // Toolbar "open in new tab" target: our own /viewer route, not the raw
+  // PDF, so a full-tab open preserves the page + bbox highlight the side
+  // pane was showing. `currentPage` tracks the user's current view;
+  // bbox/origin replay the anchor the viewer was opened with. Without a
+  // valid anchor (direct visit) the link is bbox-less.
+  const anchorQuery = initialAnchor.bbox
+    ? `&bbox=${initialAnchor.bbox}&origin=${initialAnchor.origin}`
+    : "";
+  const viewerHref = `${basePath}viewer/${encodeURIComponent(stem)}?page=${currentPage}${anchorQuery}`;
+
   return (
     <div className="pdf-viewer relative flex flex-col h-full text-[var(--fg)] bg-[var(--panel-3)] font-[var(--sans)]">
       <div
@@ -259,7 +286,11 @@ export default function PdfViewer({ stem, basePath }: Props) {
           "sticky top-0 z-10 flex items-center gap-1.5 " +
           "h-9 px-3 py-[5px] box-border text-xs " +
           "bg-[var(--bg)] border-b border-[var(--border)] " +
-          "overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+          "overflow-x-auto overflow-y-hidden [scrollbar-width:thin] " +
+          // Match the chat scrollbar look in webkit browsers, themed to
+          // the PDF viewer's local warm palette via var(--border).
+          "[&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-[var(--border)] " +
+          "[&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
         }
       >
         <button
@@ -325,10 +356,10 @@ export default function PdfViewer({ stem, basePath }: Props) {
             "no-underline whitespace-nowrap transition-colors duration-150 " +
             "hover:bg-[var(--panel-2)] hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
           }
-          href={`${basePath}pdfs/${encodeURIComponent(stem)}.pdf`}
+          href={viewerHref}
           target="_blank"
           rel="noopener"
-          title={`Open ${stem}.pdf in a new tab`}
+          title={`Open ${stem} in a new tab`}
         >
           <span className="min-w-0 overflow-hidden text-ellipsis font-[var(--mono)]">{stem}.pdf</span>
           <span className="shrink-0 text-[var(--muted)]" aria-hidden="true">↗</span>
@@ -381,8 +412,17 @@ export default function PdfViewer({ stem, basePath }: Props) {
         // horizontal scroll. `items-center` on a flex column would put
         // the wrap's center on the container's center and make the left
         // overflow unreachable when zoomed past fit width.
-        // `overflow-auto` enables both axes.
-        className="flex flex-1 flex-col min-h-0 px-4 pt-7 pb-20 gap-[22px] bg-[var(--panel-3)] overflow-auto"
+        // `overflow-auto` enables both axes. The scrollbar styling mirrors
+        // the chat's thin scrollbar but uses var(--border) so it sits in
+        // the PDF viewer's warm palette rather than the global cool gray.
+        className={
+          "flex flex-1 flex-col min-h-0 px-4 pt-7 pb-20 gap-[22px] " +
+          "bg-[var(--panel-3)] overflow-auto [scrollbar-width:thin] " +
+          "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 " +
+          "[&::-webkit-scrollbar-thumb]:bg-[var(--border)] " +
+          "[&::-webkit-scrollbar-thumb]:rounded " +
+          "[&::-webkit-scrollbar-track]:bg-transparent"
+        }
         ref={stageRef}
       />
     </div>

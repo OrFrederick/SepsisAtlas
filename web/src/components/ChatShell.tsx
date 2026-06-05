@@ -50,6 +50,11 @@ const HISTORY_MAX = 50;
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
+// Persisting viewerUrl lets the collapse chevron be present on mount when
+// the user had a PDF open in a previous session. Cleared on closeViewer /
+// clearAll so a fresh load starts with the chat in solo mode.
+const VIEWER_URL_KEY = "sepsis_atlas.viewer_url.v1";
+
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",
   "phenotype clusters in Seymour 2016",
@@ -261,8 +266,12 @@ export default function ChatShell() {
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
-    // The viewer URL is intentionally NOT restored — the PDF pane should
-    // start collapsed and only open when the user clicks an evidence row.
+    // Restore the last viewer URL so the PDF pane reopens where the user
+    // left off. Cleared on closeViewer / clearAll to reset the layout.
+    const savedUrl = typeof window !== "undefined"
+      ? (localStorage.getItem(VIEWER_URL_KEY) || "")
+      : "";
+    if (savedUrl) setViewerUrl(savedUrl);
     inputRef.current?.focus();
   }, []);
 
@@ -281,6 +290,7 @@ export default function ChatShell() {
     if (!url) return;
     setActiveRowKey(`${turnIdx}:${rowIdx}`);
     setViewerUrl(url);
+    try { localStorage.setItem(VIEWER_URL_KEY, url); } catch { /* quota */ }
   }, []);
 
   // ---- submit ------------------------------------------------------------
@@ -394,6 +404,7 @@ export default function ChatShell() {
     if (pending) return;
     try {
       localStorage.removeItem(HISTORY_KEY);
+      localStorage.removeItem(VIEWER_URL_KEY);
     } catch {
       /* ignore */
     }
@@ -408,6 +419,7 @@ export default function ChatShell() {
   };
 
   const closeViewer = () => {
+    try { localStorage.removeItem(VIEWER_URL_KEY); } catch { /* ignore */ }
     setViewerUrl("");
     setActiveRowKey(null);
     setChatHidden(false);
@@ -625,6 +637,8 @@ export default function ChatShell() {
   // not by a max-width transition on this column.
   const chatCls = `relative flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
 
+  // NOTE: the top-right corner of the chat column is reserved for the
+  // ChatActionsMenu kebab (~38px); keep top padding clear of it.
   const scrollbackCls = showPdf
     ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
       "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
@@ -800,6 +814,29 @@ export default function ChatShell() {
               : "opacity-0 translate-x-[28px]")
           }
         >
+          {/* Collapse handle on the divider seam. Lives in .viewer-wrap (not
+              the chat pane) so it stays reachable when the chat is hidden and
+              the chat <section> is inert. Only meaningful while the PDF is
+              open. A separate button from the drag separator: it keeps its own
+              pointer-events even when the divider's drag handlers are stripped
+              in the chatHidden state. */}
+          {showPdf ? (
+            <button
+              type="button"
+              aria-label={chatHidden ? "Show chat pane" : "Hide chat pane"}
+              aria-expanded={!chatHidden}
+              onClick={() => setChatHidden((v) => !v)}
+              className="absolute top-1/2 left-0 -translate-y-1/2 translate-x-[1px] z-[3] w-5 h-9 flex items-center justify-center bg-panel border border-border rounded-md text-fg-muted shadow-[0_1px_4px_rgba(26,31,44,0.12)] cursor-pointer transition-[color,border-color,background] duration-[160ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 [&_svg]:block"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {chatHidden ? (
+                  <polyline points="9 18 15 12 9 6" />
+                ) : (
+                  <polyline points="15 18 9 12 15 6" />
+                )}
+              </svg>
+            </button>
+          ) : null}
           {/* Divider is meaningless while the chat is hidden (chat track
               pinned to 0%). Stripping handlers + focus prevents silent
               chatPct writes (and localStorage churn) from drags or

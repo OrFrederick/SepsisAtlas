@@ -10,16 +10,18 @@ import {
 } from "../../src/lib/chatPct";
 
 const HISTORY_KEY = "sepsis_atlas.history.v1";
+const VIEWER_URL_KEY = "sepsis_atlas.viewer_url.v1";
 
 function seedHistory() {
-  // One turn in history is enough to make showPdf true on mount, so the
-  // viewer panel and its divider render immediately.
+  // One turn in history + a persisted viewer URL makes showPdf true on mount,
+  // so the viewer panel, divider, and collapse chevron render immediately.
   localStorage.setItem(
     HISTORY_KEY,
     JSON.stringify([
       { user_text: "x", assistant: { summary: "s", rows: [] }, ts: 1 },
     ]),
   );
+  localStorage.setItem(VIEWER_URL_KEY, "http://localhost/viewer/test.pdf?page=1");
 }
 
 beforeEach(() => {
@@ -343,6 +345,11 @@ describe("ChatShell — chat actions menu", () => {
     await user.click(screen.getByRole("menuitem", { name: /clear chat/i }));
     await user.click(screen.getByRole("button", { name: /clear chat/i }));
     expect(localStorage.getItem(HISTORY_KEY)).toBeNull();
+    // History gone from React state too: the kebab is guarded by
+    // history.length > 0, so it must disappear.
+    expect(
+      screen.queryByRole("button", { name: /chat actions/i }),
+    ).toBeNull();
   });
 
   it("hides the kebab when there is no history", async () => {
@@ -350,5 +357,25 @@ describe("ChatShell — chat actions menu", () => {
     render(<ChatShell />);
     await act(async () => {});
     expect(screen.queryByRole("button", { name: /chat actions/i })).toBeNull();
+  });
+});
+
+describe("ChatShell — divider collapse chevron", () => {
+  it("toggles chat visibility and flips its label", async () => {
+    const user = userEvent.setup();
+    render(<ChatShell />);
+    await act(async () => {});
+    // PDF is open on mount (seeded history), so the chevron is present and
+    // starts in the "hide" state.
+    const hide = await screen.findByRole("button", { name: /hide chat pane/i });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    await user.click(hide);
+    const show = await screen.findByRole("button", { name: /show chat pane/i });
+    expect(show).toHaveAttribute("aria-expanded", "false");
+    // Still reachable while the chat pane is collapsed/inert.
+    await user.click(show);
+    expect(
+      await screen.findByRole("button", { name: /hide chat pane/i }),
+    ).toBeInTheDocument();
   });
 });

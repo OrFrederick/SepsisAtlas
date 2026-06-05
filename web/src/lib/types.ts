@@ -31,6 +31,13 @@ export interface Row {
   anchor_section: string | null;
   verifier_verdict: "ok" | "weak" | "fail" | "unverified" | null;
   verifier_score: number | null;
+  table_name?: string;
+  human_review?: {
+    verdict: "approve" | "reject" | "flag";
+    rationale?: string | null;
+    reviewer?: string | null;
+    reviewed_ts?: string | null;
+  } | null;
 }
 
 export interface PaperVerdicts {

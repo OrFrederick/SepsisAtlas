@@ -1,6 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import type { Row } from "../lib/types";
+import HumanReviewPopover from "./HumanReviewPopover";
+import type {
+  HumanReview as HumanReviewPayload,
+  HumanReviewTable,
+} from "../lib/humanReview";
 
 type Props = {
   row: Row;
@@ -34,7 +40,28 @@ function verdictKind(v: Row["verifier_verdict"]): Verdict {
   return "unk";
 }
 
+function humanVerdictKind(v: HumanReviewPayload["verdict"]): Verdict {
+  if (v === "approve") return "ok";
+  if (v === "reject") return "fail";
+  return "warn";
+}
+
+function isActiveHumanReview(
+  r: HumanReviewPayload | null | undefined,
+): r is HumanReviewPayload {
+  if (!r) return false;
+  if ((r.rationale || "").trim().toLowerCase() === "cleared") return false;
+  return true;
+}
+
 export default function ResultCard({ row, viewerHref, active, onSelect }: Props) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [reviewOverride, setReviewOverride] = useState<HumanReviewPayload | null | undefined>(undefined);
+  const review =
+    reviewOverride !== undefined ? reviewOverride : (row.human_review ?? null);
+  const hasReview = isActiveHumanReview(review);
+  const canReview = Boolean(row.row_id) && Boolean(row.table_name);
+
   const study = row.cohort_label
     ? `${row.paper_ref} — ${row.cohort_label}`
     : row.paper_ref;
@@ -79,12 +106,44 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
     >
       <header className="flex justify-between gap-3 mb-[10px]">
         <span className="font-serif text-[16px] font-medium text-fg">{study}</span>
-        <span className="flex gap-2 items-center text-fg-muted">
-          <span className={`badge ${kind} ${BADGE_BASE} ${BADGE_VARIANTS[kind]}`}>
+        <span className="flex gap-2 items-center text-fg-muted relative">
+          <button
+            type="button"
+            className={`badge ${kind} ${BADGE_BASE} ${BADGE_VARIANTS[kind]} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"}`}
+            title={
+              canReview
+                ? `verifier: ${verdict} — click to add human review`
+                : `verifier: ${verdict}`
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!canReview) return;
+              setPopoverOpen((prev) => !prev);
+            }}
+            disabled={!canReview}
+          >
             {verdict}
-          </span>
+          </button>
+          {hasReview && (
+            <span
+              className={`${BADGE_BASE} ${BADGE_VARIANTS[humanVerdictKind(review!.verdict)]} ring-1 ring-accent`}
+              title={`human review: ${review!.verdict}${review!.reviewer ? ` — ${review!.reviewer}` : ""}${review!.rationale ? ` (${review!.rationale})` : ""}`}
+            >
+              {review!.verdict}
+            </span>
+          )}
           {row.anchor_page != null && (
             <span className="text-xs tabular-nums">p. {row.anchor_page}</span>
+          )}
+          {popoverOpen && canReview && (
+            <HumanReviewPopover
+              tableName={row.table_name as HumanReviewTable}
+              rowId={row.row_id}
+              current={hasReview ? review : null}
+              onSaved={(saved) => setReviewOverride(saved)}
+              onClose={() => setPopoverOpen(false)}
+              align="right"
+            />
           )}
         </span>
       </header>

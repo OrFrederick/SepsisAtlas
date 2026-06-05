@@ -19,13 +19,15 @@ type Props = {
 };
 
 function hrefFor(row: Row, basePath: string): string {
+  // ``close=0`` hides the viewer's close button — the paper detail layout has
+  // no collapsible pane, so the button has nothing to do here.
   return buildViewerUrl(
     basePath,
     row.file_name,
     row.anchor_page ?? 1,
     row.anchor_bbox,
     "tl",
-  );
+  ) + "&close=0";
 }
 
 const BADGE_BASE =

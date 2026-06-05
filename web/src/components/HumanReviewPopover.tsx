@@ -26,6 +26,7 @@ type Props = {
   current: HumanReview | null;
   onSaved: (review: HumanReview) => void;
   onClose: () => void;
+  align?: "left" | "right";
 };
 
 const VERDICT_OPTIONS: { value: HumanVerdict; label: string; hint: string }[] = [
@@ -40,6 +41,7 @@ export default function HumanReviewPopover({
   current,
   onSaved,
   onClose,
+  align = "left",
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [verdict, setVerdict] = useState<HumanVerdict>(current?.verdict || "approve");
@@ -112,7 +114,7 @@ export default function HumanReviewPopover({
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full z-50 mt-1 w-[22rem] max-w-[90vw] rounded-md border border-border bg-panel shadow-lg p-3 text-[12.5px] text-fg whitespace-normal text-left"
+      className={`absolute ${align === "right" ? "right-0" : "left-0"} top-full z-50 mt-1 w-[22rem] max-w-[90vw] rounded-md border border-border bg-panel shadow-lg p-3 text-[12.5px] text-fg whitespace-normal text-left`}
       role="dialog"
       onClick={(e) => e.stopPropagation()}
     >

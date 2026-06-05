@@ -54,9 +54,17 @@ export default function PdfViewer({ stem, basePath }: Props) {
   // Only show the close button when this viewer is embedded in a parent
   // window (i.e. inside ChatShell's PdfViewerPane iframe). Direct visits
   // to /viewer/<stem> have nothing to close.
+  // Hosts that embed the viewer without a collapsible pane (e.g. the
+  // paper detail page where the PDF lives in a static split layout) can
+  // pass ``?close=0`` to suppress the button.
   const [embedded, setEmbedded] = useState(false);
+  const [showClose, setShowClose] = useState(true);
   useEffect(() => {
     setEmbedded(typeof window !== "undefined" && window.parent !== window);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("close") === "0") setShowClose(false);
+    }
   }, []);
 
   // ---- mount controller ----
@@ -333,7 +341,7 @@ export default function PdfViewer({ stem, basePath }: Props) {
           <span className="min-w-0 overflow-hidden text-ellipsis font-[var(--mono)]">{stem}.pdf</span>
           <span className="shrink-0 text-[var(--muted)]" aria-hidden="true">↗</span>
         </a>
-        {embedded && (
+        {embedded && showClose && (
           <button
             type="button"
             onClick={() => {

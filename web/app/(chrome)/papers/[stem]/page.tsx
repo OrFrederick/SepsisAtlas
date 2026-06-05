@@ -29,9 +29,12 @@ export default async function PaperDetail({ params }: { params: Promise<{ stem: 
 
   const basePath = "/";
   const firstRow = rows[0];
-  const defaultViewerUrl = firstRow
-    ? buildViewerUrl(basePath, paper.file_name, firstRow.anchor_page ?? 1, firstRow.anchor_bbox, "tl")
-    : buildViewerUrl(basePath, paper.file_name, 1);
+  // ``close=0`` hides the in-viewer × button — the paper detail layout has
+  // no collapsible pane, so the button is meaningless here.
+  const defaultViewerUrl =
+    (firstRow
+      ? buildViewerUrl(basePath, paper.file_name, firstRow.anchor_page ?? 1, firstRow.anchor_bbox, "tl")
+      : buildViewerUrl(basePath, paper.file_name, 1)) + "&close=0";
 
   return (
     <PaperDetailPage

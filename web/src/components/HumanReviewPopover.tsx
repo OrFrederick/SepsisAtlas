@@ -112,7 +112,7 @@ export default function HumanReviewPopover({
   return (
     <div
       ref={ref}
-      className="absolute z-50 mt-1 w-72 rounded-md border border-border bg-panel shadow-lg p-3 text-[12.5px] text-fg"
+      className="absolute left-0 top-full z-50 mt-1 w-[22rem] max-w-[90vw] rounded-md border border-border bg-panel shadow-lg p-3 text-[12.5px] text-fg whitespace-normal text-left"
       role="dialog"
       onClick={(e) => e.stopPropagation()}
     >
@@ -140,7 +140,7 @@ export default function HumanReviewPopover({
       <label className="block mb-2">
         <span className="text-fg-faint">Rationale (optional)</span>
         <textarea
-          className="mt-1 w-full rounded border border-border bg-panel-2 p-1.5 text-fg text-[12.5px]"
+          className="mt-1 block w-full box-border min-w-0 resize-y rounded border border-border bg-panel-2 p-1.5 text-fg text-[12.5px]"
           rows={2}
           value={rationale}
           onChange={(e) => setRationale(e.target.value)}
@@ -152,7 +152,7 @@ export default function HumanReviewPopover({
         <span className="text-fg-faint">Reviewer (optional)</span>
         <input
           type="text"
-          className="mt-1 w-full rounded border border-border bg-panel-2 p-1.5 text-fg text-[12.5px]"
+          className="mt-1 block w-full box-border min-w-0 rounded border border-border bg-panel-2 p-1.5 text-fg text-[12.5px]"
           value={reviewer}
           onChange={(e) => setReviewer(e.target.value)}
           placeholder="Your name"

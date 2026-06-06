@@ -647,7 +647,7 @@ export default function ChatShell() {
         ref={splitRef}
         style={splitStyle}
       >
-        <section inert={chatHidden} className={chatCls}>
+        <section id="chat-pane" inert={chatHidden} className={chatCls}>
           {history.length > 0 ? (
             <ChatActionsMenu onClear={clearAll} disabled={pending} />
           ) : null}
@@ -807,12 +807,16 @@ export default function ChatShell() {
               the chat <section> is inert. Only meaningful while the PDF is
               open. A separate button from the drag separator: it keeps its own
               pointer-events even when the divider's drag handlers are stripped
-              in the chatHidden state. */}
+              in the chatHidden state. It deliberately overlaps the divider's
+              drag zone at mid-height (a small accepted dead-zone) — don't
+              "expose" the separator beneath it by lowering its z-index. */}
           {showPdf ? (
             <button
               type="button"
               aria-label={chatHidden ? "Show chat pane" : "Hide chat pane"}
+              title={chatHidden ? "Show chat pane" : "Hide chat pane"}
               aria-expanded={!chatHidden}
+              aria-controls="chat-pane"
               onClick={() => setChatHidden((v) => !v)}
               className="absolute top-1/2 left-0 -translate-y-1/2 translate-x-[1px] z-[3] w-5 h-9 flex items-center justify-center bg-panel border border-border rounded-md text-fg-muted shadow-[0_1px_4px_rgba(26,31,44,0.12)] cursor-pointer transition-[color,border-color,background] duration-[160ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 [&_svg]:block"
             >

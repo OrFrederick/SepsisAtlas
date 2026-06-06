@@ -10,18 +10,16 @@ import {
 } from "../../src/lib/chatPct";
 
 const HISTORY_KEY = "sepsis_atlas.history.v1";
-const VIEWER_URL_KEY = "sepsis_atlas.viewer_url.v1";
 
 function seedHistory() {
-  // One turn in history + a persisted viewer URL makes showPdf true on mount,
-  // so the viewer panel, divider, and collapse chevron render immediately.
+  // One turn in history is enough to make showPdf true on mount, so the
+  // viewer panel and its divider render immediately.
   localStorage.setItem(
     HISTORY_KEY,
     JSON.stringify([
       { user_text: "x", assistant: { summary: "s", rows: [] }, ts: 1 },
     ]),
   );
-  localStorage.setItem(VIEWER_URL_KEY, "http://localhost/viewer/test.pdf?page=1");
 }
 
 beforeEach(() => {
@@ -362,11 +360,33 @@ describe("ChatShell — chat actions menu", () => {
 
 describe("ChatShell — divider collapse chevron", () => {
   it("toggles chat visibility and flips its label", async () => {
+    // The chevron only renders while the PDF is open (showPdf). Seed a turn
+    // with a clickable evidence row and open it — no viewer persistence.
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([
+        {
+          user_text: "q",
+          assistant: {
+            summary: "s",
+            rows: [
+              {
+                predictor_canonical: "Lactate",
+                file_name: "Seymour_2016",
+                anchor_page: 4,
+              },
+            ],
+          },
+          ts: 1,
+        },
+      ]),
+    );
     const user = userEvent.setup();
     render(<ChatShell />);
     await act(async () => {});
-    // PDF is open on mount (seeded history), so the chevron is present and
-    // starts in the "hide" state.
+    // Open the PDF viewer by clicking the evidence row.
+    await user.click(screen.getByText("Lactate"));
+    await act(async () => {});
     const hide = await screen.findByRole("button", { name: /hide chat pane/i });
     expect(hide).toHaveAttribute("aria-expanded", "true");
     await user.click(hide);

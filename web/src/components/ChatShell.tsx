@@ -50,11 +50,6 @@ const HISTORY_MAX = 50;
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
-// Persisting viewerUrl lets the collapse chevron be present on mount when
-// the user had a PDF open in a previous session. Cleared on closeViewer /
-// clearAll so a fresh load starts with the chat in solo mode.
-const VIEWER_URL_KEY = "sepsis_atlas.viewer_url.v1";
-
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",
   "phenotype clusters in Seymour 2016",
@@ -266,12 +261,8 @@ export default function ChatShell() {
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
-    // Restore the last viewer URL so the PDF pane reopens where the user
-    // left off. Cleared on closeViewer / clearAll to reset the layout.
-    const savedUrl = typeof window !== "undefined"
-      ? (localStorage.getItem(VIEWER_URL_KEY) || "")
-      : "";
-    if (savedUrl) setViewerUrl(savedUrl);
+    // The viewer URL is intentionally NOT restored — the PDF pane should
+    // start collapsed and only open when the user clicks an evidence row.
     inputRef.current?.focus();
   }, []);
 
@@ -290,7 +281,6 @@ export default function ChatShell() {
     if (!url) return;
     setActiveRowKey(`${turnIdx}:${rowIdx}`);
     setViewerUrl(url);
-    try { localStorage.setItem(VIEWER_URL_KEY, url); } catch { /* quota */ }
   }, []);
 
   // ---- submit ------------------------------------------------------------
@@ -404,7 +394,6 @@ export default function ChatShell() {
     if (pending) return;
     try {
       localStorage.removeItem(HISTORY_KEY);
-      localStorage.removeItem(VIEWER_URL_KEY);
     } catch {
       /* ignore */
     }
@@ -419,7 +408,6 @@ export default function ChatShell() {
   };
 
   const closeViewer = () => {
-    try { localStorage.removeItem(VIEWER_URL_KEY); } catch { /* ignore */ }
     setViewerUrl("");
     setActiveRowKey(null);
     setChatHidden(false);

@@ -86,4 +86,22 @@ describe("ChatActionsMenu", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(onClear).not.toHaveBeenCalled();
   });
+
+  it("Esc on the confirm dialog closes it and returns focus to the trigger", async () => {
+    const onClear = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatActionsMenu onClear={onClear} />);
+    await user.click(screen.getByRole("button", { name: /chat actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /clear chat/i }));
+    // Esc fires the dialog's native `cancel` event (not a key handler we own).
+    fireEvent(
+      screen.getByRole("dialog"),
+      new Event("cancel", { bubbles: false, cancelable: true }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onClear).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /chat actions/i }),
+    ).toHaveFocus();
+  });
 });

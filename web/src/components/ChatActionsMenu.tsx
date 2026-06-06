@@ -134,6 +134,14 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
 
       <dialog
         ref={dialogRef}
+        // Esc fires the native `cancel`/close on the <dialog>, which would
+        // bypass closeConfirm and restore focus to the (now-unmounted) menu
+        // item → focus falls to <body>. Intercept it and close through our
+        // own path so focus returns to the trigger.
+        onCancel={(e) => {
+          e.preventDefault();
+          closeConfirm();
+        }}
         className="m-auto bg-panel text-fg border border-border rounded-lg p-0 overflow-hidden w-[min(420px,92vw)] shadow-[0_16px_48px_rgba(0,0,0,0.18)] backdrop:bg-[rgba(26,22,20,0.4)] backdrop:backdrop-blur-[2px]"
       >
         <div className="py-[14px] px-[18px] bg-panel-2 border-b border-border">

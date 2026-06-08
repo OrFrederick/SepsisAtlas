@@ -48,6 +48,13 @@ beforeEach(() => {
     HTMLElement.prototype.releasePointerCapture = () => {};
     HTMLElement.prototype.hasPointerCapture = () => false;
   }
+  // Confirm dialog uses <dialog>.showModal, unimplemented in jsdom.
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.open = false;
+  };
   seedHistory();
 });
 
@@ -315,5 +322,80 @@ describe("ChatShell — viewer reveal fallback (issue #91)", () => {
     });
 
     expect(viewerWrap.hasAttribute("inert")).toBe(false);
+  });
+});
+
+describe("ChatShell — chat actions menu", () => {
+  it("has no always-visible Clear chat button; exposes a kebab instead", async () => {
+    render(<ChatShell />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /^clear chat$/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /chat actions/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("Clear chat from the menu wipes history after confirming", async () => {
+    const user = userEvent.setup();
+    render(<ChatShell />);
+    await act(async () => {});
+    await user.click(screen.getByRole("button", { name: /chat actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /clear chat/i }));
+    await user.click(screen.getByRole("button", { name: /clear chat/i }));
+    expect(localStorage.getItem(HISTORY_KEY)).toBeNull();
+    // History gone from React state too: the kebab is guarded by
+    // history.length > 0, so it must disappear.
+    expect(
+      screen.queryByRole("button", { name: /chat actions/i }),
+    ).toBeNull();
+  });
+
+  it("hides the kebab when there is no history", async () => {
+    localStorage.removeItem(HISTORY_KEY);
+    render(<ChatShell />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /chat actions/i })).toBeNull();
+  });
+});
+
+describe("ChatShell — divider collapse chevron", () => {
+  it("toggles chat visibility and flips its label", async () => {
+    // The chevron only renders while the PDF is open (showPdf). Seed a turn
+    // with a clickable evidence row and open it — no viewer persistence.
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([
+        {
+          user_text: "q",
+          assistant: {
+            summary: "s",
+            rows: [
+              {
+                predictor_canonical: "Lactate",
+                file_name: "Seymour_2016",
+                anchor_page: 4,
+              },
+            ],
+          },
+          ts: 1,
+        },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<ChatShell />);
+    await act(async () => {});
+    // Open the PDF viewer by clicking the evidence row.
+    await user.click(screen.getByText("Lactate"));
+    await act(async () => {});
+    const hide = await screen.findByRole("button", { name: /hide chat pane/i });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    await user.click(hide);
+    const show = await screen.findByRole("button", { name: /show chat pane/i });
+    expect(show).toHaveAttribute("aria-expanded", "false");
+    // Still reachable while the chat pane is collapsed/inert.
+    await user.click(show);
+    expect(
+      await screen.findByRole("button", { name: /hide chat pane/i }),
+    ).toBeInTheDocument();
   });
 });

@@ -21,6 +21,7 @@ import { motion, MotionConfig } from "framer-motion";
 import EvidenceTable from "./EvidenceTable";
 import PdfViewerPane from "./PdfViewerPane";
 import { rowsToCsv, downloadCsv } from "../lib/csv";
+import { ChatActionsMenu } from "./ChatActionsMenu";
 import {
   clampChatPct,
   DEFAULT_CHAT_PCT,
@@ -622,8 +623,10 @@ export default function ChatShell() {
   // Chat column fills the grid track in both solo and split modes; width
   // animation is driven by the parent grid's track template (splitStyle),
   // not by a max-width transition on this column.
-  const chatCls = `flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
+  const chatCls = `relative flex flex-col bg-bg overflow-hidden max-w-none m-0 w-full`;
 
+  // NOTE: the top-right corner of the chat column is reserved for the
+  // ChatActionsMenu kebab (~38px); keep top padding clear of it.
   const scrollbackCls = showPdf
     ? "flex-1 overflow-y-auto py-7 px-9 flex flex-col gap-[22px] overscroll-contain " +
       "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
@@ -637,36 +640,17 @@ export default function ChatShell() {
   return (
     <MotionConfig reducedMotion="user">
     <main
-      className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:44px_1fr]"
+      className="chat-shell grid fixed left-0 right-0 bottom-0 top-[49px] z-10 bg-bg [grid-template-rows:1fr]"
     >
-      <div className="flex items-center justify-end gap-[14px] py-2 px-[22px] bg-bg border-b border-border max-[480px]:flex-wrap max-[480px]:justify-start max-[480px]:gap-2 max-[480px]:px-3">
-        {showPdf ? (
-          <button
-            type="button"
-            className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2"
-            title={chatHidden ? "Show chat pane" : "Hide chat pane"}
-            onClick={() => setChatHidden((v) => !v)}
-          >
-            {chatHidden ? "Show chat" : "Hide chat"}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="text-fg-muted border border-border rounded py-[5px] px-3 text-xs bg-transparent cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-transparent"
-          title={pending ? "Wait for the current response to finish" : "Clear chat history"}
-          onClick={clearAll}
-          disabled={pending}
-        >
-          Clear chat
-        </button>
-      </div>
-
       <section
         className={`split grid h-full w-full overflow-hidden ${resizing ? "select-none cursor-col-resize" : ""}`}
         ref={splitRef}
         style={splitStyle}
       >
-        <section inert={chatHidden} className={chatCls}>
+        <section id="chat-pane" inert={chatHidden} className={chatCls}>
+          {history.length > 0 ? (
+            <ChatActionsMenu onClear={clearAll} disabled={pending} />
+          ) : null}
           <div ref={scrollbackRef} className={scrollbackCls}>
             {history.length === 0 && !pending ? (
               <Welcome
@@ -818,6 +802,42 @@ export default function ChatShell() {
               : "opacity-0 translate-x-[28px]")
           }
         >
+          {/* Collapse handle on the divider seam. Lives in .viewer-wrap (not
+              the chat pane) so it stays reachable when the chat is hidden and
+              the chat <section> is inert. Only meaningful while the PDF is
+              open. A separate button from the drag separator: it keeps its own
+              pointer-events even when the divider's drag handlers are stripped
+              in the chatHidden state. It deliberately overlaps the divider's
+              drag zone at mid-height (a small accepted dead-zone) — don't
+              "expose" the separator beneath it by lowering its z-index. */}
+          {showPdf ? (
+            <button
+              type="button"
+              aria-label={chatHidden ? "Show chat pane" : "Hide chat pane"}
+              title={chatHidden ? "Show chat pane" : "Hide chat pane"}
+              aria-expanded={!chatHidden}
+              aria-controls="chat-pane"
+              onClick={() => setChatHidden((v) => !v)}
+              // 44×44 transparent hit area for WCAG 2.5.5; the visible pill
+              // is the inner <span> and stays 20×36 on the divider seam.
+              // viewer-wrap clips overflow, so the slop extends right (into
+              // the viewer) rather than left into the chat pane.
+              className="group absolute top-1/2 left-0 -translate-y-1/2 z-[3] w-[44px] h-[44px] flex items-center justify-start bg-transparent border-0 p-0 cursor-pointer"
+            >
+              <span
+                aria-hidden="true"
+                className="w-5 h-9 translate-x-[1px] inline-flex items-center justify-center bg-panel border border-border rounded-md text-fg-muted shadow-[0_1px_4px_rgba(26,31,44,0.12)] transition-[color,border-color,background] duration-[160ms] ease-out group-hover:text-fg group-hover:border-border-strong group-hover:bg-panel-2 [&_svg]:block"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {chatHidden ? (
+                    <polyline points="9 18 15 12 9 6" />
+                  ) : (
+                    <polyline points="15 18 9 12 15 6" />
+                  )}
+                </svg>
+              </span>
+            </button>
+          ) : null}
           {/* Divider is meaningless while the chat is hidden (chat track
               pinned to 0%). Stripping handlers + focus prevents silent
               chatPct writes (and localStorage churn) from drags or

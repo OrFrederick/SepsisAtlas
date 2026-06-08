@@ -818,15 +818,24 @@ export default function ChatShell() {
               aria-expanded={!chatHidden}
               aria-controls="chat-pane"
               onClick={() => setChatHidden((v) => !v)}
-              className="absolute top-1/2 left-0 -translate-y-1/2 translate-x-[1px] z-[3] w-5 h-9 flex items-center justify-center bg-panel border border-border rounded-md text-fg-muted shadow-[0_1px_4px_rgba(26,31,44,0.12)] cursor-pointer transition-[color,border-color,background] duration-[160ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 [&_svg]:block"
+              // 44×44 transparent hit area for WCAG 2.5.5; the visible pill
+              // is the inner <span> and stays 20×36 on the divider seam.
+              // viewer-wrap clips overflow, so the slop extends right (into
+              // the viewer) rather than left into the chat pane.
+              className="group absolute top-1/2 left-0 -translate-y-1/2 z-[3] w-[44px] h-[44px] flex items-center justify-start bg-transparent border-0 p-0 cursor-pointer"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                {chatHidden ? (
-                  <polyline points="9 18 15 12 9 6" />
-                ) : (
-                  <polyline points="15 18 9 12 15 6" />
-                )}
-              </svg>
+              <span
+                aria-hidden="true"
+                className="w-5 h-9 translate-x-[1px] inline-flex items-center justify-center bg-panel border border-border rounded-md text-fg-muted shadow-[0_1px_4px_rgba(26,31,44,0.12)] transition-[color,border-color,background] duration-[160ms] ease-out group-hover:text-fg group-hover:border-border-strong group-hover:bg-panel-2 [&_svg]:block"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {chatHidden ? (
+                    <polyline points="9 18 15 12 9 6" />
+                  ) : (
+                    <polyline points="15 18 9 12 15 6" />
+                  )}
+                </svg>
+              </span>
             </button>
           ) : null}
           {/* Divider is meaningless while the chat is hidden (chat track

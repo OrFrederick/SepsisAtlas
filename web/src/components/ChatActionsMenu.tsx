@@ -92,6 +92,9 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
 
   return (
     <div className="absolute top-2 right-3 z-[5]">
+      {/* Outer button is a 44×44 transparent hit area (WCAG 2.5.5); the
+          visible glyph stays small and anchored to the top-right corner,
+          so the extra slop extends down and left into empty header space. */}
       <button
         ref={triggerRef}
         type="button"
@@ -100,13 +103,18 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
         aria-expanded={menuOpen}
         disabled={disabled}
         onClick={() => setMenuOpen((v) => !v)}
-        className="inline-flex items-center justify-center text-fg-muted border border-border rounded py-[5px] px-2 bg-bg/85 backdrop-blur-[2px] cursor-pointer transition-[color,border-color,background] duration-[180ms] ease-out hover:text-fg hover:border-border-strong hover:bg-panel-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-muted disabled:hover:border-border disabled:hover:bg-bg/85 [&_svg]:block"
+        className="group flex items-start justify-end w-[44px] h-[44px] bg-transparent border-0 p-0 cursor-pointer disabled:cursor-not-allowed"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="12" cy="5" r="1.6" />
-          <circle cx="12" cy="12" r="1.6" />
-          <circle cx="12" cy="19" r="1.6" />
-        </svg>
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center text-fg-muted border border-border rounded py-[5px] px-2 bg-bg/85 backdrop-blur-[2px] transition-[color,border-color,background] duration-[180ms] ease-out group-hover:text-fg group-hover:border-border-strong group-hover:bg-panel-2 group-disabled:opacity-40 group-disabled:group-hover:text-fg-muted group-disabled:group-hover:border-border group-disabled:group-hover:bg-bg/85 [&_svg]:block"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="12" cy="5" r="1.6" />
+            <circle cx="12" cy="12" r="1.6" />
+            <circle cx="12" cy="19" r="1.6" />
+          </svg>
+        </span>
       </button>
 
       {menuOpen ? (

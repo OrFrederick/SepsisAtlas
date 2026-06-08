@@ -83,10 +83,15 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
   }
 
   function confirmClear() {
-    // Close (returning focus to the trigger) BEFORE onClear: clearing the
-    // history unmounts this menu, so onClear must run last or focus is
-    // dropped to <body>. clearAll re-focuses the composer afterwards.
-    closeConfirm();
+    // Close the dialog and let onClear run. We deliberately don't route
+    // through closeConfirm here: clearing the history unmounts this menu,
+    // so focusing the trigger is wasted — clearAll re-focuses the composer,
+    // which is the intended post-clear landing spot.
+    try {
+      dialogRef.current?.close();
+    } catch {
+      /* ignore */
+    }
     onClear();
   }
 
@@ -101,6 +106,7 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
         aria-label="Chat actions"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
+        aria-controls="chat-actions-menu"
         disabled={disabled}
         onClick={() => setMenuOpen((v) => !v)}
         className="group flex items-start justify-end w-[44px] h-[44px] bg-transparent border-0 p-0 cursor-pointer disabled:cursor-not-allowed"
@@ -120,6 +126,7 @@ export function ChatActionsMenu({ onClear, disabled = false }: ChatActionsMenuPr
       {menuOpen ? (
         <div
           ref={menuRef}
+          id="chat-actions-menu"
           role="menu"
           // Single-item menu: arrow-key roving navigation is intentionally
           // omitted. Add it (ARIA APG menu pattern) if more items are added.

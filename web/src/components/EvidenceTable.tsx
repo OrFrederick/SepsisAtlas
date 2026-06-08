@@ -75,7 +75,6 @@ function isGenericCohort(label: unknown): boolean {
   return s === "" || s === "total cohort" || s === "total";
 }
 
-
 function paperCohort(row: EvidenceRow): string {
   const ref = row.paper_ref || row.file_name || row.study || "(unknown)";
   return isGenericCohort(row.cohort_label)

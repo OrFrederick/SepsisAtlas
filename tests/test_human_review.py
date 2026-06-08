@@ -98,6 +98,65 @@ def test_second_post_supersedes_first(app_client):
     assert active["review_id"] != first["review_id"]
 
 
+def test_double_active_resolves_to_latest(app_client):
+    """No DB-level "one active per target" constraint exists, so two rows with
+    ``superseded_by IS NULL`` can coexist (e.g. a prior concurrent write). The
+    read paths must resolve to the latest active row rather than raising
+    MultipleResultsFound, and the next write must supersede *all* of them.
+    """
+    import os
+    from datetime import datetime, timedelta
+
+    from sepsis_atlas.db import HumanReview, get_session
+    from api.human_reviews import latest_review_for_row, latest_reviews_for_table
+
+    Session = get_session(os.environ["SEPSIS_DB_URL"])
+    base = datetime(2026, 1, 1, 0, 0, 0)
+    with Session() as s:
+        s.add(
+            HumanReview(
+                review_id="dup_old",
+                table_name="predictor_model",
+                row_id="r_gai_1",
+                human_verdict="flag",
+                reviewed_ts=base,
+                superseded_by=None,
+            )
+        )
+        s.add(
+            HumanReview(
+                review_id="dup_new",
+                table_name="predictor_model",
+                row_id="r_gai_1",
+                human_verdict="reject",
+                reviewed_ts=base + timedelta(minutes=5),
+                superseded_by=None,
+            )
+        )
+        s.commit()
+
+    with Session() as s:
+        single = latest_review_for_row(s, "predictor_model", "r_gai_1")
+        assert single["review_id"] == "dup_new"
+        table = latest_reviews_for_table(s, "predictor_model", ["r_gai_1"])
+        assert table["r_gai_1"]["review_id"] == "dup_new"
+
+    # A fresh POST supersedes both stray active rows, leaving exactly one active.
+    _post(app_client, human_verdict="approve")
+    with Session() as s:
+        active = (
+            s.query(HumanReview)
+            .filter(
+                HumanReview.table_name == "predictor_model",
+                HumanReview.row_id == "r_gai_1",
+                HumanReview.superseded_by.is_(None),
+            )
+            .all()
+        )
+        assert len(active) == 1
+        assert active[0].human_verdict == "approve"
+
+
 def test_get_active_review_none_when_unreviewed(app_client):
     r = app_client.get(
         "/api/reviews", params={"table_name": "predictor_model", "row_id": "r_gai_1"}

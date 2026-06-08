@@ -109,17 +109,18 @@ export async function postHumanReview(input: {
   };
 }
 
-// Batch-fetch the latest active reviews for a known set of row_ids. Scoped
-// query — avoids pulling the entire table down on cold loads. Returns a map
-// keyed by row_id so callers can patch their cached rows directly.
-export async function fetchReviewsForRows(
+// Max row_ids per GET. The endpoint reads row_ids from the query string, so a
+// large set (ChatShell rehydrate dedupes across every cached turn) would blow
+// past proxy/server URL limits. UUID row_ids are 36 chars + comma, so 100 per
+// batch keeps the query under ~3.7KB; batches are fetched concurrently and the
+// per-row maps are merged.
+const REVIEW_FETCH_BATCH = 100;
+
+async function fetchReviewBatch(
   table_name: HumanReviewTable,
   row_ids: string[],
 ): Promise<Record<string, HumanReview>> {
-  if (!row_ids.length) return {};
   const params = new URLSearchParams({ table_name });
-  // POSTing avoids a URL-length blowup when the cached chat history has
-  // thousands of rows; the endpoint accepts a JSON body of row_ids too.
   params.set("row_ids", row_ids.join(","));
   const url = `${BACKEND_URL}/api/reviews?${params.toString()}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -142,4 +143,22 @@ export async function fetchReviewsForRows(
     };
   }
   return out;
+}
+
+// Batch-fetch the latest active reviews for a known set of row_ids. Scoped
+// query — avoids pulling the entire table down on cold loads. Returns a map
+// keyed by row_id so callers can patch their cached rows directly.
+export async function fetchReviewsForRows(
+  table_name: HumanReviewTable,
+  row_ids: string[],
+): Promise<Record<string, HumanReview>> {
+  if (!row_ids.length) return {};
+  const batches: string[][] = [];
+  for (let i = 0; i < row_ids.length; i += REVIEW_FETCH_BATCH) {
+    batches.push(row_ids.slice(i, i + REVIEW_FETCH_BATCH));
+  }
+  const results = await Promise.all(
+    batches.map((batch) => fetchReviewBatch(table_name, batch)),
+  );
+  return Object.assign({}, ...results);
 }

@@ -64,22 +64,25 @@ def validate(payload: ReviewInput) -> Optional[str]:
 def post_review(session: Session, payload: ReviewInput) -> dict:
     """Insert a new review, marking any prior active review as superseded.
 
-    Single transaction: we look up the active review for ``(table_name,
-    row_id)``, set its ``superseded_by`` to the new ``review_id``, then
-    insert the new active record. The composite index on
-    ``(table_name, row_id, superseded_by)`` keeps the lookup cheap.
+    We look up *every* active review for ``(table_name, row_id)`` and point
+    each one's ``superseded_by`` at the new ``review_id`` before inserting the
+    new active record. There is no DB-level "one active per target" constraint,
+    so a prior double-write could have left two active rows; superseding all of
+    them here heals that state and keeps the read paths single-valued. The
+    composite index on ``(table_name, row_id, superseded_by)`` keeps the lookup
+    cheap.
     """
     new_id = uuid.uuid4().hex
-    prior = (
+    priors = (
         session.query(HumanReview)
         .filter(
             HumanReview.table_name == payload.table_name,
             HumanReview.row_id == payload.row_id,
             HumanReview.superseded_by.is_(None),
         )
-        .one_or_none()
+        .all()
     )
-    if prior is not None:
+    for prior in priors:
         prior.superseded_by = new_id
 
     rec = HumanReview(
@@ -108,7 +111,8 @@ def latest_review_for_row(
             HumanReview.row_id == row_id,
             HumanReview.superseded_by.is_(None),
         )
-        .one_or_none()
+        .order_by(HumanReview.reviewed_ts.desc())
+        .first()
     )
     return _serialize(rec) if rec else None
 
@@ -131,9 +135,12 @@ def latest_reviews_for_table(
         if not ids:
             return {}
         q = q.filter(HumanReview.row_id.in_(ids))
+    # Order newest-first and keep the first per row_id, so a stray double-active
+    # row (no DB-level "one active" constraint) resolves to the latest review
+    # instead of an arbitrary one.
     out: dict[str, dict] = {}
-    for r in q.all():
-        out[r.row_id] = _serialize(r)
+    for r in q.order_by(HumanReview.reviewed_ts.desc()).all():
+        out.setdefault(r.row_id, _serialize(r))
     return out
 
 

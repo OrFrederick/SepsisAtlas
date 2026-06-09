@@ -106,6 +106,9 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
             // the badge always opens the popover (pre-loaded with the active
             // review so the reviewer can edit or clear).
             const effectiveKind = hasReview ? humanVerdictKind(review!.verdict) : kind;
+            // Unreviewed path shows the verifier's verbatim verdict text
+            // (ok/pass/weak/…); verdictKind normalizes the color bucket, not
+            // the label — intentional, don't "fix" it to the bucketed glyph.
             const effectiveLabel = hasReview ? review!.verdict : verdict;
             const title = hasReview
               ? `human ${review!.verdict}${review!.reviewer ? ` (${review!.reviewer})` : ""} · machine said ${verdict}${review!.rationale ? ` — ${review!.rationale}` : ""}`

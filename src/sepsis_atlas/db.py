@@ -226,7 +226,12 @@ class LLMCall(Base):
     output_path: Mapped[Optional[str]] = mapped_column(String)
 
 
-HUMAN_REVIEW_VERDICTS = ("approve", "reject", "flag")
+# "cleared" is a reserved tombstone verdict written when a reviewer clears
+# their own override (we supersede instead of delete to keep the audit chain).
+# It is never offered as a selectable option in the popover, so a reviewer
+# cannot reach it via free text — the read paths treat it as "no active review".
+HUMAN_REVIEW_VERDICTS = ("approve", "reject", "flag", "cleared")
+# Keep in sync with `HumanReviewTable` in web/src/lib/humanReview.ts.
 HUMAN_REVIEW_TABLES = (
     "study_cohort",
     "predictor_model",

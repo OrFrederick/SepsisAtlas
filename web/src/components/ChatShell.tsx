@@ -30,7 +30,7 @@ import {
   MIN_CHAT_PCT,
   saveChatPct,
 } from "../lib/chatPct";
-import { BACKEND_URL, fetchReviewsForRows } from "../lib/humanReview";
+import { BACKEND_URL, fetchReviewsForRows, type HumanReview } from "../lib/humanReview";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -104,12 +104,7 @@ type EvidenceRow = {
   n?: string | number;
   row_id?: string;
   table_name?: string;
-  human_review?: {
-    verdict: "approve" | "reject" | "flag";
-    rationale?: string | null;
-    reviewer?: string | null;
-    reviewed_ts?: string | null;
-  } | null;
+  human_review?: HumanReview | null;
 };
 
 type AssistantPayload = {
@@ -288,9 +283,13 @@ export default function ChatShell() {
       ),
     );
     if (cachedRowIds.length === 0) return;
+    // Guard against the fetch resolving after unmount (React warns on a
+    // setHistory to an unmounted component). Mirrors PdfViewer's pattern.
+    let cancelled = false;
     (async () => {
       try {
         const reviews = await fetchReviewsForRows("predictor_model", cachedRowIds);
+        if (cancelled) return;
         if (!Object.keys(reviews).length) {
           // Still tag cached rows with table_name so the popover knows what
           // to do when the user reviews one for the first time.
@@ -321,6 +320,9 @@ export default function ChatShell() {
         /* network hiccup; user can re-run the query to refresh reviews */
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---- scroll to bottom on new turn -------------------------------------

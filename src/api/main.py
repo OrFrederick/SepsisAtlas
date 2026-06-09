@@ -823,6 +823,11 @@ def get_phenotype(paper_ref: str):
 # ---------------------------------------------------------------------------
 
 
+# Upper bound on rows scanned by the unscoped GET /api/reviews path so the
+# no-auth endpoint can't be made to stream the whole audit table at once.
+REVIEWS_TABLE_SCAN_CAP = 1000
+
+
 class HumanReviewRequest(BaseModel):
     table_name: str
     row_id: str
@@ -864,8 +869,9 @@ def get_review_endpoint(
     - ``row_ids``: comma-separated list, scopes the table-wide query to a
       known set so clients can avoid pulling every review in the table when
       they only need a handful (e.g. ChatShell rehydrating cached turns).
-    - neither: returns every active review for the table (unbounded — use
-      with care; intended for admin/audit only).
+    - neither: returns the most recent active reviews for the table, capped at
+      ``REVIEWS_TABLE_SCAN_CAP`` so this no-auth endpoint can't be made to
+      stream an unbounded result set (intended for admin/audit only).
     """
     engine = _engine()
     Session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -875,6 +881,9 @@ def get_review_endpoint(
         ids: list[str] | None = None
         if row_ids:
             ids = [s for s in (rid.strip() for rid in row_ids.split(",")) if s]
-        return {"reviews": latest_reviews_for_table(session, table_name, ids)}
+        cap = None if ids else REVIEWS_TABLE_SCAN_CAP
+        return {
+            "reviews": latest_reviews_for_table(session, table_name, ids, limit=cap)
+        }
 
 

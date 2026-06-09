@@ -9,15 +9,21 @@
 // PUBLIC_BACKEND_URL when the static frontend is split from the API host.
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
+// Verdicts a reviewer can select in the popover.
 export type HumanVerdict = "approve" | "reject" | "flag";
+// "cleared" is the reserved tombstone verdict written when a reviewer clears
+// their own override. Never selectable in the UI, so it can't be reached by
+// free text — see isActiveHumanReview. Mirrors HUMAN_REVIEW_VERDICTS (Python).
+export type StoredVerdict = HumanVerdict | "cleared";
 
 export type HumanReview = {
-  verdict: HumanVerdict;
+  verdict: StoredVerdict;
   rationale?: string | null;
   reviewer?: string | null;
   reviewed_ts?: string | null;
 };
 
+// Keep in sync with HUMAN_REVIEW_TABLES in src/sepsis_atlas/db.py.
 export type HumanReviewTable =
   | "study_cohort"
   | "predictor_model"
@@ -41,15 +47,16 @@ export function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
   return { cls: "unk", glyph: "?" };
 }
 
-// "cleared" is the sentinel rationale we write when a reviewer clears their
-// own review (we supersede instead of delete to keep the audit chain). The UI
-// must treat that as "no active review" — checked here so callers don't have
-// to embed the magic string.
+// A review is "active" unless it carries the reserved "cleared" tombstone
+// verdict (written by the popover's clear path; we supersede instead of delete
+// to keep the audit chain). Keying on the verdict — not on rationale text —
+// means a reviewer who genuinely types "cleared" as their rationale keeps a
+// visible review. The UI treats a tombstone as "no active review".
 export function isActiveHumanReview(
   r: HumanReview | null | undefined,
 ): r is HumanReview {
   if (!r) return false;
-  if ((r.rationale || "").trim().toLowerCase() === "cleared") return false;
+  if (r.verdict === "cleared") return false;
   return true;
 }
 
@@ -74,7 +81,7 @@ export function setReviewerName(name: string): void {
 export async function postHumanReview(input: {
   table_name: HumanReviewTable;
   row_id: string;
-  human_verdict: HumanVerdict;
+  human_verdict: StoredVerdict;
   human_rationale?: string;
   reviewer?: string;
 }): Promise<HumanReview> {
@@ -95,7 +102,7 @@ export async function postHumanReview(input: {
   }
   const body = (await res.json()) as {
     review: {
-      human_verdict: HumanVerdict;
+      human_verdict: StoredVerdict;
       human_rationale: string | null;
       reviewer: string | null;
       reviewed_ts: string | null;
@@ -127,7 +134,7 @@ async function fetchReviewBatch(
   if (!res.ok) return {};
   const body = (await res.json()) as {
     reviews?: Record<string, {
-      human_verdict: HumanVerdict;
+      human_verdict: StoredVerdict;
       human_rationale: string | null;
       reviewer: string | null;
       reviewed_ts: string | null;

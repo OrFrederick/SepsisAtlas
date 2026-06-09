@@ -44,7 +44,11 @@ export default function HumanReviewPopover({
   align = "left",
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [verdict, setVerdict] = useState<HumanVerdict>(current?.verdict || "approve");
+  // `current` is only ever an active review (cleared tombstones never reach
+  // here), so its verdict is one of the selectable options; default otherwise.
+  const [verdict, setVerdict] = useState<HumanVerdict>(
+    current && current.verdict !== "cleared" ? current.verdict : "approve",
+  );
   const [rationale, setRationale] = useState<string>(current?.rationale || "");
   const [reviewer, setReviewer] = useState<string>(
     current?.reviewer || getReviewerName() || "",
@@ -90,16 +94,16 @@ export default function HumanReviewPopover({
   }
 
   async function clear() {
-    // Implemented as a supersede with verdict=flag, rationale="cleared".
-    // The frontend treats rationale === "cleared" the same as "no review".
+    // Supersede the active review with a "cleared" tombstone verdict. This
+    // verdict is never a selectable option, so it can't collide with anything
+    // a reviewer types; isActiveHumanReview treats it as "no active review".
     setSaving(true);
     setError(null);
     try {
       const saved = await postHumanReview({
         table_name: tableName,
         row_id: rowId,
-        human_verdict: "flag",
-        human_rationale: "cleared",
+        human_verdict: "cleared",
         reviewer: reviewer || undefined,
       });
       onSaved(saved);

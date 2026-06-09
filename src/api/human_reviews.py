@@ -118,13 +118,18 @@ def latest_review_for_row(
 
 
 def latest_reviews_for_table(
-    session: Session, table_name: str, row_ids: Optional[Iterable[str]] = None
+    session: Session,
+    table_name: str,
+    row_ids: Optional[Iterable[str]] = None,
+    limit: Optional[int] = None,
 ) -> dict[str, dict]:
     """Return ``{row_id: review_dict}`` for the latest active review of each row.
 
     If ``row_ids`` is provided, the query is scoped to that set — useful for
     per-paper fetches where we already know the row_ids returned by the
-    extraction join.
+    extraction join. ``limit`` caps the number of (newest-first) rows scanned;
+    callers that don't scope by ``row_ids`` should pass one so the no-auth
+    endpoint can't be made to stream the whole table.
     """
     q = session.query(HumanReview).filter(
         HumanReview.table_name == table_name,
@@ -138,8 +143,11 @@ def latest_reviews_for_table(
     # Order newest-first and keep the first per row_id, so a stray double-active
     # row (no DB-level "one active" constraint) resolves to the latest review
     # instead of an arbitrary one.
+    q = q.order_by(HumanReview.reviewed_ts.desc())
+    if limit is not None:
+        q = q.limit(limit)
     out: dict[str, dict] = {}
-    for r in q.order_by(HumanReview.reviewed_ts.desc()).all():
+    for r in q.all():
         out.setdefault(r.row_id, _serialize(r))
     return out
 
@@ -156,19 +164,19 @@ def to_row_payload(review: Optional[dict]) -> Optional[dict]:
     }
 
 
-def attach_predictor_reviews(session: Session, rows: list[dict]) -> list[dict]:
-    """Hydrate a list of predictor-row dicts (from query.py / rank_predictors)
-    with ``table_name='predictor_model'`` and ``human_review``.
+def attach_predictor_reviews(session: Session, rows: list[dict]) -> None:
+    """Hydrate predictor-row dicts in place with ``table_name='predictor_model'``
+    and ``human_review`` (from query.py / rank_predictors).
 
-    Rows missing ``row_id`` are left untouched on ``human_review`` (None) but
-    still get the ``table_name`` tag so the frontend popover knows what to do.
+    Mutates ``rows`` and returns nothing — callers rely on the mutation. Rows
+    missing ``row_id`` are left with ``human_review=None`` but still get the
+    ``table_name`` tag so the frontend popover knows what to do.
     """
     if not rows:
-        return rows
+        return
     ids = [r.get("row_id") for r in rows if r.get("row_id")]
     reviews = latest_reviews_for_table(session, "predictor_model", ids)
     for r in rows:
         r.setdefault("table_name", "predictor_model")
         rid = r.get("row_id")
         r["human_review"] = to_row_payload(reviews.get(rid)) if rid else None
-    return rows

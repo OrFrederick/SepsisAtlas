@@ -48,6 +48,10 @@ const SKIP_KEYS = new Set([
   "anchor_bbox",
   "_score",
   "_evidence_type",
+  // Human-review metadata is internal plumbing for the UI popover; it
+  // should not appear as a column in user-facing CSV exports.
+  "table_name",
+  "human_review",
 ]);
 
 function isScalar(v: unknown): boolean {

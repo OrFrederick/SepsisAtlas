@@ -11,6 +11,14 @@
 
 import { useState } from "react";
 import { FeedbackButton } from "./FeedbackButton";
+import HumanReviewPopover from "./HumanReviewPopover";
+import {
+  isActiveHumanReview,
+  verdictKind,
+  type HumanReview,
+  type HumanReviewTable,
+  type VerdictKind,
+} from "../lib/humanReview";
 
 export type EvidenceRow = {
   paper_ref?: string;
@@ -30,14 +38,15 @@ export type EvidenceRow = {
   verifier?: string;
   study?: string;
   n?: string | number;
+  row_id?: string;
+  table_name?: string;
+  human_review?: HumanReview | null;
   // Present on rows produced by the ranked-predictor projection
   // (UC3 "best AUC for mortality" etc.). Used to show the actual ranking
   // criterion in its own column so the user can see why a row ranks here.
   best_metric?: string;
   best_value?: number | null;
 };
-
-type VerdictKind = "ok" | "warn" | "fail" | "unk";
 
 type SortKey =
   | "paper"
@@ -64,15 +73,6 @@ function isGenericCohort(label: unknown): boolean {
   if (!label) return true;
   const s = String(label).trim().toLowerCase();
   return s === "" || s === "total cohort" || s === "total";
-}
-
-function verdictKind(v: unknown): { cls: VerdictKind; glyph: string } {
-  const s = String(v || "").toLowerCase();
-  if (s === "pass" || s === "ok") return { cls: "ok", glyph: "✓" };
-  if (s === "weak" || s === "warn" || s === "partial")
-    return { cls: "warn", glyph: "~" };
-  if (s === "fail" || s === "reject") return { cls: "fail", glyph: "✗" };
-  return { cls: "unk", glyph: "?" };
 }
 
 function paperCohort(row: EvidenceRow): string {
@@ -220,6 +220,10 @@ export default function EvidenceTable({
 }) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(1);
+  // Local override of human_review per row key, so a save reflects immediately
+  // without round-tripping through the parent's data source.
+  const [reviewOverride, setReviewOverride] = useState<Record<string, HumanReview | null>>({});
+  const [openPopover, setOpenPopover] = useState<string | null>(null);
 
   const onHeaderClick = (key: SortKey) => {
     if (sortKey === key) {
@@ -312,6 +316,11 @@ export default function EvidenceTable({
           const predictor = predictorOf(row);
           const outcome = outcomeOf(row);
           const effect = effectOf(row);
+          const review = reviewOverride[k] !== undefined ? reviewOverride[k] : (row.human_review ?? null);
+          const showHumanPip = isActiveHumanReview(review);
+          const humanKind = showHumanPip ? verdictKind(review!.verdict) : null;
+          const canReview =
+            Boolean(row.row_id) && Boolean(row.table_name);
           const rowCls =
             "cursor-pointer outline-none transition-colors duration-150 ease-out hover:bg-panel-2 " +
             "focus-visible:shadow-[inset_0_0_0_1px_var(--color-accent)] " +
@@ -325,13 +334,60 @@ export default function EvidenceTable({
               onClick={() => onActivate(ri, row)}
               onKeyDown={(e) => handleKey(e, ri, row)}
             >
-              <td className={`${TD_BASE} text-center`}>
-                <span
-                  className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[verdict.cls]}`}
-                  title={`verdict: ${row.verifier_verdict || row.verifier || "unverified"}`}
-                >
-                  {verdict.glyph}
-                </span>
+              <td className={`${TD_BASE} text-center relative`}>
+                {(() => {
+                  // When a human review exists, the human verdict is the
+                  // authoritative display: render ONE pip in the human's
+                  // verdict color with a small "reviewed" marker. The
+                  // verifier verdict moves to the tooltip so the reviewer
+                  // can still see what the machine said. When verdicts
+                  // agree this is just one tidy pip; when they disagree
+                  // the user no longer sees a confusing ✓ ✗ pair.
+                  const verifierLabel =
+                    row.verifier_verdict || row.verifier || "unverified";
+                  const effectiveKind = showHumanPip && humanKind ? humanKind : verdict;
+                  const effectiveLabel = showHumanPip
+                    ? review!.verdict
+                    : verifierLabel;
+                  const title = showHumanPip
+                    ? `human ${review!.verdict}${review!.reviewer ? ` (${review!.reviewer})` : ""} · machine said ${verifierLabel}${review!.rationale ? ` — ${review!.rationale}` : ""}`
+                    : canReview
+                      ? `verifier: ${verifierLabel} — click to add human review`
+                      : `verdict: ${verifierLabel}`;
+                  return (
+                    <button
+                      type="button"
+                      className={`${VERDICT_PIP_BASE} ${VERDICT_PIP[effectiveKind.cls]} ${showHumanPip ? "ring-2 ring-accent" : ""} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"} relative`}
+                      title={title}
+                      aria-label={`${showHumanPip ? "human review" : "verifier"}: ${effectiveLabel}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canReview) return;
+                        setOpenPopover((prev) => (prev === k ? null : k));
+                      }}
+                      disabled={!canReview}
+                    >
+                      {effectiveKind.glyph}
+                      {showHumanPip && (
+                        <span
+                          className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent border border-panel"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  );
+                })()}
+                {openPopover === k && canReview && (
+                  <HumanReviewPopover
+                    tableName={row.table_name as HumanReviewTable}
+                    rowId={row.row_id!}
+                    current={isActiveHumanReview(review) ? review : null}
+                    onSaved={(saved) =>
+                      setReviewOverride((prev) => ({ ...prev, [k]: saved }))
+                    }
+                    onClose={() => setOpenPopover(null)}
+                  />
+                )}
               </td>
               <td className={`${TD_BASE} text-fg text-[14.5px] font-serif`} title={paper}>
                 {paper}

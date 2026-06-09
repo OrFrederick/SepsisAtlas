@@ -1,5 +1,7 @@
 // Shape contract with scripts/export_static.py (Agent X owns the writer).
 
+import type { HumanReview } from "./humanReview";
+
 export interface Row {
   row_id: string;
   paper_ref: string;
@@ -31,6 +33,8 @@ export interface Row {
   anchor_section: string | null;
   verifier_verdict: "ok" | "weak" | "fail" | "unverified" | null;
   verifier_score: number | null;
+  table_name?: string;
+  human_review?: HumanReview | null;
 }
 
 export interface PaperVerdicts {

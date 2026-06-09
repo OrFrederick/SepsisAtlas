@@ -25,11 +25,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sqla_inspect, text
 
 from sepsis_atlas.config import PAPERS_RAW, STATIC_DIR
 from sepsis_atlas.db import (
+    Base,
     PhenotypeCluster,
     StudyPhenotypeSummary,
     get_engine,
@@ -52,6 +53,15 @@ from api.papers import (
     get_paper as _get_paper,
     list_papers as _list_papers,
     list_rows_for_file as _list_rows_for_file,
+)
+from api.human_reviews import (
+    ReviewInput,
+    attach_predictor_reviews,
+    latest_review_for_row,
+    latest_reviews_for_table,
+    post_review,
+    to_row_payload,
+    validate as _validate_review,
 )
 
 
@@ -81,6 +91,25 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 def _engine():
     url = os.getenv("SEPSIS_DB_URL")
     return get_engine(url)
+
+
+@app.on_event("startup")
+def _ensure_schema() -> None:
+    """Idempotent create_all so new tables (e.g. ``human_reviews``) appear on
+    existing SQLite snapshots without a separate migration step. SQLAlchemy
+    skips tables that already exist, so this is a no-op after first start.
+    """
+    import logging
+    try:
+        Base.metadata.create_all(_engine())
+    except Exception as e:
+        # Don't block app startup on schema check; endpoints that need the
+        # table will surface their own errors. Log so an operator debugging
+        # "table does not exist" can correlate it with this hook.
+        logging.getLogger(__name__).warning(
+            "ensure_schema failed: %s; subsequent table-missing errors may follow",
+            e,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +294,9 @@ def post_query(req: QueryRequest) -> QueryResponse:
         )
         latency_ms = int((time.time() - t0) * 1000)
         _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(rank_dicts), latency_ms)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as session:
+            attach_predictor_reviews(session, rank_dicts)
         return QueryResponse(
             query_id=query_id,
             rows=rank_dicts,
@@ -315,6 +347,10 @@ def post_query(req: QueryRequest) -> QueryResponse:
 
     latency_ms = int((time.time() - t0) * 1000)
     _persist_query(engine, query_id, req.nl_text, intent_dict, fr.sql, len(filtered), latency_ms)
+
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        attach_predictor_reviews(session, filtered)
 
     return QueryResponse(
         query_id=query_id,
@@ -367,6 +403,9 @@ def _rank_predictors_core(
         top_k=top_k,
     )
     rows = [rank_row_to_dict(rr) for rr in ranked]
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        attach_predictor_reviews(session, rows)
     return RankPredictorsResponse(
         rows=rows,
         n_predictors=len(rows),
@@ -621,8 +660,17 @@ def get_paper_rows_endpoint(file_name: str):
 # ---------------------------------------------------------------------------
 
 
-def _phenotype_cluster_dict(c: PhenotypeCluster, file_name: str | None) -> dict:
+def _phenotype_cluster_dict(
+    c: PhenotypeCluster,
+    file_name: str | None,
+    cluster_reviews: dict[str, dict] | None = None,
+) -> dict:
     return {
+        "row_id": c.id,
+        "table_name": "phenotype_cluster",
+        "human_review": to_row_payload(
+            (cluster_reviews or {}).get(c.id)
+        ),
         "cluster_label": c.cluster_label,
         "cluster_size_n": c.cluster_size_n,
         "key_features": c.key_features,
@@ -637,8 +685,18 @@ def _phenotype_cluster_dict(c: PhenotypeCluster, file_name: str | None) -> dict:
     }
 
 
-def _phenotype_paper_dict(s: StudyPhenotypeSummary, clusters: list[PhenotypeCluster]) -> dict:
+def _phenotype_paper_dict(
+    s: StudyPhenotypeSummary,
+    clusters: list[PhenotypeCluster],
+    summary_reviews: dict[str, dict] | None = None,
+    cluster_reviews: dict[str, dict] | None = None,
+) -> dict:
     return {
+        "row_id": s.id,
+        "table_name": "study_phenotype_summary",
+        "human_review": to_row_payload(
+            (summary_reviews or {}).get(s.id)
+        ),
         "paper_ref": s.paper_ref,
         "file_name": s.file_name,
         "country": s.country,
@@ -654,7 +712,10 @@ def _phenotype_paper_dict(s: StudyPhenotypeSummary, clusters: list[PhenotypeClus
         "anchor_section": s.anchor_section,
         "anchor_text": s.anchor_text,
         "verifier_verdict": s.verifier_verdict,
-        "clusters": [_phenotype_cluster_dict(c, s.file_name) for c in clusters],
+        "clusters": [
+            _phenotype_cluster_dict(c, s.file_name, cluster_reviews)
+            for c in clusters
+        ],
     }
 
 
@@ -696,8 +757,17 @@ def list_phenotypes():
         # Keep cluster_label order stable (alphabetical).
         for sid, cs in by_summary.items():
             cs.sort(key=lambda c: (c.cluster_label or ""))
+        summary_reviews = latest_reviews_for_table(
+            session, "study_phenotype_summary", ids
+        )
+        cluster_reviews = latest_reviews_for_table(
+            session, "phenotype_cluster", [c.id for c in clusters]
+        )
         papers = [
-            _phenotype_paper_dict(s, by_summary.get(s.id, [])) for s in summaries
+            _phenotype_paper_dict(
+                s, by_summary.get(s.id, []), summary_reviews, cluster_reviews
+            )
+            for s in summaries
         ]
     return {"papers": papers}
 
@@ -735,6 +805,85 @@ def get_phenotype(paper_ref: str):
             .order_by(PhenotypeCluster.cluster_label)
             .all()
         )
-        return _phenotype_paper_dict(s, clusters)
+        summary_reviews = latest_reviews_for_table(
+            session, "study_phenotype_summary", [s.id]
+        )
+        cluster_reviews = latest_reviews_for_table(
+            session, "phenotype_cluster", [c.id for c in clusters]
+        )
+        return _phenotype_paper_dict(s, clusters, summary_reviews, cluster_reviews)
+
+
+# ---------------------------------------------------------------------------
+# /api/reviews — human-review override of the verifier verdict
+#
+# Sidecar: append-only chain in ``human_reviews`` keyed by
+# (table_name, row_id). Display-only — downstream filters (rank, meta-analysis,
+# evidence projection) keep consuming ``verifier_verdict``.
+# ---------------------------------------------------------------------------
+
+
+# Upper bound on rows scanned by the unscoped GET /api/reviews path so the
+# no-auth endpoint can't be made to stream the whole audit table at once.
+REVIEWS_TABLE_SCAN_CAP = 1000
+
+
+class HumanReviewRequest(BaseModel):
+    table_name: str
+    row_id: str
+    human_verdict: str
+    # Bound the free-text fields so a malformed client can't store
+    # arbitrarily large blobs in the audit chain. Generous limits — typical
+    # rationales are a sentence or two.
+    human_rationale: str | None = Field(default=None, max_length=4000)
+    reviewer: str | None = Field(default=None, max_length=200)
+
+
+@app.post("/api/reviews")
+def post_review_endpoint(req: HumanReviewRequest):
+    payload = ReviewInput(
+        table_name=req.table_name,
+        row_id=req.row_id,
+        human_verdict=req.human_verdict,
+        human_rationale=req.human_rationale,
+        reviewer=req.reviewer,
+    )
+    err = _validate_review(payload)
+    if err:
+        raise HTTPException(400, err)
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        return {"review": post_review(session, payload)}
+
+
+@app.get("/api/reviews")
+def get_review_endpoint(
+    table_name: str,
+    row_id: str | None = None,
+    row_ids: str | None = None,
+):
+    """Fetch active reviews for an extraction table.
+
+    - ``row_id``: single-row lookup, returns ``{"review": <dict|null>}``.
+    - ``row_ids``: comma-separated list, scopes the table-wide query to a
+      known set so clients can avoid pulling every review in the table when
+      they only need a handful (e.g. ChatShell rehydrating cached turns).
+    - neither: returns the most recent active reviews for the table, capped at
+      ``REVIEWS_TABLE_SCAN_CAP`` so this no-auth endpoint can't be made to
+      stream an unbounded result set (intended for admin/audit only).
+    """
+    engine = _engine()
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as session:
+        if row_id is not None:
+            return {"review": latest_review_for_row(session, table_name, row_id)}
+        ids: list[str] | None = None
+        if row_ids:
+            ids = [s for s in (rid.strip() for rid in row_ids.split(",")) if s]
+        cap = None if ids else REVIEWS_TABLE_SCAN_CAP
+        return {
+            "reviews": latest_reviews_for_table(session, table_name, ids, limit=cap)
+        }
 
 

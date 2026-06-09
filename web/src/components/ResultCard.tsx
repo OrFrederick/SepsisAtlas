@@ -1,6 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import type { Row } from "../lib/types";
+import HumanReviewPopover from "./HumanReviewPopover";
+import {
+  isActiveHumanReview,
+  verdictKind as resolveVerdictKind,
+  type HumanReview as HumanReviewPayload,
+  type HumanReviewTable,
+  type VerdictKind,
+} from "../lib/humanReview";
 
 type Props = {
   row: Row;
@@ -16,25 +25,31 @@ function fmt(v: number | null | undefined, d = 2): string {
   return parseFloat(v.toFixed(d)).toString();
 }
 
-type Verdict = "ok" | "warn" | "fail" | "unk";
-
 const BADGE_BASE =
   "inline-flex items-center justify-center py-px px-2 rounded-full text-[11px] font-semibold border tracking-[0.2px]";
-const BADGE_VARIANTS: Record<Verdict, string> = {
+const BADGE_VARIANTS: Record<VerdictKind, string> = {
   ok: "text-ok bg-ok-soft border-ok-border",
   warn: "text-warn bg-warn-soft border-warn-border",
   fail: "text-fail bg-fail-soft border-fail-border",
   unk: "text-fg-muted bg-panel-2 border-border",
 };
 
-function verdictKind(v: Row["verifier_verdict"]): Verdict {
-  if (v === "ok") return "ok";
-  if (v === "weak") return "warn";
-  if (v === "fail") return "fail";
-  return "unk";
+function verdictKindFor(v: Row["verifier_verdict"]): VerdictKind {
+  return resolveVerdictKind(v ?? "").cls;
+}
+
+function humanVerdictKind(v: HumanReviewPayload["verdict"]): VerdictKind {
+  return resolveVerdictKind(v).cls;
 }
 
 export default function ResultCard({ row, viewerHref, active, onSelect }: Props) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [reviewOverride, setReviewOverride] = useState<HumanReviewPayload | null | undefined>(undefined);
+  const review =
+    reviewOverride !== undefined ? reviewOverride : (row.human_review ?? null);
+  const hasReview = isActiveHumanReview(review);
+  const canReview = Boolean(row.row_id) && Boolean(row.table_name);
+
   const study = row.cohort_label
     ? `${row.paper_ref} — ${row.cohort_label}`
     : row.paper_ref;
@@ -58,7 +73,7 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
     }
   };
 
-  const kind = verdictKind(row.verifier_verdict);
+  const kind = verdictKindFor(row.verifier_verdict);
   const cardBase =
     "card bg-panel border border-border rounded-md px-4 py-[14px] cursor-pointer outline-none " +
     "transition-[border-color,transform,box-shadow] duration-[180ms] ease-out " +
@@ -76,15 +91,64 @@ export default function ResultCard({ row, viewerHref, active, onSelect }: Props)
       onClick={handleActivate}
       onKeyDown={handleKey}
       data-href={viewerHref}
+      // Each card's hover transform creates its own stacking context, which
+      // would clip an open popover behind the next card. Lift this card above
+      // its siblings while the popover is open.
+      style={popoverOpen ? { position: "relative", zIndex: 50 } : undefined}
     >
       <header className="flex justify-between gap-3 mb-[10px]">
         <span className="font-serif text-[16px] font-medium text-fg">{study}</span>
-        <span className="flex gap-2 items-center text-fg-muted">
-          <span className={`badge ${kind} ${BADGE_BASE} ${BADGE_VARIANTS[kind]}`}>
-            {verdict}
-          </span>
+        <span className="flex gap-2 items-center text-fg-muted relative">
+          {(() => {
+            // Collapse machine + human badges into one when a review exists:
+            // shows the human verdict colour with a small accent dot marking
+            // it as reviewed; verifier verdict moves to the tooltip. Clicking
+            // the badge always opens the popover (pre-loaded with the active
+            // review so the reviewer can edit or clear).
+            const effectiveKind = hasReview ? humanVerdictKind(review!.verdict) : kind;
+            // Unreviewed path shows the verifier's verbatim verdict text
+            // (ok/pass/weak/…); verdictKind normalizes the color bucket, not
+            // the label — intentional, don't "fix" it to the bucketed glyph.
+            const effectiveLabel = hasReview ? review!.verdict : verdict;
+            const title = hasReview
+              ? `human ${review!.verdict}${review!.reviewer ? ` (${review!.reviewer})` : ""} · machine said ${verdict}${review!.rationale ? ` — ${review!.rationale}` : ""}`
+              : canReview
+                ? `verifier: ${verdict} — click to add human review`
+                : `verifier: ${verdict}`;
+            return (
+              <button
+                type="button"
+                className={`badge ${effectiveKind} ${BADGE_BASE} ${BADGE_VARIANTS[effectiveKind]} ${hasReview ? "ring-2 ring-accent" : ""} ${canReview ? "cursor-pointer hover:ring-2 hover:ring-accent" : "cursor-default"} relative`}
+                title={title}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!canReview) return;
+                  setPopoverOpen((prev) => !prev);
+                }}
+                disabled={!canReview}
+              >
+                {effectiveLabel}
+                {hasReview && (
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent border border-panel"
+                    aria-hidden="true"
+                  />
+                )}
+              </button>
+            );
+          })()}
           {row.anchor_page != null && (
             <span className="text-xs tabular-nums">p. {row.anchor_page}</span>
+          )}
+          {popoverOpen && canReview && (
+            <HumanReviewPopover
+              tableName={row.table_name as HumanReviewTable}
+              rowId={row.row_id}
+              current={hasReview ? review : null}
+              onSaved={(saved) => setReviewOverride(saved)}
+              onClose={() => setPopoverOpen(false)}
+              align="right"
+            />
           )}
         </span>
       </header>

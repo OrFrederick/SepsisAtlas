@@ -35,6 +35,7 @@ const config: NextConfig = {
       { source: "/papers/:stem/rows", destination: `${API_URL}/papers/:stem/rows` },
       { source: "/phenotypes", destination: `${API_URL}/phenotypes` },
       { source: "/phenotypes/:path*", destination: `${API_URL}/phenotypes/:path*` },
+      { source: "/api/reviews", destination: `${API_URL}/api/reviews` },
     ];
   },
 };

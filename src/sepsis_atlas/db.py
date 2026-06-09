@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -223,6 +224,53 @@ class LLMCall(Base):
 
     input_path: Mapped[Optional[str]] = mapped_column(String)
     output_path: Mapped[Optional[str]] = mapped_column(String)
+
+
+# "cleared" is a reserved tombstone verdict written when a reviewer clears
+# their own override (we supersede instead of delete to keep the audit chain).
+# It is never offered as a selectable option in the popover, so a reviewer
+# cannot reach it via free text — the read paths treat it as "no active review".
+HUMAN_REVIEW_VERDICTS = ("approve", "reject", "flag", "cleared")
+# Keep in sync with `HumanReviewTable` in web/src/lib/humanReview.ts.
+HUMAN_REVIEW_TABLES = (
+    "study_cohort",
+    "predictor_model",
+    "study_phenotype_summary",
+    "phenotype_cluster",
+)
+
+
+class HumanReview(Base):
+    """Sidecar override of the automatic verifier verdict.
+
+    Append-only: a revision becomes a new row whose `superseded_by` on the
+    *previous* active row gets set to its own `review_id`. The "current" review
+    for a target is the row with `superseded_by IS NULL`. Orphan reviews
+    (referencing a row that no longer exists after re-extraction) are tolerated
+    on purpose so reviewer judgement is not destroyed by an extraction rerun.
+    """
+
+    __tablename__ = "human_reviews"
+
+    review_id: Mapped[str] = mapped_column(String, primary_key=True)
+    table_name: Mapped[str] = mapped_column(String, index=True)
+    row_id: Mapped[str] = mapped_column(String, index=True)
+    human_verdict: Mapped[str] = mapped_column(String)
+    human_rationale: Mapped[Optional[str]] = mapped_column(Text)
+    reviewer: Mapped[Optional[str]] = mapped_column(String)
+    reviewed_ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    superseded_by: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("human_reviews.review_id"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_human_reviews_target_active",
+            "table_name",
+            "row_id",
+            "superseded_by",
+        ),
+    )
 
 
 class Query(Base):

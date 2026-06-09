@@ -31,6 +31,7 @@ import {
   MIN_CHAT_PCT,
   saveChatPct,
 } from "../lib/chatPct";
+import { BACKEND_URL, fetchReviewsForRows, type HumanReview } from "../lib/humanReview";
 
 // Editorial Clinical motion language: short fade-ups, gentle stagger, no
 // springs. Tuned for prose-density UIs where motion should feel like
@@ -47,8 +48,6 @@ const SLIDE_IN_RIGHT = {
 };
 const HISTORY_KEY = "sepsis_atlas.history.v1";
 const HISTORY_MAX = 50;
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
 
 const SAMPLE_QUERIES = [
   "predictors from Schlapbach 2018",
@@ -104,6 +103,9 @@ type EvidenceRow = {
   verifier?: string;
   study?: string;
   n?: string | number;
+  row_id?: string;
+  table_name?: string;
+  human_review?: HumanReview | null;
 };
 
 type AssistantPayload = {
@@ -257,13 +259,71 @@ export default function ChatShell() {
 
   // ---- mount: rehydrate state from localStorage --------------------------
   useEffect(() => {
-    setHistory(loadHistory());
+    const restored = loadHistory();
+    setHistory(restored);
     const restoredPct = loadChatPct();
     setChatPct(restoredPct);
     latestPctRef.current = restoredPct;
     // The viewer URL is intentionally NOT restored — the PDF pane should
     // start collapsed and only open when the user clicks an evidence row.
     inputRef.current?.focus();
+
+    // Cached chat rows in localStorage predate any human reviews added
+    // after the response was stored, so refetch the latest reviews and
+    // patch them onto the restored rows. Scoped to the cached row_ids so
+    // we don't pull the entire predictor_model review table down on
+    // mount.
+    if (restored.length === 0) return;
+    const cachedRowIds = Array.from(
+      new Set(
+        restored.flatMap((t) =>
+          (t.assistant?.rows ?? [])
+            .map((r) => r.row_id)
+            .filter((rid): rid is string => Boolean(rid)),
+        ),
+      ),
+    );
+    if (cachedRowIds.length === 0) return;
+    // Guard against the fetch resolving after unmount (React warns on a
+    // setHistory to an unmounted component). Mirrors PdfViewer's pattern.
+    let cancelled = false;
+    (async () => {
+      try {
+        const reviews = await fetchReviewsForRows("predictor_model", cachedRowIds);
+        if (cancelled) return;
+        if (!Object.keys(reviews).length) {
+          // Still tag cached rows with table_name so the popover knows what
+          // to do when the user reviews one for the first time.
+          setHistory((prev) =>
+            prev.map((t) => {
+              if (!t.assistant?.rows?.length) return t;
+              const nextRows = t.assistant.rows.map((r) =>
+                r.table_name ? r : { ...r, table_name: "predictor_model" },
+              );
+              return { ...t, assistant: { ...t.assistant, rows: nextRows } };
+            }),
+          );
+          return;
+        }
+        setHistory((prev) =>
+          prev.map((t) => {
+            if (!t.assistant?.rows?.length) return t;
+            const nextRows = t.assistant.rows.map((r) => {
+              const rid = r.row_id;
+              if (!rid) return r;
+              const human_review = reviews[rid] ?? null;
+              return { ...r, table_name: r.table_name || "predictor_model", human_review };
+            });
+            return { ...t, assistant: { ...t.assistant, rows: nextRows } };
+          }),
+        );
+      } catch {
+        /* network hiccup; user can re-run the query to refresh reviews */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---- scroll to bottom on new turn -------------------------------------

@@ -4,3 +4,6 @@
 #   git config merge.graphify-union.name  "graphify graph.json union merge"
 #   git config merge.graphify-union.driver "graphify merge-driver %O %A %B"
 graphify-out/graph.json merge=graphify-union
+graphify-out/**            linguist-generated
+web/public/data/**         linguist-generated
+data/papers/parsed/**      linguist-generated

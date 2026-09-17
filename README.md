@@ -60,5 +60,5 @@ Parse and extract are resumable — re-runs skip completed papers unless `--forc
 | Database | SQLite (Postgres-ready) |
 | Statistics | statsmodels (random-effects), matplotlib |
 | Backend | FastAPI + Uvicorn |
-| Frontend | Astro 5, React 19, Tailwind 4, PDF.js |
+| Frontend | Next.js 15, React 19, Tailwind 4, PDF.js |
 | Tracing | Langfuse (optional) |
